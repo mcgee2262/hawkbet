@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS rounds(id INTEGER PRIMARY KEY, user_id INTEGER NOT NU
 CREATE TABLE IF NOT EXISTS txns(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, delta INTEGER NOT NULL, kind TEXT NOT NULL, ref INTEGER, balance INTEGER NOT NULL, ts INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_slips_user ON slips(user_id); CREATE INDEX IF NOT EXISTS idx_rounds_user ON rounds(user_id, game, status);
 `);
+if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='added'").get()) db.exec('ALTER TABLE users ADD COLUMN added INTEGER NOT NULL DEFAULT 0'); // free top-ups so far
 
 /* demo lines: South Lakes' real Oct 22 slate, numbers invented. Seeded once; admin manages after that. */
 if (!db.prepare('SELECT 1 FROM props LIMIT 1').get()) {
@@ -82,7 +83,7 @@ function userFrom(req) {
   const row = db.prepare('SELECT u.*, s.expires FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?').get(sha(m[1]));
   if (!row || row.expires < now()) return null; return row;
 }
-const publicUser = u => ({ username: u.username, balance: u.balance, isAdmin: !!u.is_admin, canClaim: u.balance < CLAIM_BELOW && now() - u.last_claim >= CLAIM_EVERY_MS });
+const publicUser = u => ({ username: u.username, balance: u.balance, added: u.added || 0, isAdmin: !!u.is_admin, canClaim: u.balance < CLAIM_BELOW && now() - u.last_claim >= CLAIM_EVERY_MS });
 const hits = new Map(); // crude per-IP limiter for auth routes
 function limit(ip) { const t = now(), a = (hits.get(ip) || []).filter(x => t - x < 600e3); a.push(t); hits.set(ip, a); if (a.length > 30) bad('Too many attempts, try again in a few minutes', 429); }
 
@@ -263,6 +264,145 @@ const arcade = {
   }),
 };
 
+/* ---------- more arcade games ---------- */
+function oneShot(ctx, game, state, mult, bet = int(ctx.body.bet, 1, MAX_BET, 'Bet')) { // bet, decide and pay in one transaction
+  adjust(ctx.user.id, -bet, game + '_bet');
+  const payout = Math.round(bet * mult);
+  const id = Number(db.prepare("INSERT INTO rounds(user_id,game,bet,state,status,mult,payout,created) VALUES(?,?,?,?,'done',?,?,?)").run(ctx.user.id, game, bet, JSON.stringify(state), mult, payout, now()).lastInsertRowid);
+  return { bet, mult, payout, balance: payout ? adjust(ctx.user.id, payout, game + '_win', id) : balanceOf(ctx.user.id) };
+}
+const FLIP_MAX = 10, flipMult = n => 0.99 * 2 ** n;         // each correct call doubles, one 1% edge on the streak
+const RPS_MAX = 10, rpsMult = n => 0.98 * 2 ** n;           // ties replay, so each decisive throw is 50/50
+const RIVALS = ['Westfield', 'Chantilly', 'Oakton', 'Centreville', 'Madison', 'Herndon'];
+const ROULETTE_A = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]); // the "red" numbers, shown green here
+const rColor = n => n === 0 ? 'gold' : ROULETTE_A.has(n) ? 'green' : 'blue';
+function rouletteMult(b, n) {
+  if (b.type === 'num') return n === b.value ? 36 : 0;
+  if (n === 0) return 0;
+  if (b.type === 'color') return rColor(n) === b.value ? 2 : 0;
+  if (b.type === 'parity') return (n % 2 ? 'odd' : 'even') === b.value ? 2 : 0;
+  if (b.type === 'half') return (n <= 18 ? 'low' : 'high') === b.value ? 2 : 0;
+  if (b.type === 'dozen') return Math.ceil(n / 12) === b.value ? 3 : 0;
+  return 0;
+}
+const ROULETTE_OK = { num: v => Number.isInteger(v) && v >= 0 && v <= 36, color: v => v === 'green' || v === 'blue', parity: v => v === 'odd' || v === 'even', half: v => v === 'low' || v === 'high', dozen: v => [1, 2, 3].includes(v) };
+const SLOT = { trophy: [1, 250], hawk: [2, 80], football: [3, 30], volley: [4, 20], bball: [4, 20], bus: [5, 14], pass: [6, 5] }; // [stops per reel, 3-of-a-kind pay]
+const SLOT_STRIP = Object.entries(SLOT).flatMap(([k, [w]]) => Array(w).fill(k)), BALLS = new Set(['football', 'volley', 'bball']);
+function slotPay(a, b, c) {
+  if (a === b && b === c) return SLOT[a][1];
+  const h = [a, b, c].filter(x => x === 'hawk').length;
+  if (h === 2) return 5; if ([a, b, c].every(x => BALLS.has(x))) return 3; if (h === 1) return 1; return 0;
+}
+const SLOT_RTP = (() => { let r = 0; for (const a of SLOT_STRIP) for (const b of SLOT_STRIP) for (const c of SLOT_STRIP) r += slotPay(a, b, c); return r / SLOT_STRIP.length ** 3; })();
+
+/* blackjack: infinite deck, dealer stands on all 17s, blackjack pays 3:2, double on first two cards */
+const card = () => ({ r: crypto.randomInt(13) + 1, s: crypto.randomInt(4) });
+function hand(cs) { let t = 0, a = 0; for (const c of cs) { t += c.r === 1 ? 11 : Math.min(10, c.r); if (c.r === 1) a++; } while (t > 21 && a) { t -= 10; a--; } return t; }
+const isBJ = cs => cs.length === 2 && hand(cs) === 21;
+function bjView(r, st, done) {
+  return { id: r.id, bet: r.bet, player: st.p, dealer: done ? st.d : [st.d[0]], pt: hand(st.p), dt: hand(done ? st.d : [st.d[0]]), canDouble: !done && st.p.length === 2 && !st.dbl, done };
+}
+function bjSettle(r, st) {
+  const p = hand(st.p); let res;
+  if (p > 21) res = 'bust';
+  else if (isBJ(st.p) && !isBJ(st.d)) res = 'blackjack';
+  else if (isBJ(st.d) && !isBJ(st.p)) res = 'lose';
+  else { if (!isBJ(st.p)) while (hand(st.d) < 17) st.d.push(card()); const d = hand(st.d); res = d > 21 || p > d ? 'win' : p === d ? 'push' : 'lose'; }
+  const mult = { blackjack: 2.5, win: 2, push: 1, lose: 0, bust: 0 }[res];
+  save(r, st);
+  return { ...bjView(r, st, true), result: res, ...finishRound(r, mult > 0 ? 'cashed' : 'lost', mult) };
+}
+const streakGame = (game, max, multFn) => ({
+  start: ctx => tx(() => startRound(ctx, game, { streak: 0 })),
+  cash: ctx => tx(() => { const { r, st } = live(ctx, game); if (st.streak < 1) bad('Win one first'); return { streak: st.streak, mult: multFn(st.streak), ...finishRound(r, 'cashed', multFn(st.streak)) }; }),
+  win: (ctx, r, st, extra) => { st.streak++; const mult = multFn(st.streak); if (st.streak >= max) return { ...extra, streak: st.streak, mult, cashed: true, ...finishRound(r, 'cashed', mult) }; save(r, st); return { ...extra, streak: st.streak, mult, balance: balanceOf(ctx.user.id) }; },
+});
+const flipG = streakGame('flip', FLIP_MAX, flipMult), rpsG = streakGame('rps', RPS_MAX, rpsMult);
+const BEATS = { rock: 'scissors', paper: 'rock', scissors: 'paper' };
+
+Object.assign(arcade, {
+  dice: ctx => tx(() => {
+    const t = Math.round(Number(ctx.body.target) * 100) / 100, over = ctx.body.over === true;
+    if (!Number.isFinite(t) || t < 2 || t > 98) bad('Target must be between 2 and 98');
+    const chance = over ? (100 - t) / 100 : t / 100, roll = crypto.randomInt(10000) / 100, win = over ? roll > t : roll < t, pays = 0.99 / chance;
+    return { roll, target: t, over, pays, win, ...oneShot(ctx, 'dice', { roll, t, over }, win ? pays : 0) };
+  }),
+  limbo: ctx => tx(() => {
+    const target = Math.round(Number(ctx.body.target) * 100) / 100;
+    if (!Number.isFinite(target) || target < 1.01 || target > 1000) bad('Target must be 1.01x to 1000x');
+    const crash = Math.min(1e6, Math.max(1, Math.floor(0.99 / (1 - rnd()) * 100) / 100)), win = crash >= target; // P(crash >= x) = 0.99 / x
+    return { crash, target, win, ...oneShot(ctx, 'limbo', { crash, target }, win ? target : 0) };
+  }),
+  slots: ctx => tx(() => {
+    const reels = [0, 1, 2].map(() => SLOT_STRIP[crypto.randomInt(SLOT_STRIP.length)]);
+    return { reels, ...oneShot(ctx, 'slots', { reels }, slotPay(...reels)) };
+  }),
+  roulette: ctx => tx(() => {
+    const bets = ctx.body.bets; if (!Array.isArray(bets) || !bets.length || bets.length > 40) bad('Place 1 to 40 bets');
+    let total = 0;
+    for (const b of bets) { if (!ROULETTE_OK[b.type] || !ROULETTE_OK[b.type](b.value)) bad('Bad bet'); int(b.amount, 1, MAX_BET, 'Chip'); total += b.amount; }
+    if (total > MAX_BET) bad(`Total bet can't be over ${MAX_BET}`);
+    const n = crypto.randomInt(37), won = bets.reduce((a, b) => a + b.amount * rouletteMult(b, n), 0);
+    return { n, color: rColor(n), total, ...oneShot(ctx, 'roulette', { bets, n }, won / total, total) };
+  }),
+  flipStart: flipG.start, flipCash: flipG.cash,
+  flip: ctx => tx(() => {
+    const { r, st } = live(ctx, 'flip'), call = ctx.body.call; if (call !== 'hawk' && call !== 'sl') bad('Call Seymour or SL');
+    const side = crypto.randomInt(2) ? 'hawk' : 'sl';
+    if (side !== call) return { side, lost: true, streak: st.streak, ...finishRound(r, 'lost', 0) };
+    return flipG.win(ctx, r, st, { side });
+  }),
+  rpsStart: rpsG.start, rpsCash: rpsG.cash,
+  rps: ctx => tx(() => {
+    const { r, st } = live(ctx, 'rps'), me = ctx.body.throw; if (!BEATS[me]) bad('Pick rock, paper or scissors');
+    const them = Object.keys(BEATS)[crypto.randomInt(3)], rival = RIVALS[crypto.randomInt(RIVALS.length)];
+    if (me === them) { save(r, st); return { me, them, rival, tie: true, streak: st.streak, mult: st.streak ? rpsMult(st.streak) : 0, balance: balanceOf(ctx.user.id) }; }
+    if (BEATS[me] !== them) return { me, them, rival, lost: true, streak: st.streak, ...finishRound(r, 'lost', 0) };
+    return rpsG.win(ctx, r, st, { me, them, rival });
+  }),
+  bjStart: ctx => tx(() => {
+    const st = { p: [card(), card()], d: [card(), card()], dbl: false }, s = startRound(ctx, 'bj', st), r = db.prepare('SELECT * FROM rounds WHERE id=?').get(s.id);
+    if (isBJ(st.p) || isBJ(st.d)) return bjSettle(r, st);
+    return { ...bjView(r, st, false), balance: s.balance };
+  }),
+  bjHit: ctx => tx(() => {
+    const { r, st } = live(ctx, 'bj'); st.p.push(card());
+    if (hand(st.p) >= 21) return bjSettle(r, st);
+    save(r, st); return { ...bjView(r, st, false), balance: balanceOf(ctx.user.id) };
+  }),
+  bjStand: ctx => tx(() => { const { r, st } = live(ctx, 'bj'); return bjSettle(r, st); }),
+  bjDouble: ctx => tx(() => {
+    const { r, st } = live(ctx, 'bj'); if (st.p.length !== 2 || st.dbl) bad('You can only double on your first two cards');
+    adjust(ctx.user.id, -r.bet, 'bj_bet', r.id); r.bet *= 2; db.prepare('UPDATE rounds SET bet=? WHERE id=?').run(r.bet, r.id);
+    st.dbl = true; st.p.push(card()); return bjSettle(r, st);
+  }),
+});
+const VIEWS = {
+  mines: (r, st) => ({ id: r.id, bet: r.bet, m: st.m, opened: st.opened, mult: minesMult(st.opened.length, st.m) }),
+  cross: (r, st) => ({ id: r.id, bet: r.bet, diff: st.diff, at: st.at, mult: crossMult(st.at, st.diff) }),
+  flip: (r, st) => ({ id: r.id, bet: r.bet, streak: st.streak, mult: st.streak ? flipMult(st.streak) : 0 }),
+  rps: (r, st) => ({ id: r.id, bet: r.bet, streak: st.streak, mult: st.streak ? rpsMult(st.streak) : 0 }),
+  bj: (r, st) => bjView(r, st, false),
+};
+arcade.active = ctx => {
+  const game = ctx.url.searchParams.get('game'), r = VIEWS[game] && activeRound(ctx.user.id, game);
+  return { round: r ? VIEWS[game](r, JSON.parse(r.state)) : null };
+};
+const baseConfig = arcade.config;
+arcade.config = () => ({ ...baseConfig(), slots: { pays: Object.fromEntries(Object.entries(SLOT).map(([k, [, p]]) => [k, p])), rtp: SLOT_RTP }, flipMax: FLIP_MAX, rpsMax: RPS_MAX });
+
+/* ---------- bank: free Hawk Bucks top-ups (tracked so the leaderboard ranks real winnings) ---------- */
+const BANK_AMOUNTS = [100, 500, 1000], BANK_MAX_BAL = 1e6, bankHits = new Map();
+function bank(ctx) {
+  const amt = ctx.body.amount; if (!BANK_AMOUNTS.includes(amt)) bad('Pick 100, 500 or 1,000');
+  const t = now(), a = (bankHits.get(ctx.user.id) || []).filter(x => t - x < 600e3); if (a.length >= 30) bad('Slow down – try again in a few minutes', 429); a.push(t); bankHits.set(ctx.user.id, a);
+  return tx(() => {
+    if (balanceOf(ctx.user.id) + amt > BANK_MAX_BAL) bad('Your balance is already maxed out');
+    db.prepare('UPDATE users SET added=added+? WHERE id=?').run(amt, ctx.user.id);
+    return { balance: adjust(ctx.user.id, amt, 'bank'), added: db.prepare('SELECT added FROM users WHERE id=?').get(ctx.user.id).added };
+  });
+}
+
 /* ---------- routes ---------- */
 const need = fn => ctx => { if (!ctx.user) bad('Please log in', 401); return fn(ctx); };
 const routes = {
@@ -274,15 +414,17 @@ const routes = {
     const u = db.prepare('SELECT * FROM users WHERE id=?').get(ctx.user.id);
     if (u.balance >= CLAIM_BELOW) bad(`You can claim only when under ${CLAIM_BELOW} Hawk Bucks`);
     if (now() - u.last_claim < CLAIM_EVERY_MS) bad('Come back tomorrow for another top-up');
-    db.prepare('UPDATE users SET last_claim=? WHERE id=?').run(now(), u.id); return { balance: adjust(u.id, CLAIM_AMT, 'claim') };
+    db.prepare('UPDATE users SET last_claim=?, added=added+? WHERE id=?').run(now(), CLAIM_AMT, u.id); return { balance: adjust(u.id, CLAIM_AMT, 'claim') };
   })),
   'GET /api/props': need(() => ({ props: db.prepare("SELECT id,sport,who,lvl,vs,stat,type,line,init,status,actual FROM props ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'locked' THEN 1 ELSE 2 END, id").all() })),
   'POST /api/slips': need(placeSlip),
   'GET /api/slips': need(mySlips),
   'GET /api/leaderboard': need(ctx => {
-    const top = db.prepare('SELECT username, balance FROM users ORDER BY balance DESC, id LIMIT 20').all();
-    const rank = db.prepare('SELECT COUNT(*)+1 AS r FROM users WHERE balance>?').get(ctx.user.balance).r;
-    return { top, me: { username: ctx.user.username, balance: ctx.user.balance, rank } };
+    // ranked by net winnings (balance minus the starting 1,000 and any free top-ups), so adding Hawk Bucks can't buy a top spot
+    const top = db.prepare(`SELECT username, balance, balance-${START_BAL}-added AS net FROM users ORDER BY net DESC, id LIMIT 20`).all();
+    const me = db.prepare(`SELECT username, balance, balance-${START_BAL}-added AS net FROM users WHERE id=?`).get(ctx.user.id);
+    me.rank = db.prepare(`SELECT COUNT(*)+1 AS r FROM users WHERE balance-${START_BAL}-added>?`).get(me.net).r;
+    return { top, me };
   }),
   'POST /api/admin/props': need(admin(addProp)),
   'POST /api/admin/lock': need(admin(c => setProp(c, 'lock'))),
@@ -298,6 +440,21 @@ const routes = {
   'POST /api/arcade/cross/start': need(arcade.crossStart),
   'POST /api/arcade/cross/step': need(arcade.crossStep),
   'POST /api/arcade/cross/cashout': need(arcade.crossCash),
+  'POST /api/arcade/dice': need(arcade.dice),
+  'POST /api/arcade/limbo': need(arcade.limbo),
+  'POST /api/arcade/slots': need(arcade.slots),
+  'POST /api/arcade/roulette': need(arcade.roulette),
+  'POST /api/arcade/flip/start': need(arcade.flipStart),
+  'POST /api/arcade/flip/call': need(arcade.flip),
+  'POST /api/arcade/flip/cashout': need(arcade.flipCash),
+  'POST /api/arcade/rps/start': need(arcade.rpsStart),
+  'POST /api/arcade/rps/throw': need(arcade.rps),
+  'POST /api/arcade/rps/cashout': need(arcade.rpsCash),
+  'POST /api/arcade/bj/start': need(arcade.bjStart),
+  'POST /api/arcade/bj/hit': need(arcade.bjHit),
+  'POST /api/arcade/bj/stand': need(arcade.bjStand),
+  'POST /api/arcade/bj/double': need(arcade.bjDouble),
+  'POST /api/bank': need(bank),
 };
 
 const FILES = { '/': 'index.html', '/index.html': 'index.html', '/style.css': 'style.css', '/app.js': 'app.js', '/logo.svg': 'logo.svg' };
