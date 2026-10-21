@@ -12,11 +12,97 @@ async function api(method, path, body) {
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && !/login|register|\/me/.test(path)) { U = null; renderAuth(); }
   if (!r.ok) throw new Error(j.error || 'Something went wrong');
+  if (method === 'POST' && path.startsWith('/arcade/')) {
+    if (typeof j.payout === 'number') lastRes = { game: path.split('/')[2], mult: j.mult, payout: j.payout, bet: j.bet ?? j.total ?? (j.mult ? j.payout / j.mult : 0) };
+    if (/\/start$|^\/arcade\/(plinko|dice|limbo|slots|roulette)$/.test(path)) sfx.play('start');
+    else if (/cashout$/.test(path)) sfx.play('cash');
+    else if (/mines\/reveal|cross\/step/.test(path) && !j.bust && !j.hit && !j.cashed) sfx.play('reveal');
+  }
   return j;
 }
 function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2200); }
 /* ---------- effects: confetti, shake, count-up balance ---------- */
 const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+/* ---------- Luck Lab themes (cosmetic only: confetti look and win chimes) ---------- */
+const LUCK = [ // [level, emoji, name, what changes]
+  ['normal', '⚪', 'Normal', 'Standard HawkBet celebrations. The default.'],
+  [1, '⚡', 'Chaos Mode', 'Stormy purple sparks, light confetti, a thunder thud on wins.'],
+  [2, '⛈️', 'Thunderstorm', 'Dark storm colors with lightning-bolt confetti.'],
+  [3, '🌧️', 'Rainy Day', 'Cool blue drizzle confetti.'],
+  [4, '☁️', 'Cloudy', 'Soft gray-blue confetti and calm sounds.'],
+  [5, '⚖️', 'Balanced', 'Even South Lakes green and blue.'],
+  [6, '☀️', 'Sunny', 'Bright yellow and green confetti.'],
+  [7, '🌅', 'Golden Hour', 'Warm gold and orange confetti.'],
+  [8, '🍀', 'Four-Leaf', 'Clover confetti joins the party.'],
+  [9, '🌈', 'Rainbow', 'Full-rainbow confetti.'],
+  [10, '✨', 'Lucky Vibes', 'Max confetti, clovers and sparkles, plus a lucky chime on wins.'],
+];
+const LUCK_FX = {
+  normal: { c: ['#12c26a', '#16e0c0', '#2f6bff', '#ffc542', '#ffffff', '#5b8cff'], e: [], m: 1 },
+  1: { c: ['#7b3cff', '#ff4d5e', '#3a2a5a', '#b388ff'], e: ['⚡'] }, 2: { c: ['#3a3f58', '#7b3cff', '#8fa3c7', '#ffe08a'], e: ['⚡', '🌩️'] },
+  3: { c: ['#5b8cff', '#8fb0ff', '#2f6bff', '#cfe0f3'], e: ['💧'] }, 4: { c: ['#8fa3c7', '#cfd8e3', '#5b8cff', '#ffffff'], e: ['☁️'] },
+  5: { c: ['#12c26a', '#2f6bff', '#16e0c0', '#5b8cff'], e: [] }, 6: { c: ['#ffe08a', '#12c26a', '#ffc542', '#9ff5c8'], e: ['☀️'] },
+  7: { c: ['#ffc542', '#f5a623', '#ff9f1a', '#ffe08a'], e: ['🌟'] }, 8: { c: ['#12c26a', '#0a8f4e', '#ffc542', '#9ff5c8'], e: ['🍀'] },
+  9: { c: ['#ff4d5e', '#ff9f1a', '#ffe08a', '#12c26a', '#2f6bff', '#7b3cff'], e: ['🌈'] }, 10: { c: ['#ffc542', '#12c26a', '#ffe08a', '#16e0c0', '#ffffff'], e: ['🍀', '✨'] },
+};
+const luckLevel = () => (U && U.luck) || 'normal';
+const luckFx = () => { const l = luckLevel(), t = LUCK_FX[l] || LUCK_FX.normal; return { ...t, m: l === 'normal' ? 1 : 0.5 + l * 0.1 }; }; // confetti amount: 0.6x at 1 … 1.5x at 10
+const luckEntry = () => LUCK.find(x => String(x[0]) === String(luckLevel())) || LUCK[0];
+const luckBadge = () => { const [lv, e, name] = luckEntry(); return `${e} Luck: ${name}${lv === 'normal' ? '' : ` (${lv})`} · looks only`; };
+
+/* ---------- sound: tiny Web Audio synth, no files. Silent until the first tap or key press. ---------- */
+const sfx = (() => {
+  let ac = null, out = null, on = true;
+  try { on = localStorage.getItem('hb.sound') !== 'off'; } catch (e) {}
+  function unlock() {
+    if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); out = ac.createGain(); out.gain.value = 0.55; out.connect(ac.destination); } catch (e) { return; } }
+    if (ac.state === 'suspended') ac.resume();
+  }
+  addEventListener('pointerdown', unlock, true); addEventListener('keydown', unlock, true);
+  function tone(f, t = 0, d = 0.12, type = 'sine', g = 0.08, f2) {
+    const o = ac.createOscillator(), a = ac.createGain(), s = ac.currentTime + t;
+    o.type = type; o.frequency.setValueAtTime(f, s); if (f2) o.frequency.exponentialRampToValueAtTime(f2, s + d);
+    a.gain.setValueAtTime(0.0001, s); a.gain.exponentialRampToValueAtTime(g, s + 0.012); a.gain.exponentialRampToValueAtTime(0.0001, s + d);
+    o.connect(a); a.connect(out); o.start(s); o.stop(s + d + 0.03);
+  }
+  const notes = (fs, step, d, type, g) => fs.forEach((f, k) => tone(f, k * step, d, type, g));
+  function flavor() { const l = luckLevel(); if (l !== 'normal' && l <= 2) tone(120, 0, 0.25, 'sine', 0.08, 70); if (l >= 8) { tone(2093, 0.3, 0.35, 'sine', 0.035); tone(2637, 0.38, 0.35, 'sine', 0.03); } }
+  const S = {
+    tap: () => tone(620, 0, 0.045, 'triangle', 0.025),
+    flip: () => tone(1100, 0, 0.05, 'triangle', 0.03, 1400),
+    start: () => notes([440, 660], 0.07, 0.1, 'triangle', 0.05),
+    reveal: () => tone(880, 0, 0.11, 'sine', 0.06, 1320),
+    streak: () => notes([660, 990], 0.06, 0.1, 'square', 0.025),
+    miss: () => tone(300, 0, 0.14, 'triangle', 0.045, 210),
+    win: () => { notes([523, 659, 784], 0.08, 0.16, 'triangle', 0.06); flavor(); },
+    big: () => { notes([523, 659, 784, 1047], 0.08, 0.2, 'triangle', 0.065); tone(1568, 0.36, 0.4, 'sine', 0.04); flavor(); },
+    lose: () => tone(330, 0, 0.3, 'sine', 0.055, 175),
+    cash: () => { tone(988, 0, 0.07, 'square', 0.03); tone(1319, 0.07, 0.2, 'square', 0.03); },
+    pb: () => notes([392, 523, 659, 784, 1047], 0.09, 0.22, 'triangle', 0.06),
+    error: () => { tone(220, 0, 0.1, 'square', 0.03); tone(185, 0.11, 0.14, 'square', 0.03); },
+    bell: () => { tone(1568, 0, 0.7, 'sine', 0.08); tone(2349, 0, 0.5, 'sine', 0.03); tone(1568, 0.12, 0.5, 'sine', 0.05); },
+  };
+  return {
+    play(name) { if (!on || !ac || ac.state !== 'running' || !S[name]) return; try { S[name](); } catch (e) {} },
+    get on() { return on; },
+    toggle() { on = !on; try { localStorage.setItem('hb.sound', on ? 'on' : 'off'); } catch (e) {} if (on) { unlock(); setTimeout(() => this.play('tap'), 30); } return on; },
+  };
+})();
+document.addEventListener('click', e => { if (e.target.closest('button:not(:disabled),.tabs a,a.pill')) sfx.play('tap'); });
+
+/* ---------- personal bests (from the server's own round history) ---------- */
+let STATS = { best: {}, recent: [] }, lastRes = null;
+function bestText(id) { const b = STATS.best[id]; return !b ? '' : b.score != null ? `${fmt(b.score)} pts` : `${b.mult.toFixed(2)}x`; }
+function paintPB() {
+  const el = $('#pb'); if (!el) return; const b = STATS.best[game];
+  el.innerHTML = b ? `🏆 Your best: <b>${bestText(game)}</b>${b.win ? ` · biggest win +${fmt(b.win)} 🪙` : ''}` : '🏆 No personal best yet – go set one';
+}
+function checkPB() { // called when a win celebration plays; lastRes is the server's settled result
+  const r = lastRes; lastRes = null; if (!r || !(r.payout > r.bet) || !r.mult) return;
+  const b = STATS.best[r.game] || {}; if (b.mult && r.mult <= b.mult) return;
+  STATS.best[r.game] = { mult: r.mult, win: Math.max(b.win || 0, r.payout - r.bet) }; paintPB();
+  if (b.mult) setTimeout(() => { toast(`🏆 New personal best: ${r.mult.toFixed(2)}x!`); sfx.play('pb'); fx.bump($('#pb')); }, 650);
+}
 const fx = (() => {
   const cv = $('#fx'), ctx = cv.getContext('2d'); let parts = [], raf = 0;
   const COLORS = ['#12c26a', '#16e0c0', '#2f6bff', '#ffc542', '#ffffff', '#5b8cff'];
@@ -27,20 +113,23 @@ const fx = (() => {
     parts = parts.filter(p => p.life > 0);
     for (const p of parts) {
       p.vy += 0.25; p.vx *= 0.99; p.x += p.vx; p.y += p.vy; p.r += p.vr; p.life--;
-      ctx.save(); ctx.globalAlpha = Math.min(1, p.life / 30); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.c; ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); ctx.restore();
+      ctx.save(); ctx.globalAlpha = Math.min(1, p.life / 30); ctx.translate(p.x, p.y); ctx.rotate(p.r);
+      if (p.e) { ctx.font = '20px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(p.e, 0, 0); } else { ctx.fillStyle = p.c; ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); }
+      ctx.restore();
     }
     raf = parts.length ? requestAnimationFrame(tick) : 0;
   }
   function burst(n = 120, x = innerWidth / 2, y = innerHeight / 3) {
     if (calm) return;
-    for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = 4 + Math.random() * 9; parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 5, r: Math.random() * 6, vr: (Math.random() - .5) * .4, w: 6 + Math.random() * 6, h: 4 + Math.random() * 4, c: COLORS[i % COLORS.length], life: 80 + Math.random() * 50 }); }
+    const t = luckFx(); n = Math.round(n * t.m);
+    for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = 4 + Math.random() * 9; parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 5, r: Math.random() * 6, vr: (Math.random() - .5) * .4, w: 6 + Math.random() * 6, h: 4 + Math.random() * 4, c: t.c[i % t.c.length], e: t.e.length && i % 5 === 0 ? t.e[i % t.e.length] : '', life: 80 + Math.random() * 50 }); }
     if (!raf) raf = requestAnimationFrame(tick);
   }
   const pulse = (el, cls, ms = 800) => { if (!el || calm) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); setTimeout(() => el.classList.remove(cls), ms); };
   return {
     burst,
-    win(big) { burst(big ? 220 : 90); pulse($('.stage') || $('#app'), 'flash-win'); },
-    lose() { pulse($('.stage') || $('#app'), 'shake', 500); },
+    win(big) { burst(big ? 220 : 90); pulse($('.stage') || $('#app'), 'flash-win'); sfx.play(big ? 'big' : 'win'); checkPB(); },
+    lose() { pulse($('.stage') || $('#app'), 'shake', 500); sfx.play('lose'); },
     bump(el) { pulse(el, 'bump', 400); },
   };
 })();
@@ -53,7 +142,7 @@ const showBal = () => {
   requestAnimationFrame(step);
 };
 const setBal = n => { U.balance = n; showBal(); };
-const act = fn => async (...a) => { if (act.busy) return; act.busy = true; try { await fn(...a); } catch (e) { toast(e.message); } finally { act.busy = false; } };
+const act = fn => async (...a) => { if (act.busy) return; act.busy = true; try { await fn(...a); } catch (e) { toast(e.message); sfx.play('error'); } finally { act.busy = false; } };
 
 /* ---------- slip math (display only; the server computes real payouts) ---------- */
 const POWER = { 2: 3, 3: 5, 4: 10, 5: 20, 6: 37.5 };
@@ -74,11 +163,13 @@ async function go() {
   $('#logout').textContent = `${U.username} · Log out`; showBal();
   view = location.hash.slice(1) || 'board';
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.v === view));
-  const R = { board: renderBoard, arcade: renderArcade, lineups: renderLineups, leaders: renderLeaders, admin: renderAdmin, bank: renderBank };
+  const R = { board: renderBoard, arcade: renderArcade, lineups: renderLineups, leaders: renderLeaders, admin: renderAdmin, bank: renderBank, luck: renderLuck };
   try { await (R[view] || renderBoard)(my); } catch (e) { if (my === nav) $('#app').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   renderSlipBar();
 }
 window.addEventListener('hashchange', go);
+const paintSound = () => { const b = $('#sound'); b.textContent = sfx.on ? '🔊' : '🔇'; b.setAttribute('aria-pressed', String(sfx.on)); b.setAttribute('aria-label', sfx.on ? 'Sound on' : 'Sound off'); };
+$('#sound').onclick = () => { sfx.toggle(); paintSound(); toast(sfx.on ? '🔊 Sound on' : '🔇 Sound off'); }; paintSound();
 $('#logout').onclick = async () => { await api('POST', '/logout').catch(() => {}); U = null; Object.keys(pick).forEach(k => delete pick[k]); slipOpen = false; $('#slip').classList.add('hidden'); location.hash = ''; go(); };
 
 /* ---------- auth ---------- */
@@ -217,12 +308,31 @@ async function renderAdmin(my) {
 /* ---------- arcade ---------- */
 let stopFns = [];
 function stopGames() { stopFns.forEach(f => f()); stopFns = []; if (pending) { pending = 0; showBal(); } }
-const GAMES = [['plinko', '🔵 Hawk Drop'], ['mines', '🔐 Locker Hunt'], ['cross', '🚌 Seahawk Crossing'], ['flip', '🪙 Seymour Flip'], ['dice', '🎲 Scoreboard Roll'], ['limbo', '🏈 Hail Mary'], ['slots', '🎰 Seahawk Slots'], ['roulette', '🎡 Lakes Roulette'], ['rps', '✊ Hallway RPS'], ['bj', '🃏 Hawk 21']];
-const GAME_FNS = { plinko, mines, cross, flip, dice, limbo, slots, roulette, rps, bj }; // every game that can launch
+const GAMES = [['plinko', '🔵 Hawk Drop'], ['mines', '🔐 Locker Hunt'], ['cross', '🚌 Seahawk Crossing'], ['flip', '🪙 Seymour Flip'], ['dice', '🎲 Scoreboard Roll'], ['limbo', '🏈 Hail Mary'], ['slots', '🎰 Seahawk Slots'], ['roulette', '🎡 Lakes Roulette'], ['rps', '✊ Hallway RPS'], ['bj', '🃏 Hawk 21'], ['bell', '🔔 Bell Rush'], ['memory', '🧠 Classroom Memory'], ['trivia', '❓ Seahawk Trivia']];
+const GAME_FNS = { plinko, mines, cross, flip, dice, limbo, slots, roulette, rps, bj, bell, memory, trivia }; // every game that can launch
+const CATS = ['All', 'Skill', 'Reaction', 'Memory', 'Trivia', 'Classic'];
+const GAME_CATS = { bell: ['Skill', 'Reaction'], memory: ['Skill', 'Memory'], trivia: ['Skill', 'Trivia'] }; // anything not listed is a Classic chance game
+const catsOf = id => GAME_CATS[id] || ['Classic'];
+let arcCat = 'All';
 async function renderArcade(my) {
-  if (!CFG) CFG = await api('GET', '/arcade/config'); if (my !== nav) return;
-  $('#app').innerHTML = `<h1>Seahawk Arcade</h1><div class="sub">${GAMES.map(([k, n]) => `<button class="pill ${k === game ? 'on' : ''}" data-g="${k}">${n}</button>`).join('')}</div><div id="gm"></div>`;
+  if (!CFG) CFG = await api('GET', '/arcade/config');
+  STATS = await api('GET', '/arcade/stats').catch(() => STATS); if (my !== nav) return;
+  const list = gameList(), byId = Object.fromEntries(list.map(g => [g.id, g])), shown = list.filter(g => arcCat === 'All' || catsOf(g.id).includes(arcCat));
+  const week = Math.floor((Date.now() / 864e5 + 4) / 7), featured = [...new Set([0, 1, 2].map(k => list[(week * 3 + k * 5) % list.length]))]; // rotates every Monday
+  const recent = STATS.recent.map(id => byId[id]).filter(Boolean), bests = list.filter(g => STATS.best[g.id]);
+  const chip = (g, sub) => `<button class="hubchip" data-open="${g.id}"><span>${esc(g.emoji)}</span><b>${esc(g.title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</button>`;
+  $('#app').innerHTML = `<h1>Seahawk Arcade</h1>
+    <div class="arcnote"><span>🎟️ Hawk Bucks are pretend. The arcade is just for fun: no money, no prizes, nothing to cash out.</span><a class="luckchip" href="#luck">${luckBadge()}</a></div>
+    <div class="archub"><div class="hubsec"><h3>⭐ Featured this week</h3><div class="hubrow">${featured.map(g => chip(g, g.tag)).join('')}</div></div>
+      ${recent.length ? `<div class="hubsec"><h3>🕘 Recently played</h3><div class="hubrow">${recent.map(g => chip(g)).join('')}</div></div>` : ''}
+      ${bests.length ? `<div class="hubsec"><h3>🏆 Your best scores</h3><div class="hubrow">${bests.map(g => chip(g, bestText(g.id))).join('')}</div></div>` : ''}</div>
+    <div class="pills cats" role="group" aria-label="Filter games">${CATS.map(c => `<button class="pill ${c === arcCat ? 'on' : ''}" data-cat="${c}" aria-pressed="${c === arcCat}">${c}</button>`).join('')}</div>
+    <div class="sub">${shown.map(g => `<button class="pill ${g.id === game ? 'on' : ''}" data-g="${g.id}">${esc(g.emoji)} ${esc(g.title)}</button>`).join('')}</div>
+    <div class="pbbar" id="pb"></div><div id="gm"></div>`;
   document.querySelectorAll('[data-g]').forEach(b => b.onclick = () => { game = b.dataset.g; go(); });
+  document.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => { arcCat = b.dataset.cat; const first = list.find(g => arcCat === 'All' || catsOf(g.id).includes(arcCat)); if (first && !catsOf(game).includes(arcCat) && arcCat !== 'All') game = first.id; go(); });
+  document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { game = b.dataset.open; go(); });
+  paintPB();
   await (GAME_FNS[game] || plinko)($('#gm'), my);
 }
 const betBox = (v = 10) => `<label>Bet (Hawk Bucks, max ${CFG.maxBet})</label><input id="bet" type="number" min="1" max="${CFG.maxBet}" value="${v}">`;
@@ -241,6 +351,9 @@ const GAME_INFO = {
   roulette: { tag: 'Table game', desc: 'Green, blue or the golden zero. Spin it like it’s the last day of finals.' },
   rps: { tag: 'Streak', desc: 'Throw hands with a Concorde District rival. Westfield has been practicing in the mirror.' },
   bj: { tag: 'Table game', desc: 'Beat Coach to 21. Coach stands on 17 and refuses to explain why.' },
+  bell: { tag: 'Reaction', desc: 'The bell rings, you move. Like 7th period, but now it’s a competition.' },
+  memory: { tag: 'Memory', desc: 'Match the classroom cards fast. Easier than remembering your locker combo.' },
+  trivia: { tag: 'Trivia', desc: 'Seven questions, twenty seconds each. Finally, a quiz where speed counts.' },
 };
 let artSeq = 0;
 function cover(id, emoji) { // returns an inline SVG; u keeps gradient ids unique when a cover appears twice on the page
@@ -328,6 +441,33 @@ function cover(id, emoji) { // returns an inline SVG; u keeps gradient ids uniqu
       a += pc(470, 110, -12, 'A', '♠', '#0f3fb5') + pc(580, 100, 10, 'K', '♥', '#0a8f4e');
       [[450, 360, '#1b4fd8'], [500, 372, '#f5a623'], [700, 360, '#0a8f4e']].forEach(([x, y, c]) => { for (let k = 0; k < 4; k++) a += `<ellipse cx="${x}" cy="${y - k * 10}" rx="34" ry="12" fill="${c}" stroke="#fff" stroke-width="3" stroke-dasharray="8 6"/>`; });
       a += `<text x="740" y="70" fill="#ffe08a" font-size="34" font-weight="900" text-anchor="end">21</text>`;
+      break;
+    }
+    case 'bell': {
+      a = bg('#3a2a05', '#05080b', '70%');
+      for (let k = 0; k < 6; k++) a += `<rect x="${400 + k * 70}" y="40" width="62" height="370" rx="6" fill="#16337f" stroke="#2f6bff" stroke-width="2" opacity=".55"/><rect x="${428 + k * 70}" y="170" width="6" height="40" rx="2" fill="#ffffff44"/>`;
+      a += `<circle cx="590" cy="215" r="150" fill="#ffc542" opacity=".25" filter="url(#${u}f)"/>` + em(590, 215, 200, '🔔', 'transform="rotate(-12 590 215)"');
+      [[400, 120, 470, 160], [380, 230, 455, 230], [400, 330, 470, 290], [780, 120, 710, 160], [800, 230, 725, 230], [780, 330, 710, 290]].forEach(([x1, y1, x2, y2]) => a += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="url(#${u}g)" stroke-width="8" stroke-linecap="round"/>`);
+      a += `<text x="590" y="420" fill="#ffe08a" font-size="44" font-weight="900" letter-spacing="8" text-anchor="middle">RING!</text>`;
+      break;
+    }
+    case 'memory': {
+      a = bg('#24125a', '#05070b');
+      const ic = ['🦅', '📚', '🍕', '🦅', '🔔', '🎒'];
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) {
+        const x = 430 + c * 88, y = 60 + r * 115, k = r * 4 + c, up = [0, 5, 6, 9].includes(k);
+        a += up ? `<rect x="${x}" y="${y}" width="76" height="100" rx="12" fill="#f3f6fa" stroke="${k === 0 || k === 9 ? '#12c26a' : '#ffffff'}" stroke-width="4"/>` + em(x + 38, y + 50, 44, ic[[0, 5, 6, 9].indexOf(k) % ic.length] || '🦅')
+          : `<rect x="${x}" y="${y}" width="76" height="100" rx="12" fill="#1b4fd8" stroke="#5b8cff" stroke-width="3"/>` + logo(x + 38, y + 50, 46);
+      }
+      a += `<rect x="426" y="56" width="84" height="108" rx="14" fill="none" stroke="#12c26a" stroke-width="6" filter="url(#${u}f)"/>`;
+      break;
+    }
+    case 'trivia': {
+      a = bg('#0b3a22', '#05080b', '68%');
+      a += `<rect x="410" y="50" width="360" height="250" rx="12" fill="#7a4a1c"/><rect x="424" y="64" width="332" height="222" rx="6" fill="#163d2a"/>`;
+      a += `<text x="590" y="225" fill="url(#${u}g)" font-size="190" font-weight="900" text-anchor="middle" filter="url(#${u}f)" opacity=".5">?</text><text x="590" y="225" fill="url(#${u}g)" font-size="190" font-weight="900" text-anchor="middle">?</text>`;
+      ['A', 'B', 'C', 'D'].forEach((l, k) => a += `<circle cx="${470 + k * 80}" cy="360" r="30" fill="${k === 2 ? '#12c26a' : '#1b4fd8'}" stroke="#fff" stroke-width="3"/><text x="${470 + k * 80}" y="372" fill="#fff" font-size="32" font-weight="900" text-anchor="middle">${l}</text>`);
+      a += `<text x="452" y="104" fill="#ffffff88" font-size="20" font-family="ui-monospace,monospace">Q7 / 7</text>`;
       break;
     }
     default: a = bg('#1b4fd8', '#05080b') + em(590, 225, 180, emoji || '🎮');
@@ -549,6 +689,7 @@ function settleShot(r, big) { // one-shot games: reveal the balance only after t
   else if (r.payout === r.bet) resMsg(true, 'Push · bet back');
   else { resMsg(false, `−${fmt(r.bet - r.payout)} 🪙`); fx.lose(); }
 }
+function streakFx(n) { sfx.play('streak'); if ([3, 5, 8].includes(n)) { toast(`🔥 ${n} in a row!`); fx.burst(40); } }
 const gameShell = (ctrl, stage) => `<div class="game"><div class="panel ctrl">${ctrl}<div class="res" id="res"></div></div><div class="panel stage">${stage}</div></div>`;
 
 /* Coin flip: Seymour Flip */
@@ -577,7 +718,7 @@ async function flip(root, my) {
     const name = r.side === 'hawk' ? 'Seymour' : 'SL';
     if (r.lost) { st.live = false; setBal(r.balance); resMsg(false, `It landed ${name} · −${fmt(st.bet)} 🪙`); fx.lose(); }
     else { st.streak = r.streak; st.mult = r.mult; fx.bump($('#mult'));
-      if (r.cashed) { st.live = false; setBal(r.balance); resMsg(true, `Perfect ${r.streak}! +${fmt(r.payout - st.bet)} 🪙`); fx.win(true); } else resMsg(true, `${name}! Streak ${r.streak}`); }
+      if (r.cashed) { st.live = false; setBal(r.balance); resMsg(true, `Perfect ${r.streak}! +${fmt(r.payout - st.bet)} 🪙`); fx.win(true); } else { resMsg(true, `${name}! Streak ${r.streak}`); streakFx(r.streak); } }
     paint();
   }));
   $('#cash').onclick = act(async () => { const r = await api('POST', '/arcade/flip/cashout'); st.live = false; setBal(r.balance); resMsg(true, `Cashed out +${fmt(r.payout - st.bet)} 🪙`); fx.win(r.mult >= 4); paint(); });
@@ -716,7 +857,7 @@ async function rps(root, my) {
     if (r.tie) resMsg(true, `Tie with ${esc(r.rival)} – go again`);
     else if (r.lost) { st.live = false; setBal(r.balance); resMsg(false, `${esc(r.rival)} wins · −${fmt(st.bet)} 🪙`); fx.lose(); }
     else { st.streak = r.streak; st.mult = r.mult; fx.bump($('#mult'));
-      if (r.cashed) { st.live = false; setBal(r.balance); resMsg(true, `Undefeated! +${fmt(r.payout - st.bet)} 🪙`); fx.win(true); } else resMsg(true, `Beat ${esc(r.rival)}! Streak ${r.streak}`); }
+      if (r.cashed) { st.live = false; setBal(r.balance); resMsg(true, `Undefeated! +${fmt(r.payout - st.bet)} 🪙`); fx.win(true); } else { resMsg(true, `Beat ${esc(r.rival)}! Streak ${r.streak}`); streakFx(r.streak); } }
     paint();
   }));
   $('#cash').onclick = act(async () => { const r = await api('POST', '/arcade/rps/cashout'); st.live = false; setBal(r.balance); resMsg(true, `Cashed out +${fmt(r.payout - st.bet)} 🪙`); fx.win(r.mult >= 4); paint(); });
@@ -764,9 +905,143 @@ async function renderBank(my) {
   const note = () => { $('#bnote').innerHTML = `Free, always – no real money, no cash value. You've added <b>${fmt(U.added)}</b> so far. The leaderboard ranks <b>net winnings</b>, so adding Hawk Bucks won't move you up.`; };
   document.querySelectorAll('[data-amt]').forEach(b => b.onclick = act(async () => {
     const n = +b.dataset.amt, r = await api('POST', '/bank', { amount: n }); U.added = r.added; setBal(r.balance);
-    $('#bb').textContent = fmt(r.balance); fx.bump($('#bb')); fx.burst(n >= 1000 ? 120 : 50); toast(`+${fmt(n)} Hawk Bucks`); note();
+    $('#bb').textContent = fmt(r.balance); fx.bump($('#bb')); sfx.play('cash'); fx.burst(n >= 1000 ? 120 : 50); toast(`+${fmt(n)} Hawk Bucks`); note();
   }));
   note();
+}
+
+/* ---------- skill games UI (score-only; the server keeps the clock and the answers) ---------- */
+const hsBox = () => '<div class="hs"><h3>🏆 Top scores</h3><ol id="hs"><li class="mutecell">Loading…</li></ol></div>';
+async function loadHS(id) {
+  try {
+    const { top } = await api('GET', '/arcade/highscores?game=' + id), el = $('#hs'); if (!el) return;
+    el.innerHTML = top.map(t => `<li class="${t.username === U.username ? 'me' : ''}"><span>${esc(t.username)}</span><b>${fmt(t.best)}</b></li>`).join('') || '<li class="mutecell">No scores yet – be the first!</li>';
+  } catch (e) {}
+}
+function countUp(el, to, ms = 900) {
+  if (!el) return; const from = +String(el.textContent).replace(/[^\d]/g, '') || 0;
+  if (calm || from === to) { el.textContent = fmt(to); return; }
+  const t0 = performance.now(), step = () => { const k = Math.min(1, (performance.now() - t0) / ms); el.textContent = fmt(from + (to - from) * (1 - Math.pow(1 - k, 3))); if (k < 1) setTimeout(step, 16); };
+  step();
+}
+function skillDone(id, r, great) {
+  STATS.best[id] = { score: r.best }; paintPB();
+  if (r.newBest) { fx.burst(150); sfx.play('pb'); setTimeout(() => toast(`🏆 New personal best: ${fmt(r.score)}!`), 300); fx.bump($('#pb')); }
+  else if (great) fx.win(false); else sfx.play('win');
+  loadHS(id);
+}
+
+/* Reaction: Bell Rush */
+async function bell(root) {
+  let st = null, tok = 0, ringing = false, busy = false;
+  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> press Start, wait for the bell, then tap the big button (or press Space) as fast as you can. 5 bells. Each bell is worth 1,000 minus your reaction time in milliseconds. Tap before it rings and that bell scores 0.</div>
+    <button class="btn" id="start">Start Bell Rush</button><div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Bell</small><b id="bn">–</b></div></div>${hsBox()}`,
+    `<button class="bellpad" id="pad" disabled><span class="bellemoji">🔔</span><b id="padtxt">Press Start</b></button><div class="pips" id="pips">${'<i></i>'.repeat(5)}</div>`);
+  const pad = $('#pad'), txt = $('#padtxt'), setPad = (cls, t) => { pad.className = 'bellpad ' + cls; txt.textContent = t; };
+  async function next() {
+    const me = ++tok; ringing = false; setPad('wait', 'Wait for it…'); pad.disabled = false;
+    try { const r = await api('POST', '/arcade/bell/next'); if (me !== tok || !root.isConnected) return; $('#bn').textContent = `${r.bell} / 5`; ringing = true; setPad('ring', 'TAP!'); sfx.play('bell'); }
+    catch (e) { if (me === tok) toast(e.message); }
+  }
+  async function tap() {
+    if (!st || busy) return; busy = true; tok++; // tok++ cancels a pending ring if this tap was early
+    try {
+      const r = await api('POST', '/arcade/bell/tap'); if (!root.isConnected) return;
+      const pip = $('#pips').children[r.bell - 1];
+      if (r.res === 'ok') { setPad('good', `${r.ms} ms · +${r.pts}`); sfx.play(r.ms < 300 ? 'streak' : 'reveal'); pip.classList.add('on'); fx.bump(txt); }
+      else { setPad('bad', r.res === 'early' ? 'Too early! +0' : 'Too slow! +0'); pip.classList.add('bad'); r.res === 'early' ? fx.lose() : sfx.play('miss'); }
+      countUp($('#sc'), r.total, 400);
+      if (r.done) {
+        st = null; pad.disabled = true; $('#start').disabled = false; $('#start').textContent = 'Play again';
+        setTimeout(() => { if (!root.isConnected) return; setPad('done', `Final: ${fmt(r.score)}`); resMsg(true, `Score ${fmt(r.score)}${r.bestMs ? ` · fastest ${r.bestMs} ms` : ''}`); skillDone('bell', r, r.score >= 3000); }, 700);
+      } else setTimeout(() => { if (root.isConnected && st) next(); }, 850);
+    } catch (e) { toast(e.message); } finally { busy = false; }
+  }
+  pad.onclick = () => { if (st && (ringing || pad.classList.contains('wait'))) tap(); };
+  const key = e => { if (e.code === 'Space' && st && root.isConnected && e.target.tagName !== 'INPUT') { e.preventDefault(); if (e.target !== pad) pad.onclick(); } };
+  document.addEventListener('keydown', key); stopFns.push(() => { tok++; document.removeEventListener('keydown', key); });
+  $('#start').onclick = act(async () => {
+    await api('POST', '/arcade/bell/start'); st = {}; $('#start').disabled = true; $('#sc').textContent = '0'; $('#res').textContent = '';
+    [...$('#pips').children].forEach(i => i.className = ''); pad.focus(); next();
+  });
+  loadHS('bell');
+}
+
+/* Memory: Classroom Memory */
+async function memory(root, my) {
+  const IC = ['🦅', '🏈', '📚', '🔔', '🧪', '🎒', '🍕', '🚌']; let st = null, tick = 0, t0 = 0;
+  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> flip two cards at a time to find the 8 matching pairs. Score starts at 3,000: −100 for each try past 8 and −10 per second.</div>
+    <button class="btn" id="start">Start Memory</button><div class="stats"><div><small>Tries</small><b id="mv">0</b></div><div><small>Time</small><b id="tm">0.0s</b></div></div>${hsBox()}`,
+    `<div class="mgrid" id="mg">${Array.from({ length: 16 }, (_, i) => `<button class="mcard" data-i="${i}" disabled aria-label="Card ${i + 1}, face down"><span class="mback"><img src="logo.svg" alt=""></span><span class="mface"></span></button>`).join('')}</div>`);
+  const cards = [...root.querySelectorAll('.mcard')];
+  const face = (i, sym) => { cards[i].querySelector('.mface').textContent = IC[sym]; cards[i].classList.add('up'); cards[i].setAttribute('aria-label', `Card ${i + 1}, ${IC[sym]}`); };
+  const hide = i => { cards[i].classList.remove('up'); cards[i].setAttribute('aria-label', `Card ${i + 1}, face down`); };
+  const clock = () => { clearInterval(tick); tick = setInterval(() => { if (!root.isConnected) return clearInterval(tick); $('#tm').textContent = ((performance.now() - t0) / 1000).toFixed(1) + 's'; }, 100); };
+  stopFns.push(() => clearInterval(tick));
+  function begin() { st = {}; cards.forEach((c, i) => { c.disabled = false; c.classList.remove('matched', 'nope'); hide(i); }); t0 = performance.now(); clock(); $('#start').disabled = true; }
+  const a = (await api('GET', '/arcade/active?game=memory')).round; if (my !== nav) return;
+  if (a) { begin(); a.matched.forEach(({ i, sym }) => { face(i, sym); cards[i].classList.add('matched'); cards[i].disabled = true; }); $('#mv').textContent = a.moves; $('#res').textContent = 'Game restored (the server kept your time)'; }
+  $('#start').onclick = act(async () => { await api('POST', '/arcade/memory/start'); begin(); $('#mv').textContent = '0'; $('#res').textContent = ''; });
+  $('#mg').onclick = act(async e => {
+    const c = e.target.closest('.mcard'); if (!c || !st || c.disabled || c.classList.contains('up')) return;
+    const i = +c.dataset.i, r = await api('POST', '/arcade/memory/flip', { i }); if (!root.isConnected) return;
+    face(i, r.sym); sfx.play('flip');
+    if (r.pair) {
+      $('#mv').textContent = r.moves;
+      if (r.match) { r.pair.forEach(k => { cards[k].classList.add('matched'); cards[k].disabled = true; }); sfx.play('reveal'); fx.bump(cards[i]); }
+      else { sfx.play('miss'); r.pair.forEach(k => cards[k].classList.add('nope')); await wait(calm ? 350 : 750); if (!root.isConnected) return; r.pair.forEach(k => { cards[k].classList.remove('nope'); hide(k); }); }
+    }
+    if (r.done) {
+      st = null; clearInterval(tick); $('#tm').textContent = r.secs.toFixed(1) + 's'; $('#start').disabled = false; $('#start').textContent = 'Play again';
+      resMsg(true, `Score ${fmt(r.score)} · ${r.moves} tries in ${r.secs}s`); skillDone('memory', r, r.score >= 2000);
+    }
+  });
+  loadHS('memory');
+}
+
+/* Trivia: Seahawk Trivia */
+async function trivia(root) {
+  let st = null, timer = 0;
+  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> 7 questions, 20 seconds each. 100 points for each right answer, plus a speed bonus of up to 50 (it drops 5 points per second).</div>
+    <button class="btn" id="start">Start Trivia</button><div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Question</small><b id="qn">–</b></div></div>${hsBox()}`,
+    `<div class="tq"><div class="tboard"><h3 id="tqq">Ready for a pop quiz? 📝</h3></div><div class="tbar"><i id="tt"></i></div><div class="tans" id="ta"></div></div>`);
+  stopFns.push(() => clearTimeout(timer));
+  function show(q) {
+    $('#qn').textContent = `${q.n} / ${q.total}`; $('#tqq').textContent = q.q; fx.bump($('#tqq'));
+    $('#ta').innerHTML = q.a.map((a, k) => `<button class="tbtn" data-c="${k}"><span>${'ABCD'[k]}</span>${esc(a)}</button>`).join('');
+    const bar = $('#tt'); bar.style.transition = 'none'; bar.style.width = '100%'; void bar.offsetWidth; bar.style.transition = `width ${q.secs}s linear`; bar.style.width = '0%';
+    clearTimeout(timer); timer = setTimeout(() => { const b = root.querySelector('.tbtn:not(:disabled)'); if (b && st) { st.timeout = true; b.click(); } }, (q.secs + 0.4) * 1000);
+  }
+  $('#start').onclick = act(async () => { const r = await api('POST', '/arcade/trivia/start'); st = {}; $('#start').disabled = true; $('#sc').textContent = '0'; $('#res').textContent = ''; show(r.question); });
+  $('#ta').onclick = act(async e => {
+    const b = e.target.closest('.tbtn'); if (!b || !st) return; clearTimeout(timer);
+    const r = await api('POST', '/arcade/trivia/answer', { choice: +b.dataset.c }); if (!root.isConnected) return;
+    const btns = [...root.querySelectorAll('.tbtn')]; btns.forEach(x => x.disabled = true); btns[r.answer].classList.add('right'); if (!r.right && !r.timeout) b.classList.add('wrong');
+    const bar = $('#tt'); bar.style.width = getComputedStyle(bar).width; bar.style.transition = 'none'; st.timeout = false;
+    if (r.right) { sfx.play('reveal'); fx.bump(btns[r.answer]); resMsg(true, `Correct! +${r.pts}`); } else { sfx.play('miss'); fx.lose(); resMsg(false, r.timeout ? 'Time’s up!' : 'Not quite!'); }
+    countUp($('#sc'), r.score, 400);
+    await wait(calm ? 400 : 1100); if (!root.isConnected) return;
+    if (r.done) {
+      st = null; $('#tqq').textContent = `Final score: ${fmt(r.score)} · ${r.correct}/${r.of} right`; $('#ta').innerHTML = ''; $('#start').disabled = false; $('#start').textContent = 'Play again';
+      resMsg(true, `${r.correct}/${r.of} right · ${fmt(r.score)} pts`); skillDone('trivia', r, r.correct >= 6);
+    } else show(r.next);
+  });
+  loadHS('trivia');
+}
+
+/* ---------- Luck Lab ---------- */
+async function renderLuck() {
+  const cur = String(luckLevel());
+  $('#app').innerHTML = `<h1>🍀 Luck Lab</h1>
+    <div class="panel luckinfo"><b>This is a style setting, not a cheat code.</b> Luck only changes how wins <i>look and sound</i>: confetti colors, how much confetti, lucky-charm particles and win chimes.
+      It <b>never</b> changes odds, payouts, scores, Hawk Bucks, sports picks or leaderboards. The server decides every result the same way for everyone. HawkBet is a pretend-money arcade, not real gambling.</div>
+    <div class="luckgrid">${LUCK.map(([lv, e, name, desc]) => `<button class="luckcard ${String(lv) === cur ? 'on' : ''}" data-luck="${lv}" aria-pressed="${String(lv) === cur}"><span class="le">${e}</span><b>${lv === 'normal' ? 'Normal' : `${lv} · ${name}`}</b><small>${desc}</small>${lv === 'normal' ? '' : `<i class="lm">Confetti ×${(0.5 + lv * 0.1).toFixed(1)}</i>`}</button>`).join('')}</div>
+    <div class="panel lucktest"><button class="btn" id="preview">✨ Preview a win</button><div class="note">Saved to your account, so it follows you to any device.</div></div>`;
+  document.querySelectorAll('[data-luck]').forEach(b => b.onclick = act(async () => {
+    const v = b.dataset.luck === 'normal' ? 'normal' : +b.dataset.luck, r = await api('POST', '/luck', { luck: v });
+    U.luck = r.luck; renderLuck(); fx.burst(110); sfx.play('big'); toast(`Luck set to ${luckEntry()[2]}`);
+  }));
+  $('#preview').onclick = () => { fx.burst(160); sfx.play('big'); };
 }
 
 go();

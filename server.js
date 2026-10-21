@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS txns(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL
 CREATE INDEX IF NOT EXISTS idx_slips_user ON slips(user_id); CREATE INDEX IF NOT EXISTS idx_rounds_user ON rounds(user_id, game, status);
 `);
 if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='added'").get()) db.exec('ALTER TABLE users ADD COLUMN added INTEGER NOT NULL DEFAULT 0'); // free top-ups so far
+if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='luck'").get()) db.exec("ALTER TABLE users ADD COLUMN luck TEXT NOT NULL DEFAULT 'normal'"); // Luck Lab (cosmetic)
+db.exec(`CREATE TABLE IF NOT EXISTS scores(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), game TEXT NOT NULL, score INTEGER NOT NULL, detail TEXT, created INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_scores_game ON scores(game, score DESC); CREATE INDEX IF NOT EXISTS idx_scores_user ON scores(user_id, game);`);
 
 /* demo lines: South Lakes' real Oct 22 slate, numbers invented. Seeded once; admin manages after that. */
 if (!db.prepare('SELECT 1 FROM props LIMIT 1').get()) {
@@ -83,7 +86,7 @@ function userFrom(req) {
   const row = db.prepare('SELECT u.*, s.expires FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?').get(sha(m[1]));
   if (!row || row.expires < now()) return null; return row;
 }
-const publicUser = u => ({ username: u.username, balance: u.balance, added: u.added || 0, isAdmin: !!u.is_admin, canClaim: u.balance < CLAIM_BELOW && now() - u.last_claim >= CLAIM_EVERY_MS });
+const publicUser = u => ({ username: u.username, balance: u.balance, added: u.added || 0, luck: luckOut(u.luck), isAdmin: !!u.is_admin, canClaim: u.balance < CLAIM_BELOW && now() - u.last_claim >= CLAIM_EVERY_MS });
 const hits = new Map(); // crude per-IP limiter for auth routes
 function limit(ip) { const t = now(), a = (hits.get(ip) || []).filter(x => t - x < 600e3); a.push(t); hits.set(ip, a); if (a.length > 30) bad('Too many attempts, try again in a few minutes', 429); }
 
@@ -383,6 +386,7 @@ const VIEWS = {
   flip: (r, st) => ({ id: r.id, bet: r.bet, streak: st.streak, mult: st.streak ? flipMult(st.streak) : 0 }),
   rps: (r, st) => ({ id: r.id, bet: r.bet, streak: st.streak, mult: st.streak ? rpsMult(st.streak) : 0 }),
   bj: (r, st) => bjView(r, st, false),
+  memory: (r, st) => ({ id: r.id, moves: st.moves, matched: st.matched.map(i => ({ i, sym: st.deck[i] })), cards: st.deck.length }),
 };
 arcade.active = ctx => {
   const game = ctx.url.searchParams.get('game'), r = VIEWS[game] && activeRound(ctx.user.id, game);
@@ -390,6 +394,122 @@ arcade.active = ctx => {
 };
 const baseConfig = arcade.config;
 arcade.config = () => ({ ...baseConfig(), slots: { pays: Object.fromEntries(Object.entries(SLOT).map(([k, [, p]]) => [k, p])), rtp: SLOT_RTP }, flipMax: FLIP_MAX, rpsMax: RPS_MAX });
+
+/* ---------- skill games: Bell Rush, Classroom Memory, Seahawk Trivia ----------
+   Score-only (no Hawk Bucks at stake). The server holds all hidden state and keeps the clock. */
+const SKILL_GAMES = ['bell', 'memory', 'trivia'];
+function skillStart(ctx, game, state) {
+  db.prepare("UPDATE rounds SET status='abandoned' WHERE user_id=? AND game=? AND status='active'").run(ctx.user.id, game); // nothing at stake, so a restart just abandons
+  return Number(db.prepare('INSERT INTO rounds(user_id,game,bet,state,created) VALUES(?,?,0,?,?)').run(ctx.user.id, game, JSON.stringify(state), now()).lastInsertRowid);
+}
+function skillFinish(ctx, r, st, score, detail = {}) {
+  const prev = db.prepare('SELECT MAX(score) AS b FROM scores WHERE user_id=? AND game=?').get(ctx.user.id, r.game).b;
+  save(r, st); db.prepare("UPDATE rounds SET status='done', payout=0 WHERE id=?").run(r.id);
+  db.prepare('INSERT INTO scores(user_id,game,score,detail,created) VALUES(?,?,?,?,?)').run(ctx.user.id, r.game, score, JSON.stringify(detail), now());
+  return { done: true, score, best: Math.max(score, prev ?? 0), newBest: prev == null || score > prev, ...detail };
+}
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = crypto.randomInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+// Bell Rush: 5 bells. The "ring" response is held until ring time, so the browser never knows when the bell will go.
+const BELLS = 5, BELL_SCALE = Number(process.env.BELL_DELAY_SCALE) || 1, BELL_EARLY_MS = 90, BELL_SLOW_MS = 2000;
+const bellPoints = ms => ms < BELL_EARLY_MS ? 0 : ms > BELL_SLOW_MS ? 0 : 1000 - ms; // <90ms after the ring = anticipated, counts as early
+// Classroom Memory: 8 pairs. Score starts at 3000, -100 per extra pair attempt, -10 per second.
+const MEM_PAIRS = 8, memoryScore = (moves, secs) => Math.max(0, Math.round(3000 - 100 * Math.max(0, moves - MEM_PAIRS) - 10 * secs));
+// Seahawk Trivia: 7 questions, 20s each. 100 per right answer + speed bonus of 50 minus 5 per second taken.
+const TRIVIA_N = 7, TRIVIA_SECS = 20, triviaPoints = (right, secs) => right && secs <= TRIVIA_SECS ? 100 + Math.max(0, 50 - Math.floor(secs * 5)) : 0;
+const TRIVIA = [
+  ['What is the South Lakes High School mascot?', ['Seahawks', 'Eagles', 'Falcons', 'Ospreys']],
+  ['What are South Lakes’ school colors?', ['Royal blue and kelly green', 'Red and gold', 'Black and orange', 'Purple and white']],
+  ['South Lakes High School is in which town?', ['Reston', 'Herndon', 'Vienna', 'Chantilly']],
+  ['South Lakes plays in which athletic district?', ['Concorde', 'Liberty', 'Gunston', 'Patriot']],
+  ['Which school system is South Lakes part of?', ['Fairfax County Public Schools', 'Loudoun County Public Schools', 'Arlington Public Schools', 'Prince William County Schools']],
+  ['Which SL team won back-to-back VHSL Class 6 state titles in 2024 and 2025?', ['Boys basketball', 'Football', 'Girls soccer', 'Baseball']],
+  ['How many sides does a hexagon have?', ['6', '5', '7', '8']],
+  ['What is the chemical symbol for gold?', ['Au', 'Ag', 'Go', 'Gd']],
+  ['Which planet is called the Red Planet?', ['Mars', 'Venus', 'Jupiter', 'Mercury']],
+  ['Who wrote “Romeo and Juliet”?', ['William Shakespeare', 'Charles Dickens', 'Mark Twain', 'Jane Austen']],
+  ['What is the square root of 144?', ['12', '14', '11', '16']],
+  ['What is the largest ocean on Earth?', ['Pacific', 'Atlantic', 'Indian', 'Arctic']],
+  ['What is the capital of Virginia?', ['Richmond', 'Norfolk', 'Virginia Beach', 'Alexandria']],
+  ['How many continents are there?', ['7', '6', '5', '8']],
+  ['Which gas do plants take in for photosynthesis?', ['Carbon dioxide', 'Oxygen', 'Nitrogen', 'Helium']],
+  ['Which part of the cell is called its powerhouse?', ['Mitochondria', 'Nucleus', 'Ribosome', 'Cell wall']],
+  ['Who was the first president of the United States?', ['George Washington', 'Thomas Jefferson', 'John Adams', 'Abraham Lincoln']],
+  ['What is the longest river in Africa?', ['Nile', 'Congo', 'Niger', 'Zambezi']],
+  ['Which of these is a prime number?', ['29', '21', '27', '33']],
+  ['Who painted the Mona Lisa?', ['Leonardo da Vinci', 'Pablo Picasso', 'Vincent van Gogh', 'Michelangelo']],
+  ['What is 15% of 200?', ['30', '15', '20', '35']],
+  ['Water boils at what temperature in Celsius (at sea level)?', ['100°', '90°', '212°', '50°']],
+]; // first choice is the right one; choices are shuffled per round
+
+function triviaQuestion(st) {
+  const q = st.qs[st.i];
+  return { n: st.i + 1, total: TRIVIA_N, q: TRIVIA[q.k][0], a: q.order.map(j => TRIVIA[q.k][1][j]), secs: TRIVIA_SECS };
+}
+Object.assign(arcade, {
+  bellStart: ctx => tx(() => ({ id: skillStart(ctx, 'bell', { i: 0, ring: null, taps: [] }), bells: BELLS })),
+  bellNext: ctx => {
+    const { ring, bell } = tx(() => {
+      const { r, st } = live(ctx, 'bell'); if (st.ring) bad('Tap the bell that is ringing first');
+      st.ring = now() + Math.round((1200 + crypto.randomInt(2800)) * BELL_SCALE); save(r, st);
+      return { ring: st.ring, bell: st.i + 1 };
+    });
+    return new Promise(ok => setTimeout(() => ok({ ring: true, bell }), Math.max(0, ring - now())));
+  },
+  bellTap: ctx => tx(() => {
+    const { r, st } = live(ctx, 'bell'); if (!st.ring) bad('Wait for the next bell');
+    const ms = now() - st.ring, res = ms < BELL_EARLY_MS ? 'early' : ms > BELL_SLOW_MS ? 'slow' : 'ok', pts = bellPoints(ms);
+    st.taps.push({ ms: res === 'ok' ? ms : null, pts, res }); st.i++; st.ring = null;
+    const out = { bell: st.i, res, ms: res === 'early' ? null : ms, pts, total: st.taps.reduce((a, t) => a + t.pts, 0) };
+    if (st.i >= BELLS) { const ok = st.taps.filter(t => t.ms != null).map(t => t.ms); return { ...out, ...skillFinish(ctx, r, st, out.total, { bestMs: ok.length ? Math.min(...ok) : null }) }; }
+    save(r, st); return out;
+  }),
+  memoryStart: ctx => tx(() => ({ id: skillStart(ctx, 'memory', { deck: shuffle([...Array(MEM_PAIRS).keys(), ...Array(MEM_PAIRS).keys()]), open: [], matched: [], moves: 0, t0: now() }), cards: MEM_PAIRS * 2 })),
+  memoryFlip: ctx => tx(() => {
+    const { r, st } = live(ctx, 'memory'), i = int(ctx.body.i, 0, MEM_PAIRS * 2 - 1, 'Card');
+    if (st.open.length === 2) st.open = []; // previous mismatch has been flipped back
+    if (st.matched.includes(i) || st.open.includes(i)) bad('That card is already face up');
+    st.open.push(i); const out = { i, sym: st.deck[i] };
+    if (st.open.length === 2) {
+      const [a, b] = st.open; st.moves++; out.pair = [a, b]; out.match = st.deck[a] === st.deck[b];
+      if (out.match) { st.matched.push(a, b); st.open = []; }
+    }
+    out.moves = st.moves; out.matched = st.matched.length / 2;
+    if (st.matched.length === MEM_PAIRS * 2) { const secs = Math.round((now() - st.t0) / 100) / 10; return { ...out, ...skillFinish(ctx, r, st, memoryScore(st.moves, secs), { moves: st.moves, secs }) }; }
+    save(r, st); return out;
+  }),
+  triviaStart: ctx => tx(() => {
+    const ks = shuffle([...TRIVIA.keys()]).slice(0, TRIVIA_N), st = { qs: ks.map(k => ({ k, order: shuffle([0, 1, 2, 3]) })), i: 0, score: 0, right: 0, asked: now() };
+    return { id: skillStart(ctx, 'trivia', st), question: triviaQuestion(st) };
+  }),
+  triviaAnswer: ctx => tx(() => {
+    const { r, st } = live(ctx, 'trivia'), choice = int(ctx.body.choice, 0, 3, 'Choice'), q = st.qs[st.i];
+    const secs = (now() - st.asked) / 1000, answer = q.order.indexOf(0), right = choice === answer && secs <= TRIVIA_SECS, pts = triviaPoints(right, secs);
+    st.score += pts; st.right += right ? 1 : 0; st.i++;
+    const out = { right, answer, pts, score: st.score, timeout: secs > TRIVIA_SECS };
+    if (st.i >= TRIVIA_N) return { ...out, ...skillFinish(ctx, r, st, st.score, { correct: st.right, of: TRIVIA_N }) };
+    st.asked = now(); save(r, st); return { ...out, next: triviaQuestion(st) };
+  }),
+  highscores: ctx => {
+    const game = ctx.url.searchParams.get('game'); if (!SKILL_GAMES.includes(game)) bad('Unknown game');
+    return { top: db.prepare('SELECT u.username, MAX(s.score) AS best FROM scores s JOIN users u ON u.id=s.user_id WHERE s.game=? GROUP BY s.user_id ORDER BY best DESC, MIN(s.created) LIMIT 10').all(game) };
+  },
+  stats: ctx => { // personal bests: best multiplier won for chance games, best score for skill games
+    const best = {};
+    for (const x of db.prepare(`SELECT game, MAX(mult) AS mult, MAX(payout-bet) AS win FROM rounds WHERE user_id=? AND payout>bet AND game NOT IN (${SKILL_GAMES.map(() => '?').join(',')}) GROUP BY game`).all(ctx.user.id, ...SKILL_GAMES)) best[x.game] = { mult: x.mult, win: x.win };
+    for (const x of db.prepare('SELECT game, MAX(score) AS score FROM scores WHERE user_id=? GROUP BY game').all(ctx.user.id)) best[x.game] = { score: x.score };
+    const recent = db.prepare("SELECT game FROM rounds WHERE user_id=? GROUP BY game ORDER BY MAX(created) DESC LIMIT 6").all(ctx.user.id).map(x => x.game);
+    return { best, recent };
+  },
+});
+
+/* ---------- Luck Lab: a cosmetic preference. It never touches odds, payouts, scores or picks. ---------- */
+const parseLuck = v => v === 'normal' ? 'normal' : Number.isInteger(v) && v >= 1 && v <= 10 ? String(v) : null;
+const luckOut = s => s === 'normal' || s == null ? 'normal' : Number(s);
+function setLuck(ctx) {
+  const v = parseLuck(ctx.body.luck); if (v === null) bad('Luck must be "normal" or a whole number from 1 to 10');
+  db.prepare('UPDATE users SET luck=? WHERE id=?').run(v, ctx.user.id); return { luck: luckOut(v) };
+}
 
 /* ---------- bank: free Hawk Bucks top-ups (tracked so the leaderboard ranks real winnings) ---------- */
 const BANK_AMOUNTS = [100, 500, 1000], BANK_MAX_BAL = 1e6, bankHits = new Map();
@@ -455,6 +575,16 @@ const routes = {
   'POST /api/arcade/bj/stand': need(arcade.bjStand),
   'POST /api/arcade/bj/double': need(arcade.bjDouble),
   'POST /api/bank': need(bank),
+  'POST /api/luck': need(setLuck),
+  'GET /api/arcade/stats': need(arcade.stats),
+  'GET /api/arcade/highscores': need(arcade.highscores),
+  'POST /api/arcade/bell/start': need(arcade.bellStart),
+  'POST /api/arcade/bell/next': need(arcade.bellNext),
+  'POST /api/arcade/bell/tap': need(arcade.bellTap),
+  'POST /api/arcade/memory/start': need(arcade.memoryStart),
+  'POST /api/arcade/memory/flip': need(arcade.memoryFlip),
+  'POST /api/arcade/trivia/start': need(arcade.triviaStart),
+  'POST /api/arcade/trivia/answer': need(arcade.triviaAnswer),
 };
 
 const FILES = { '/': 'index.html', '/index.html': 'index.html', '/style.css': 'style.css', '/app.js': 'app.js', '/logo.svg': 'logo.svg' };
@@ -485,17 +615,19 @@ const server = http.createServer((req, res) => {
   let raw = '';
   req.on('data', c => { raw += c; if (raw.length > 20000) req.destroy(); });
   req.on('end', () => {
+    const fail = e => {
+      if (e instanceof HttpError) return send(res, e.status, JSON.stringify({ error: e.message }));
+      if (e instanceof SyntaxError) return send(res, 400, JSON.stringify({ error: 'Bad JSON' }));
+      console.error(e); send(res, 500, JSON.stringify({ error: 'Server error' }));
+    };
     try {
       if (req.method === 'POST' && !sameOrigin(req)) bad('Cross-site request blocked', 403);
       if (req.method === 'POST' && !/application\/json/.test(req.headers['content-type'] || '')) bad('JSON only', 415);
       const body = raw ? JSON.parse(raw) : {};
       const result = handler({ req, res, url, body, user: userFrom(req), ip: clientIp(req) });
+      if (result && typeof result.then === 'function') return result.then(r => send(res, 200, JSON.stringify(r)), fail);
       send(res, 200, JSON.stringify(result));
-    } catch (e) {
-      if (e instanceof HttpError) return send(res, e.status, JSON.stringify({ error: e.message }));
-      if (e instanceof SyntaxError) return send(res, 400, JSON.stringify({ error: 'Bad JSON' }));
-      console.error(e); send(res, 500, JSON.stringify({ error: 'Server error' }));
-    }
+    } catch (e) { fail(e); }
   });
 });
 

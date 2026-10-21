@@ -23,5 +23,13 @@ Zero-dependency Node server (needs Node 22.5+ for built-in SQLite). No `npm inst
 - The server decides all outcomes (Plinko drops, Mines positions, Crossing hits, slip grading) and is the only thing that changes balances. Mines/Crossing rounds survive a page refresh.
 - Hawk Bucks have no cash value: no buying, no cash-out, no prizes for credits.
 
+## Arcade
+- 13 games: 10 classic Hawk Bucks games plus 3 score-only skill games (Bell Rush, Classroom Memory, Seahawk Trivia) with personal bests and top-10 lists.
+- 🍀 Luck Lab is cosmetic only: it changes confetti and win sounds, never odds, payouts, scores, picks or leaderboards.
+- Sound effects are generated with the Web Audio API (no files). Toggle with the 🔊 button; the choice is saved in the browser.
+
+## Tests
+    node --test        # spins up the server on a temp database and exercises the API
+
 ## Deploying
 See [DEPLOY.md](DEPLOY.md) (Fly.io, HTTPS, persistent database, invite code, backups).

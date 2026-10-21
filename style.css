@@ -364,3 +364,76 @@ canvas#cv{background:radial-gradient(ellipse at 50% 0%,#12305a,#0b1118 70%);box-
   .car-copy p{font-size:14px}
   .car-arrow{top:29%;width:38px;height:38px;font-size:26px;line-height:34px}
 }
+
+/* ================= School Arcade Upgrade ================= */
+.sndbtn{font-size:16px;padding:6px 11px}
+body.out .sndbtn{margin-left:auto}
+/* arcade hub */
+.arcnote{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;background:linear-gradient(135deg,#12305a55,#0f3a2655);border:1px solid #2f6bff44;border-radius:14px;padding:10px 14px;font-size:13px;color:#d3dde8;margin-bottom:12px}
+.luckchip{background:#0f2a1e;border:1px solid #12c26a88;color:#9ff5c8;border-radius:99px;padding:4px 11px;font-weight:700;white-space:nowrap}
+.luckchip:hover{box-shadow:var(--glowG)}
+.archub{display:grid;gap:10px;margin-bottom:12px}
+.hubsec h3{margin:0 0 6px;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px}
+.hubrow{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}
+.hubchip{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:8px;align-items:center;text-align:left;min-width:150px;padding:8px 12px;border-radius:12px;background:linear-gradient(160deg,#16202b,#10161d);border:1px solid #22303e;transition:.2s}
+.hubchip span{grid-row:1/3;font-size:22px}.hubchip b{font-size:13px;white-space:nowrap}.hubchip small{color:#ffe08a;font-size:11px;font-weight:700}
+.hubchip:hover,.hubchip:focus-visible{border-color:#ffc542;box-shadow:var(--glowY);transform:translateY(-2px);outline:none}
+.cats{margin:4px 0 8px}
+.pbbar{display:inline-flex;gap:6px;align-items:center;margin:2px 0 12px;padding:6px 12px;border-radius:99px;background:#2b2410;border:1px solid #ffc54255;color:#ffe08a;font-size:13px}
+.pbbar b{color:#fff}
+/* top-score lists */
+.hs{margin-top:14px}.hs h3{margin:0 0 6px;font-size:14px}
+.hs ol{margin:0;padding:0;list-style:none;counter-reset:hs;display:grid;gap:3px}
+.hs li{counter-increment:hs;display:flex;gap:8px;justify-content:space-between;background:var(--panel2);border-radius:8px;padding:5px 10px;font-size:13px}
+.hs li:not(.mutecell)::before{content:counter(hs);color:var(--mut);width:16px}
+.hs li span{flex:1}.hs li.me{background:#0f2a1e;box-shadow:inset 0 0 0 1px #12c26a88}
+.pips i.bad{background:radial-gradient(circle,#ff9aa4,#ff4d5e);border-color:#ff4d5e}
+/* Bell Rush */
+.bellpad{width:min(320px,80vw);aspect-ratio:1;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  background:radial-gradient(circle at 40% 35%,#24324a,#0d141d 70%);border:6px solid #2a3a4d;color:#fff;font-size:20px;font-weight:900;transition:transform .1s,background .2s,border-color .2s,box-shadow .2s}
+.bellpad .bellemoji{font-size:84px;transition:transform .2s;filter:grayscale(.6)}
+.bellpad:not(:disabled):active{transform:scale(.96)}
+.bellpad.wait{border-color:#2f6bff;box-shadow:0 0 0 6px #2f6bff22}
+.bellpad.ring{background:radial-gradient(circle at 40% 35%,#ffe08a,#f5a623 70%);border-color:#fff;color:#1a1200;box-shadow:0 0 60px #ffc542cc}
+.bellpad.ring .bellemoji{filter:none;animation:ring .18s ease-in-out infinite alternate}
+@keyframes ring{from{transform:rotate(-16deg)}to{transform:rotate(16deg)}}
+.bellpad.good{border-color:#12c26a;box-shadow:0 0 40px #12c26a88}.bellpad.good .bellemoji{filter:none}
+.bellpad.bad{border-color:#ff4d5e;box-shadow:0 0 40px #ff4d5e88}
+.bellpad.done{border-color:#ffc542;box-shadow:0 0 40px #ffc54288}.bellpad.done .bellemoji{filter:none}
+/* Classroom Memory */
+.mgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;width:min(100%,440px)}
+.mcard{position:relative;aspect-ratio:3/4;perspective:600px;border-radius:12px}
+.mcard>span{position:absolute;inset:0;border-radius:12px;display:grid;place-items:center;backface-visibility:hidden;transition:transform .35s ease}
+.mback{background:linear-gradient(160deg,#2f6bff,#12348f);border:2px solid #5b8cff;box-shadow:0 4px 0 #0b2160}.mback img{width:55%}
+.mface{background:#f3f6fa;font-size:clamp(28px,7vw,40px);transform:rotateY(180deg);border:2px solid #fff}
+.mcard.up .mback{transform:rotateY(180deg)}.mcard.up .mface{transform:rotateY(0)}
+.mcard:not(:disabled):not(.up):hover .mback{filter:brightness(1.2);box-shadow:0 6px 0 #0b2160,0 0 18px #5b8cffaa}
+.mcard.matched .mface{border-color:#12c26a;box-shadow:0 0 18px #12c26a99;background:#e9fff3}
+.mcard.nope .mface{border-color:#ff4d5e;animation:shake .4s}
+/* Seahawk Trivia */
+.tq{width:100%;max-width:560px}
+.tboard{background:#163d2a;border:10px solid #7a4a1c;border-radius:12px;padding:22px 18px;min-height:120px;display:grid;place-items:center;text-align:center;box-shadow:inset 0 0 30px #0008}
+.tboard h3{margin:0;font-size:20px;color:#f3f6fa;font-family:"Comic Sans MS","Chalkboard SE",system-ui,sans-serif}
+.tbar{height:8px;border-radius:99px;background:#1d2733;margin:12px 0;overflow:hidden}
+.tbar i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#ff4d5e,#ffc542,#12c26a)}
+.tans{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tbtn{display:flex;gap:10px;align-items:center;text-align:left;padding:12px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);font-weight:700;transition:.15s}
+.tbtn span{display:grid;place-items:center;flex:none;width:28px;height:28px;border-radius:50%;background:#1b4fd8;font-weight:900}
+.tbtn:not(:disabled):hover,.tbtn:focus-visible{border-color:#2f6bff;box-shadow:var(--glowB);outline:none}
+.tbtn.right{border-color:#12c26a;background:#0f2a1e;box-shadow:var(--glowG)}.tbtn.right span{background:#12c26a}
+.tbtn.wrong{border-color:#ff4d5e;background:#3a1018;animation:shake .4s}.tbtn.wrong span{background:#ff4d5e}
+/* Luck Lab */
+.luckinfo{line-height:1.55;margin-bottom:14px;border-color:#12c26a55}
+.luckgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.luckcard{display:grid;gap:4px;text-align:left;padding:14px;border-radius:14px;background:linear-gradient(160deg,#16202b,#10161d);border:1px solid #22303e;transition:.2s}
+.luckcard .le{font-size:30px}.luckcard b{font-size:15px}.luckcard small{color:var(--mut);font-size:12px;line-height:1.35}
+.luckcard .lm{font-style:normal;font-size:11px;color:#ffe08a;font-weight:700}
+.luckcard:hover,.luckcard:focus-visible{transform:translateY(-3px);border-color:#2f6bff;outline:none}
+.luckcard.on{border-color:#12c26a;background:linear-gradient(160deg,#0f3a26,#0e2350);box-shadow:var(--glowG)}
+.lucktest{margin-top:14px;text-align:center}.lucktest .btn{display:inline-block;width:auto;padding:12px 28px}
+@media(max-width:760px){
+  .tans{grid-template-columns:1fr}
+  .mgrid{gap:7px}
+  .luckgrid{grid-template-columns:1fr 1fr}
+  .arcnote{font-size:12px}
+}
