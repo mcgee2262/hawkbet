@@ -12,7 +12,7 @@ const INVITE_CODE = process.env.INVITE_CODE || ''; // if set, signups must inclu
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(path.dirname(process.env.DB_PATH || path.join(__dirname, 'data', 'x')), 'backups');
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'hawkbet.db');
 const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || '').toLowerCase(); // if set, only this username is admin; otherwise the first account is
-const MAX_BET = 1000, START_BAL = 1000, CLAIM_AMT = 100, CLAIM_BELOW = 100, CLAIM_EVERY_MS = 24 * 3600e3;
+const START_BAL = 1000, MAX_BAL = 1e15, CLAIM_AMT = 100, CLAIM_BELOW = 100, CLAIM_EVERY_MS = 24 * 3600e3;
 const SESSION_MS = 30 * 24 * 3600e3;
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -63,7 +63,7 @@ const bad = (msg, status = 400) => { throw new HttpError(status, msg); };
 const now = () => Date.now();
 function tx(fn) { db.exec('BEGIN IMMEDIATE'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } }
 function adjust(uid, delta, kind, ref = null) { // the only place a balance changes
-  const u = db.prepare('SELECT balance FROM users WHERE id=?').get(uid), nb = u.balance + delta;
+  const u = db.prepare('SELECT balance FROM users WHERE id=?').get(uid), nb = Math.min(MAX_BAL, u.balance + delta); // ceiling keeps numbers exact
   if (nb < 0) bad('Not enough Hawk Bucks');
   db.prepare('UPDATE users SET balance=? WHERE id=?').run(nb, uid);
   db.prepare('INSERT INTO txns(user_id,delta,kind,ref,balance,ts) VALUES(?,?,?,?,?,?)').run(uid, delta, kind, ref, nb, now());
@@ -71,6 +71,7 @@ function adjust(uid, delta, kind, ref = null) { // the only place a balance chan
 }
 const balanceOf = uid => db.prepare('SELECT balance FROM users WHERE id=?').get(uid).balance;
 function int(v, lo, hi, name) { if (!Number.isInteger(v) || v < lo || v > hi) bad(`${name} must be a whole number from ${lo} to ${hi}`); return v; }
+const stake = (v, name = 'Bet') => { if (!Number.isInteger(v) || v < 1 || v > MAX_BAL) bad(`${name} must be a whole number of at least 1`); return v; }; // no bet limit beyond your balance
 const rnd = () => crypto.randomBytes(6).readUIntBE(0, 6) / 2 ** 48;
 
 /* ---------- auth ---------- */
@@ -118,7 +119,7 @@ const POWER = { 2: 3, 3: 5, 4: 10, 5: 20, 6: 37.5 };
 const FLEX = { 3: { 3: 2.25, 2: 1.25 }, 4: { 4: 5, 3: 1.5 }, 5: { 5: 10, 4: 2, 3: 0.4 }, 6: { 6: 25, 5: 2, 4: 0.4 } };
 
 function placeSlip(ctx) {
-  const { mode, picks } = ctx.body, entry = int(ctx.body.entry, 1, MAX_BET, 'Entry');
+  const { mode, picks } = ctx.body, entry = stake(ctx.body.entry, 'Entry');
   if (!['power', 'flex'].includes(mode)) bad('Bad mode');
   if (!Array.isArray(picks) || picks.length < 2 || picks.length > 6) bad('Pick 2 to 6 players/teams');
   if (mode === 'flex' && picks.length < 3) bad('Flex needs at least 3 picks');
@@ -211,7 +212,7 @@ const stCrossP = st => st.p ?? CROSS_P[st.diff]; // rounds started before luck e
 
 function activeRound(uid, game) { return db.prepare("SELECT * FROM rounds WHERE user_id=? AND game=? AND status='active'").get(uid, game); }
 function startRound(ctx, game, state) {
-  const bet = int(ctx.body.bet, 1, MAX_BET, 'Bet');
+  const bet = stake(ctx.body.bet);
   if (activeRound(ctx.user.id, game)) bad('Finish your current round first', 409);
   const id = Number(db.prepare('INSERT INTO rounds(user_id,game,bet,state,created) VALUES(?,?,?,?,?)').run(ctx.user.id, game, bet, JSON.stringify(state), now()).lastInsertRowid);
   return { id, bet, balance: adjust(ctx.user.id, -bet, game + '_bet', id) };
@@ -225,11 +226,11 @@ const live = (ctx, game) => { const r = activeRound(ctx.user.id, game); if (!r) 
 const save = (r, st) => db.prepare('UPDATE rounds SET state=? WHERE id=?').run(JSON.stringify(st), r.id);
 
 const arcade = {
-  config: ctx => ({ maxBet: MAX_BET, cross: Object.fromEntries(Object.keys(CROSS_P).map(d => [d, Array.from({ length: LANES }, (_, i) => crossMult(i + 1, crossP(d, luckK(ctx.user))))])) }),
+  config: ctx => ({ maxBet: null, cross: Object.fromEntries(Object.keys(CROSS_P).map(d => [d, Array.from({ length: LANES }, (_, i) => crossMult(i + 1, crossP(d, luckK(ctx.user))))])) }),
   plinkoTable: ctx => { const rows = int(+ctx.url.searchParams.get('rows'), 8, 16, 'rows'), risk = ctx.url.searchParams.get('risk'); if (!PLINKO_RISK[risk]) bad('Bad risk'); return { mults: plinkoMults(rows, risk) }; },
   plinko: ctx => tx(() => {
     const rows = int(ctx.body.rows, 8, 16, 'Rows'), risk = ctx.body.risk; if (!PLINKO_RISK[risk]) bad('Bad risk');
-    const bet = int(ctx.body.bet, 1, MAX_BET, 'Bet'); adjust(ctx.user.id, -bet, 'plinko_bet');
+    const bet = stake(ctx.body.bet); adjust(ctx.user.id, -bet, 'plinko_bet');
     const path = Array.from({ length: rows }, () => crypto.randomInt(2)), k = path.reduce((a, b) => a + b, 0), mult = plinkoMults(rows, risk)[k], payout = Math.round(bet * mult);
     const id = Number(db.prepare("INSERT INTO rounds(user_id,game,bet,state,status,mult,payout,created) VALUES(?,?,?,?,?,?,?,?)").run(ctx.user.id, 'plinko', bet, JSON.stringify({ rows, risk, path }), 'done', mult, payout, now()).lastInsertRowid);
     const balance = payout ? adjust(ctx.user.id, payout, 'plinko_win', id) : balanceOf(ctx.user.id);
@@ -275,7 +276,7 @@ const arcade = {
 };
 
 /* ---------- more arcade games ---------- */
-function oneShot(ctx, game, state, mult, bet = int(ctx.body.bet, 1, MAX_BET, 'Bet')) { // bet, decide and pay in one transaction
+function oneShot(ctx, game, state, mult, bet = stake(ctx.body.bet)) { // bet, decide and pay in one transaction
   adjust(ctx.user.id, -bet, game + '_bet');
   const payout = Math.round(bet * mult);
   const id = Number(db.prepare("INSERT INTO rounds(user_id,game,bet,state,status,mult,payout,created) VALUES(?,?,?,?,'done',?,?,?)").run(ctx.user.id, game, bet, JSON.stringify(state), mult, payout, now()).lastInsertRowid);
@@ -354,8 +355,7 @@ Object.assign(arcade, {
   roulette: ctx => tx(() => {
     const bets = ctx.body.bets; if (!Array.isArray(bets) || !bets.length || bets.length > 40) bad('Place 1 to 40 bets');
     let total = 0;
-    for (const b of bets) { if (!ROULETTE_OK[b.type] || !ROULETTE_OK[b.type](b.value)) bad('Bad bet'); int(b.amount, 1, MAX_BET, 'Chip'); total += b.amount; }
-    if (total > MAX_BET) bad(`Total bet can't be over ${MAX_BET}`);
+    for (const b of bets) { if (!ROULETTE_OK[b.type] || !ROULETTE_OK[b.type](b.value)) bad('Bad bet'); stake(b.amount, 'Chip'); total += b.amount; }
     const n = crypto.randomInt(37), won = bets.reduce((a, b) => a + b.amount * rouletteMult(b, n), 0);
     return { n, color: rColor(n), total, ...oneShot(ctx, 'roulette', { bets, n }, won / total, total) };
   }),
@@ -393,6 +393,7 @@ Object.assign(arcade, {
   }),
 });
 const VIEWS = {
+  rocket: (r, st) => ({ id: r.id, bet: r.bet, auto: st.auto, flying: now() - st.t0, rate: ROCKET_RATE }),
   mines: (r, st) => ({ id: r.id, bet: r.bet, m: st.m, opened: st.opened, mult: minesMult(st.opened.length, st.m) }),
   cross: (r, st) => ({ id: r.id, bet: r.bet, diff: st.diff, at: st.at, mult: crossMult(st.at, stCrossP(st)) }),
   flip: (r, st) => ({ id: r.id, bet: r.bet, streak: st.streak, mult: st.streak ? flipMult(st.streak, st.p) : 0 }),
@@ -407,6 +408,47 @@ arcade.active = ctx => {
 const baseConfig = arcade.config;
 arcade.config = ctx => ({ ...baseConfig(ctx), luck: { k: luckK(ctx.user), flipP: streakP(ctx), rpsP: streakP(ctx) }, skillTiers: SKILL_TIERS, slots: { pays: Object.fromEntries(Object.entries(SLOT).map(([k, [, p]]) => [k, p])), rtp: SLOT_RTP }, flipMax: FLIP_MAX, rpsMax: RPS_MAX });
 
+/* ---------- Seahawk Launch (crash): cash out before the rocket blows ----------
+   The server picks the crash point and keeps the clock. The browser never learns the crash point early:
+   /watch holds its reply until the next event (auto cash-out or crash). */
+const ROCKET_RATE = Number(process.env.ROCKET_RATE) || 0.0001, ROCKET_LIFTOFF = 700, ROCKET_MAX = 1000; // multiplier = e^(rate·ms): 2x ≈ 7s, 10x ≈ 23s
+const rocketAt = ms => Math.floor(Math.exp(ROCKET_RATE * Math.max(0, ms)) * 100) / 100;
+const rocketTime = m => Math.log(m) / ROCKET_RATE; // ms after liftoff when the multiplier reaches m
+function rocketSettle(r, st) { // settle a round whose outcome is already decided by the clock; returns null if still flying
+  if (r.status !== 'active') return null;
+  const t = now() - st.t0;
+  if (st.auto && st.auto < st.c && t >= rocketTime(st.auto)) return { event: 'cashed', mult: st.auto, auto: true, ...finishRound(r, 'cashed', st.auto) };
+  if (t >= rocketTime(st.c)) return { event: 'crash', crash: st.c, ...finishRound(r, 'lost', 0) };
+  return null;
+}
+const rocketRound = (ctx, id) => { const r = db.prepare("SELECT * FROM rounds WHERE id=? AND user_id=? AND game='rocket'").get(id, ctx.user.id); if (!r) bad('No such flight', 404); return r; };
+Object.assign(arcade, {
+  rocketStart: ctx => tx(() => {
+    const old = activeRound(ctx.user.id, 'rocket'); if (old && !rocketSettle(old, JSON.parse(old.state))) bad('Your rocket is still flying', 409);
+    const auto = ctx.body.auto == null || ctx.body.auto === '' ? null : Math.round(Number(ctx.body.auto) * 100) / 100;
+    if (auto !== null && !(auto >= 1.01 && auto <= ROCKET_MAX)) bad(`Auto cash-out must be 1.01x to ${ROCKET_MAX}x`);
+    const c = Math.min(ROCKET_MAX, Math.max(1, Math.floor(0.99 / (1 - rnd()) * 100) / 100)); // P(crash >= x) = 0.99 / x, so RTP is 99%
+    const s = startRound(ctx, 'rocket', { c, t0: now() + ROCKET_LIFTOFF, auto });
+    return { ...s, auto, liftoff: ROCKET_LIFTOFF, rate: ROCKET_RATE };
+  }),
+  rocketCash: ctx => tx(() => {
+    const r = activeRound(ctx.user.id, 'rocket'); if (!r) bad('No rocket in the air', 409);
+    const st = JSON.parse(r.state), done = rocketSettle(r, st); if (done) return done; // too late: it already crashed or auto-cashed
+    const m = rocketAt(now() - st.t0);
+    return { event: 'cashed', mult: m, ...finishRound(r, 'cashed', m) };
+  }),
+  rocketWatch: ctx => { // resolves at the next event; called again after a cash-out to learn where it crashed
+    const id = int(ctx.body.id, 1, 1e12, 'id'), r = rocketRound(ctx, id), st = JSON.parse(r.state);
+    const autoFirst = r.status === 'active' && st.auto && st.auto < st.c, at = st.t0 + rocketTime(autoFirst ? st.auto : st.c);
+    return new Promise(ok => setTimeout(ok, Math.max(0, at - now()) + 5)).then(() => tx(() => {
+      const fresh = rocketRound(ctx, id), done = rocketSettle(fresh, st);
+      if (done) return { ...done, crash: done.event === 'crash' ? st.c : undefined };
+      return { event: 'crash', crash: st.c, already: true, balance: balanceOf(ctx.user.id) }; // you'd cashed out before this
+    }));
+  },
+  rocketHistory: ctx => ({ crashes: db.prepare("SELECT state FROM rounds WHERE user_id=? AND game='rocket' AND status!='active' ORDER BY id DESC LIMIT 12").all(ctx.user.id).map(x => JSON.parse(x.state).c) }),
+});
+
 /* ---------- skill games: Bell Rush, Classroom Memory, Seahawk Trivia ----------
    Score-only (no Hawk Bucks at stake). The server holds all hidden state and keeps the clock. */
 const SKILL_GAMES = ['bell', 'memory', 'trivia'];
@@ -414,7 +456,7 @@ const SKILL_GAMES = ['bell', 'memory', 'trivia'];
 const SKILL_TIERS = { bell: [[4100, 3], [3800, 2], [3500, 1.5], [3000, 1]], memory: [[2600, 3], [2300, 2], [2000, 1.5], [1700, 1]], trivia: [[900, 3], [750, 2], [600, 1.5], [450, 1]] };
 const skillMult = (game, score) => (SKILL_TIERS[game].find(([min]) => score >= min) || [0, 0])[1];
 function skillStart(ctx, game, state) {
-  const bet = ctx.body.bet == null || ctx.body.bet === 0 ? 0 : int(ctx.body.bet, 1, MAX_BET, 'Bet'); // 0 = free practice
+  const bet = ctx.body.bet == null || ctx.body.bet === 0 ? 0 : stake(ctx.body.bet); // 0 = free practice
   db.prepare("UPDATE rounds SET status='abandoned' WHERE user_id=? AND game=? AND status='active'").run(ctx.user.id, game); // restarting forfeits an unfinished round
   const id = Number(db.prepare('INSERT INTO rounds(user_id,game,bet,state,created) VALUES(?,?,?,?,?)').run(ctx.user.id, game, bet, JSON.stringify(state), now()).lastInsertRowid);
   return { id, bet, balance: bet ? adjust(ctx.user.id, -bet, game + '_bet', id) : balanceOf(ctx.user.id) };
@@ -604,6 +646,10 @@ const routes = {
   'POST /api/arcade/memory/flip': need(arcade.memoryFlip),
   'POST /api/arcade/trivia/start': need(arcade.triviaStart),
   'POST /api/arcade/trivia/answer': need(arcade.triviaAnswer),
+  'POST /api/arcade/rocket/start': need(arcade.rocketStart),
+  'POST /api/arcade/rocket/cashout': need(arcade.rocketCash),
+  'POST /api/arcade/rocket/watch': need(arcade.rocketWatch),
+  'GET /api/arcade/rocket/history': need(arcade.rocketHistory),
 };
 
 const FILES = { '/': 'index.html', '/index.html': 'index.html', '/style.css': 'style.css', '/app.js': 'app.js', '/logo.svg': 'logo.svg' };

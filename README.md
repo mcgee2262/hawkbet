@@ -24,7 +24,7 @@ Zero-dependency Node server (needs Node 22.5+ for built-in SQLite). No `npm inst
 - Hawk Bucks have no cash value: no buying, no cash-out, no prizes for credits.
 
 ## Arcade
-- 13 games: 10 classic Hawk Bucks games plus 3 score-only skill games (Bell Rush, Classroom Memory, Seahawk Trivia) with personal bests and top-10 lists.
+- 14 games: 11 classic Hawk Bucks games (including 🚀 Seahawk Launch, a crash game) plus 3 score-only skill games (Bell Rush, Classroom Memory, Seahawk Trivia) with personal bests and top-10 lists.
 - 🍀 Luck Lab (Normal or 1–10) changes win chances in Seymour Flip, Hallway RPS, Seahawk Crossing, Scoreboard Roll and Hail Mary (×0.6 at 1 up to ×1.5 at 10). Payouts shrink to match, so average payback is the same at every level. Skill games can be played free or for Hawk Bucks, paid by score tier.
 - Sound effects are generated with the Web Audio API (no files). Toggle with the 🔊 button; the choice is saved in the browser.
 

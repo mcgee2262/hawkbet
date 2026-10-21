@@ -237,16 +237,16 @@ function renderSlip() {
   const ids = Object.keys(pick), n = ids.length, el = $('#slip');
   if (!n) { slipOpen = false; el.classList.add('hidden'); renderSlipBar(); return; }
   if (n < 3 && mode === 'flex') mode = 'power';
-  const top = topPayout(mode, n), ok = () => n >= 2 && entry >= 1 && entry <= Math.min(1000, U.balance);
+  const top = topPayout(mode, n), ok = () => n >= 2 && entry >= 1 && entry <= U.balance;
   el.classList.remove('hidden');
   el.innerHTML = `<header><h2 style="margin:0">Your slip</h2><button class="x" id="sx">✕</button></header>
     ${ids.map(id => { const p = propById(id); return `<div class="srow"><div><b>${esc(p.who)}</b><small>${esc(p.stat)} · ${esc(p.vs)}</small></div><div class="r"><span class="tag ${pick[id]}">${pick[id] === 'more' ? '▲ More' : '▼ Less'} ${p.line}</span><button class="x" data-rm="${id}">✕</button></div></div>`; }).join('')}
     <div class="seg"><button data-mode="power" class="${mode === 'power' ? 'on' : ''}">Power Play</button><button data-mode="flex" class="${mode === 'flex' ? 'on' : ''}" ${n < 3 ? 'disabled' : ''}>Flex Play</button></div>
     <div class="note" style="margin:-4px 0 8px">${mode === 'power' ? 'Hit every pick to win.' : 'Miss one and still get paid.'}${n < 2 ? ' Pick at least 2.' : ''}</div>
-    <div class="entry"><input id="ent" type="number" min="1" max="1000" value="${entry}"><button class="chip" data-e="10">10</button><button class="chip" data-e="25">25</button><button class="chip" data-e="100">100</button></div>
+    <div class="entry"><input id="ent" type="number" min="1" value="${entry}"><button class="chip" data-e="10">10</button><button class="chip" data-e="25">25</button><button class="chip" data-e="100">100</button></div>
     <div class="pay"><span>To win</span><span>${top ? fmt(entry * top) : '—'} 🪙 ${top ? `(${top}x)` : ''}</span></div>
     <button class="btn" id="place" ${ok() ? '' : 'disabled'}>Place lineup</button>
-    <div class="note">Max entry 1,000. Hawk Bucks have no cash value and can't be bought or cashed out.</div>`;
+    <div class="note">No entry limit beyond your balance. Hawk Bucks have no cash value and can't be bought or cashed out.</div>`;
   $('#sx').onclick = () => { slipOpen = false; el.classList.add('hidden'); renderSlipBar(); };
   el.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { delete pick[b.dataset.rm]; if (view === 'board') renderBoard(nav, true); renderSlip(); renderSlipBar(); });
   el.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { if (!b.disabled) { mode = b.dataset.mode; renderSlip(); } });
@@ -311,34 +311,78 @@ async function renderAdmin(my) {
 /* ---------- arcade ---------- */
 let stopFns = [];
 function stopGames() { stopFns.forEach(f => f()); stopFns = []; if (pending) { pending = 0; showBal(); } }
-const GAMES = [['plinko', '🔵 Hawk Drop'], ['mines', '🔐 Locker Hunt'], ['cross', '🚌 Seahawk Crossing'], ['flip', '🪙 Seymour Flip'], ['dice', '🎲 Scoreboard Roll'], ['limbo', '🏈 Hail Mary'], ['slots', '🎰 Seahawk Slots'], ['roulette', '🎡 Lakes Roulette'], ['rps', '✊ Hallway RPS'], ['bj', '🃏 Hawk 21'], ['bell', '🔔 Bell Rush'], ['memory', '🧠 Classroom Memory'], ['trivia', '❓ Seahawk Trivia']];
-const GAME_FNS = { plinko, mines, cross, flip, dice, limbo, slots, roulette, rps, bj, bell, memory, trivia }; // every game that can launch
-const CATS = ['All', 'Skill', 'Reaction', 'Memory', 'Trivia', 'Classic'];
-const GAME_CATS = { bell: ['Skill', 'Reaction'], memory: ['Skill', 'Memory'], trivia: ['Skill', 'Trivia'] }; // anything not listed is a Classic chance game
-const catsOf = id => GAME_CATS[id] || ['Classic'];
-let arcCat = 'All';
+const GAMES = [['plinko', '🔵 Hawk Drop'], ['mines', '🔐 Locker Hunt'], ['cross', '🚌 Seahawk Crossing'], ['flip', '🪙 Seymour Flip'], ['dice', '🎲 Scoreboard Roll'], ['limbo', '🏈 Hail Mary'], ['slots', '🎰 Seahawk Slots'], ['roulette', '🎡 Lakes Roulette'], ['rps', '✊ Hallway RPS'], ['bj', '🃏 Hawk 21'], ['rocket', '🚀 Seahawk Launch'], ['bell', '🔔 Bell Rush'], ['memory', '🧠 Classroom Memory'], ['trivia', '❓ Seahawk Trivia']];
+const GAME_FNS = { plinko, mines, cross, flip, dice, limbo, slots, roulette, rps, bj, rocket, bell, memory, trivia }; // every game that can launch
+const CATS = [['all', 'All'], ['featured', '⭐ Featured'], ['recent', '🕘 Recent'], ['classic', '🎰 Classic'], ['skill', '🧠 Skill']];
+const SKILL_IDS = new Set(['bell', 'memory', 'trivia']);
+let arcCat = 'all';
 async function renderArcade(my) {
   if (!CFG || CFG.user !== U.username) CFG = { ...(await api('GET', '/arcade/config')), user: U.username };
   STATS = await api('GET', '/arcade/stats').catch(() => STATS); if (my !== nav) return;
-  const list = gameList(), byId = Object.fromEntries(list.map(g => [g.id, g])), shown = list.filter(g => arcCat === 'All' || catsOf(g.id).includes(arcCat));
+  const list = gameList(), byId = Object.fromEntries(list.map(g => [g.id, g]));
   const week = Math.floor((Date.now() / 864e5 + 4) / 7), featured = [...new Set([0, 1, 2].map(k => list[(week * 3 + k * 5) % list.length]))]; // rotates every Monday
-  const recent = STATS.recent.map(id => byId[id]).filter(Boolean), bests = list.filter(g => STATS.best[g.id]);
-  const chip = (g, sub) => `<button class="hubchip" data-open="${g.id}"><span>${esc(g.emoji)}</span><b>${esc(g.title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</button>`;
-  $('#app').innerHTML = `<h1>Seahawk Arcade</h1>
-    <div class="arcnote"><span>🎟️ Hawk Bucks are pretend. The arcade is just for fun: no money, no prizes, nothing to cash out.</span><a class="luckchip" href="#luck">${luckBadge()}</a></div>
-    <div class="archub"><div class="hubsec"><h3>⭐ Featured this week</h3><div class="hubrow">${featured.map(g => chip(g, g.tag)).join('')}</div></div>
-      ${recent.length ? `<div class="hubsec"><h3>🕘 Recently played</h3><div class="hubrow">${recent.map(g => chip(g)).join('')}</div></div>` : ''}
-      ${bests.length ? `<div class="hubsec"><h3>🏆 Your best scores</h3><div class="hubrow">${bests.map(g => chip(g, bestText(g.id))).join('')}</div></div>` : ''}</div>
-    <div class="pills cats" role="group" aria-label="Filter games">${CATS.map(c => `<button class="pill ${c === arcCat ? 'on' : ''}" data-cat="${c}" aria-pressed="${c === arcCat}">${c}</button>`).join('')}</div>
-    <div class="sub">${shown.map(g => `<button class="pill ${g.id === game ? 'on' : ''}" data-g="${g.id}">${esc(g.emoji)} ${esc(g.title)}</button>`).join('')}</div>
-    <div class="pbbar" id="pb"></div><div id="gm"></div>`;
+  const shown = { all: list, featured, recent: STATS.recent.map(id => byId[id]).filter(Boolean), classic: list.filter(g => !SKILL_IDS.has(g.id)), skill: list.filter(g => SKILL_IDS.has(g.id)) }[arcCat] || list;
+  const cur = byId[game] || list[0];
+  $('#app').innerHTML = `<div class="archead"><h1>Seahawk Arcade</h1><a class="luckchip" href="#luck">${luckBadge()}</a></div>
+    <div class="pills cats" role="group" aria-label="Filter games">${CATS.map(([k, l]) => `<button class="pill ${k === arcCat ? 'on' : ''}" data-cat="${k}" aria-pressed="${k === arcCat}">${l}</button>`).join('')}</div>
+    <div class="gstrip">${shown.map(g => `<button class="gtile ${g.id === game ? 'on' : ''}" data-g="${g.id}" aria-label="${esc(g.title)}"><span>${esc(g.emoji)}</span><b>${esc(g.title)}</b><small>${esc(bestText(g.id) ? '🏆 ' + bestText(g.id) : g.tag)}</small></button>`).join('') || '<div class="mutecell gempty">Nothing here yet – play a game first!</div>'}</div>
+    <div class="gamehead"><span class="ge">${esc(cur.emoji)}</span><div class="gt"><h2>${esc(cur.title)}</h2><small>${esc(cur.desc)}</small></div><div class="pbbar" id="pb"></div></div>
+    <div id="gm"></div>
+    <div class="arcfoot">🎟️ Hawk Bucks are pretend: no money, no prizes, nothing to cash out.</div>`;
   document.querySelectorAll('[data-g]').forEach(b => b.onclick = () => { game = b.dataset.g; go(); });
-  document.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => { arcCat = b.dataset.cat; const first = list.find(g => arcCat === 'All' || catsOf(g.id).includes(arcCat)); if (first && !catsOf(game).includes(arcCat) && arcCat !== 'All') game = first.id; go(); });
-  document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { game = b.dataset.open; go(); });
+  document.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => { arcCat = b.dataset.cat; go(); });
+  const on = $('.gtile.on'); if (on) on.scrollIntoView({ block: 'nearest', inline: 'center' });
   paintPB();
   await (GAME_FNS[game] || plinko)($('#gm'), my);
+  if (my === nav) bindKeys(game);
 }
-const betBox = (v = 10) => `<label>Bet (Hawk Bucks, max ${CFG.maxBet})</label><input id="bet" type="number" min="1" max="${CFG.maxBet}" value="${v}">`;
+// Each key lists buttons to try in order; the first visible, enabled one gets pressed. "last:" repeats your last pick.
+const ANS = Object.fromEntries([...'1234'].map((k, i) => [k, [`.tbtn[data-c="${i}"]`]]).concat([...'abcd'].map((k, i) => [k, [`.tbtn[data-c="${i}"]`]])));
+const GAME_KEYS = {
+  plinko: { Space: ['#drop'], hint: 'Space drop a ball' },
+  mines: { Space: ['#start', '#cash'], hint: 'Space start / cash out' },
+  cross: { Space: ['#start', '#go'], c: ['#cash'], hint: 'Space start / next lane · C cash out' },
+  flip: { Space: ['#start', 'last:[data-call]'], h: ['[data-call="hawk"]'], s: ['[data-call="sl"]'], c: ['#cash'], hint: 'Space start / repeat last call · H Seymour · S SL · C cash out' },
+  dice: { Space: ['#roll'], hint: 'Space roll' },
+  limbo: { Space: ['#throw'], hint: 'Space throw' },
+  slots: { Space: ['#spin'], hint: 'Space spin' },
+  roulette: { Space: ['#spin'], x: ['#clr'], hint: 'Space spin · X clear chips' },
+  rps: { Space: ['#start', 'last:[data-t]'], r: ['[data-t="rock"]'], p: ['[data-t="paper"]'], s: ['[data-t="scissors"]'], c: ['#cash'], hint: 'Space start / repeat last throw · R rock · P paper · S scissors · C cash out' },
+  bj: { Space: ['#deal', '#hit'], h: ['#hit'], s: ['#stand'], d: ['#dbl'], hint: 'Space deal / hit · H hit · S stand · D double' },
+  rocket: { Space: ['#launch', '#cash'], hint: 'Space launch / cash out' },
+  bell: { Space: ['#pad', '#start'], hint: 'Space start / tap the bell' },
+  memory: { Space: ['#start'], hint: 'Space start · Tab + Enter flips a card' },
+  trivia: { Space: ['#start'], ...ANS, hint: 'Space start · 1–4 or A–D answer' },
+};
+const usable = el => el && !el.disabled && !el.closest('.hidden') && el.offsetParent !== null;
+function bindKeys(id) {
+  const map = GAME_KEYS[id], root = $('#gm'); if (!map || !root) return;
+  const last = {};
+  root.addEventListener('click', e => { const b = e.target.closest('[data-call],[data-t]'); if (b) last[b.dataset.call ? '[data-call]' : '[data-t]'] = b; });
+  const ctrl = root.querySelector('.ctrl'); if (ctrl) ctrl.insertAdjacentHTML('beforeend', `<div class="keyhint">⌨️ ${esc(map.hint)}</div>`);
+  const h = e => {
+    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !root.isConnected) return;
+    const k = e.code === 'Space' ? 'Space' : e.key.toLowerCase(), t = e.target;
+    if (t.matches && t.matches('input,textarea,select') && k !== 'Space') return; // let people type in the bet box
+    if (t.matches && t.matches('input:not([type=number]),textarea')) return;
+    const list = map[k]; if (!list || k === 'hint') return;
+    for (const sel of list) {
+      const el = sel.startsWith('last:') ? (usable(last[sel.slice(5)]) ? last[sel.slice(5)] : root.querySelector(sel.slice(5))) : root.querySelector(sel);
+      if (usable(el)) {
+        e.preventDefault(); if (t instanceof HTMLElement && t.matches('button')) t.blur(); // stop the focused button from also firing
+        el.click(); el.classList.add('pressed'); setTimeout(() => el.classList.remove('pressed'), 150); return;
+      }
+    }
+    if (k === 'Space') e.preventDefault(); // never scroll the page from inside a game
+  };
+  document.addEventListener('keydown', h); stopFns.push(() => document.removeEventListener('keydown', h));
+}
+const betBox = (v = 10) => `<label>Bet (Hawk Bucks, no limit)</label><div class="betrow"><input id="bet" type="number" min="1" value="${v}"><button class="chip" data-bq="half" title="Half">½</button><button class="chip" data-bq="double" title="Double">2×</button><button class="chip" data-bq="max" title="Bet everything">Max</button></div>`;
+document.addEventListener('click', e => { // ½ / 2× / Max quick-bet buttons
+  const b = e.target.closest('[data-bq]'), inp = $('#bet'); if (!b || !inp || !U) return;
+  const v = Math.floor(+inp.value || 0), q = b.dataset.bq;
+  inp.value = Math.max(1, Math.min(U.balance, q === 'half' ? Math.floor(v / 2) : q === 'double' ? v * 2 : U.balance));
+});
 const readBet = () => Math.floor(+$('#bet').value || 0);
 
 /* ---------- game showcase: covers + reusable carousel ---------- */
@@ -354,6 +398,7 @@ const GAME_INFO = {
   roulette: { tag: 'Table game', desc: 'Green, blue or the golden zero. Spin it like it’s the last day of finals.' },
   rps: { tag: 'Streak', desc: 'Throw hands with a Concorde District rival. Westfield has been practicing in the mirror.' },
   bj: { tag: 'Table game', desc: 'Beat Coach to 21. Coach stands on 17 and refuses to explain why.' },
+  rocket: { tag: 'Crash', desc: 'Seymour’s science-fair rocket climbs and climbs. Cash out before it takes out the bleachers.' },
   bell: { tag: 'Reaction', desc: 'The bell rings, you move. Like 7th period, but now it’s a competition.' },
   memory: { tag: 'Memory', desc: 'Match the classroom cards fast. Easier than remembering your locker combo.' },
   trivia: { tag: 'Trivia', desc: 'Seven questions, twenty seconds each. Finally, a quiz where speed counts.' },
@@ -444,6 +489,13 @@ function cover(id, emoji) { // returns an inline SVG; u keeps gradient ids uniqu
       a += pc(470, 110, -12, 'A', '♠', '#0f3fb5') + pc(580, 100, 10, 'K', '♥', '#0a8f4e');
       [[450, 360, '#1b4fd8'], [500, 372, '#f5a623'], [700, 360, '#0a8f4e']].forEach(([x, y, c]) => { for (let k = 0; k < 4; k++) a += `<ellipse cx="${x}" cy="${y - k * 10}" rx="34" ry="12" fill="${c}" stroke="#fff" stroke-width="3" stroke-dasharray="8 6"/>`; });
       a += `<text x="740" y="70" fill="#ffe08a" font-size="34" font-weight="900" text-anchor="end">21</text>`;
+      break;
+    }
+    case 'rocket': {
+      a = bg('#1d1060', '#03040a', '70%');
+      for (let k = 0; k < 40; k++) a += `<circle cx="${380 + (k * 97) % 420}" cy="${(k * 53) % 450}" r="${1 + (k % 3)}" fill="#ffffff${k % 2 ? '99' : '55'}"/>`;
+      a += `<path d="M380 420 Q 560 400 740 80" fill="none" stroke="url(#${u}g)" stroke-width="10" stroke-linecap="round" filter="url(#${u}f)" opacity=".7"/><path d="M380 420 Q 560 400 740 80" fill="none" stroke="#19e58a" stroke-width="6" stroke-linecap="round"/>`;
+      a += em(740, 80, 84, '🚀') + `<text x="560" y="250" fill="url(#${u}g)" font-size="96" font-weight="900" text-anchor="middle" filter="url(#${u}f)" opacity=".55">12.4x</text><text x="560" y="250" fill="url(#${u}g)" font-size="96" font-weight="900" text-anchor="middle">12.4x</text>`;
       break;
     }
     case 'bell': {
@@ -808,7 +860,7 @@ async function roulette(root) {
   root.innerHTML = gameShell(`<label>Chip</label><div class="chips" id="chips">${[1, 5, 10, 25, 100].map(c => `<button class="chipb ${c === chip ? 'on' : ''}" data-c="${c}">${c}</button>`).join('')}</div>
     <div class="rtable"><button class="rc gold" data-b="num:0">0</button><div class="rgrid">${Array.from({ length: 36 }, (_, i) => `<button class="rc ${rcol(i + 1)}" data-b="num:${i + 1}">${i + 1}</button>`).join('')}</div>
     <div class="rout">${OUT.map(([t, v, l]) => `<button class="rc out ${t === 'color' ? v : ''}" data-b="${t}:${v}">${l}</button>`).join('')}</div></div>
-    <div class="stats"><div><small>Total bet</small><b id="tot">0</b></div><div><small>Max</small><b>${CFG.maxBet}</b></div></div>
+    <div class="stats"><div><small>Total bet</small><b id="tot">0</b></div><div><small>Your balance</small><b>${fmt(U.balance)}</b></div></div>
     <div class="duo"><button class="btn alt" id="clr">Clear</button><button class="btn" id="spin">Spin</button></div>`,
     `<div class="wheelwrap"><div class="pointer">▼</div><div class="wheel" id="wh" style="background:conic-gradient(${WHEEL.map((n, i) => `${C[rcol(n)]} ${i * seg}deg ${(i + 1) * seg}deg`).join(',')})"></div><div class="hub" id="hub"><img src="logo.svg" alt=""></div></div>`);
   const key = (t, v) => `${t}:${v}`, total = () => Object.values(bets).reduce((a, b) => a + b, 0);
@@ -817,7 +869,7 @@ async function roulette(root) {
     $('#tot').textContent = fmt(total());
   }
   $('#chips').onclick = e => { const c = e.target.dataset.c; if (!c) return; chip = +c; root.querySelectorAll('.chipb').forEach(b => b.classList.toggle('on', b.dataset.c === c)); };
-  root.querySelector('.rtable').onclick = e => { const b = e.target.closest('[data-b]'); if (!b) return; if (total() + chip > CFG.maxBet) return toast(`Max total bet is ${CFG.maxBet}`); bets[b.dataset.b] = (bets[b.dataset.b] || 0) + chip; paint(); };
+  root.querySelector('.rtable').onclick = e => { const b = e.target.closest('[data-b]'); if (!b) return; if (total() + chip > U.balance) return toast('Not enough Hawk Bucks for that chip'); bets[b.dataset.b] = (bets[b.dataset.b] || 0) + chip; paint(); };
   $('#clr').onclick = () => { bets = {}; paint(); };
   $('#spin').onclick = act(async () => {
     if (!total()) return toast('Tap the table to place chips');
@@ -870,10 +922,11 @@ async function rps(root, my) {
 /* Blackjack: Hawk 21 */
 async function bj(root, my) {
   const RK = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' }, SU = ['♠', '♥', '♦', '♣']; let v = null, shown = { player: 0, dealer: 0 };
-  root.innerHTML = gameShell(`${betBox()}<div style="height:14px"></div><button class="btn" id="deal">Deal</button>
-    <div class="trio hidden" id="acts"><button class="btn blue" id="hit">Hit</button><button class="btn blue" id="stand">Stand</button><button class="btn gold" id="dbl">Double</button></div>
+  root.innerHTML = gameShell(`${betBox()}<div style="height:14px"></div><button class="btn bjbig" id="deal">🃏 Deal <kbd>Space</kbd></button>
     <div class="note">Beat Coach to 21. Blackjack pays 3:2, Coach stands on 17, and you can double on your first two cards.</div>`,
-    `<div class="felt"><div class="who2">Coach <b id="dt"></b></div><div class="hand2" id="dealer"></div><div class="feltlogo"><img src="logo.svg" alt="">HAWK 21</div><div class="hand2" id="player"></div><div class="who2">You <b id="pt"></b></div></div>`);
+    `<div class="felt"><div class="who2">Coach <b id="dt"></b></div><div class="hand2" id="dealer"></div><div class="feltlogo"><img src="logo.svg" alt="">HAWK 21</div><div class="hand2" id="player"></div><div class="who2">You <b id="pt"></b></div></div>
+    <div class="bjacts hidden" id="acts"><button class="btn blue" id="hit"><span>👊</span>Hit<kbd>H</kbd></button><button class="btn" id="stand"><span>✋</span>Stand<kbd>S</kbd></button><button class="btn gold" id="dbl"><span>💰</span>Double<kbd>D</kbd></button></div>
+    <button class="btn bjbig bjdeal2 hidden" id="deal2">🃏 Deal again <kbd>Space</kbd></button>`);
   const cardHtml = (c, i, isNew, hidden) => hidden ? `<div class="pc back ${isNew ? 'new' : ''}" style="--d:${i * 0.12}s"><img src="logo.svg" alt=""></div>`
     : `<div class="pc s${c.s} ${isNew ? 'new' : ''}" style="--d:${i * 0.12}s"><b>${RK[c.r] || c.r}</b><span>${SU[c.s]}</span></div>`;
   function paint(fresh) {
@@ -884,6 +937,7 @@ async function bj(root, my) {
     shown = { player: pl.length, dealer: v && v.done ? dl.length : 1 };
     $('#pt').textContent = v ? v.pt : ''; $('#dt').textContent = v ? (v.done ? v.dt : v.dt + ' + ?') : '';
     $('#deal').classList.toggle('hidden', !!live); $('#acts').classList.toggle('hidden', !live); $('#dbl').disabled = !(live && v.canDouble);
+    $('#deal2').classList.toggle('hidden', !(v && v.done));
   }
   function done(r) {
     v = r; paint(); setBal(r.balance);
@@ -894,7 +948,7 @@ async function bj(root, my) {
   if (a) { v = a; $('#res').textContent = 'Hand restored'; }
   const step = path => act(async () => { const r = await api('POST', '/arcade/bj/' + path); if (!root.isConnected) return setBal(r.balance); if (r.done) done(r); else { v = r; paint(); } });
   $('#deal').onclick = act(async () => { $('#res').textContent = ''; const r = await api('POST', '/arcade/bj/start', { bet: readBet() }); v = null; paint(true); if (r.done) { await wait(calm ? 0 : 300); if (!root.isConnected) return setBal(r.balance); done(r); } else { v = r; setBal(r.balance); paint(); } });
-  $('#hit').onclick = step('hit'); $('#stand').onclick = step('stand'); $('#dbl').onclick = step('double');
+  $('#hit').onclick = step('hit'); $('#stand').onclick = step('stand'); $('#dbl').onclick = step('double'); $('#deal2').onclick = () => $('#deal').click();
   paint();
 }
 
@@ -972,8 +1026,7 @@ async function bell(root) {
     } catch (e) { toast(e.message); } finally { busy = false; }
   }
   pad.onclick = () => { if (st && (ringing || pad.classList.contains('wait'))) tap(); };
-  const key = e => { if (e.code === 'Space' && st && root.isConnected && e.target.tagName !== 'INPUT') { e.preventDefault(); if (e.target !== pad) pad.onclick(); } };
-  document.addEventListener('keydown', key); stopFns.push(() => { tok++; document.removeEventListener('keydown', key); });
+  stopFns.push(() => { tok++; });
   skillButtons(bet => act(async () => {
     const s0 = await api('POST', '/arcade/bell/start', { bet }); if (s0.bet) setBal(s0.balance); st = {}; lockStart(true); $('#sc').textContent = '0'; $('#res').textContent = '';
     [...$('#pips').children].forEach(i => i.className = ''); pad.focus(); next();
@@ -1041,6 +1094,83 @@ async function trivia(root) {
     } else show(r.next);
   });
   loadHS('trivia');
+}
+
+/* Crash: Seahawk Launch. The browser animates the climb; the server's clock decides cash-outs and crashes. */
+async function rocket(root, my) {
+  let fl = null, loop = 0;
+  const hist = [];
+  root.innerHTML = gameShell(`${betBox()}
+    <label>Auto cash-out (optional)</label><input id="auto" type="number" min="1.01" step="0.01" placeholder="e.g. 2.00">
+    <div style="height:14px"></div><button class="btn bjbig" id="launch">🚀 Launch <kbd>Space</kbd></button>
+    <button class="btn gold bjbig hidden" id="cash">💰 Cash out <kbd>Space</kbd></button>
+    <div class="note">The multiplier climbs as Seymour’s science-fair rocket rises. Cash out before it blows. Payback is 99%: about half of all flights pass 2x, 1 in 10 pass 10x, and 1 in 100 blows up right at 1.00x.</div>`,
+    `<div class="rk" id="rk"><canvas id="rkc"></canvas><div class="rkm" id="rkm">1.00x</div><div class="rkst" id="rkst">Ready for launch</div></div><div class="rkhist" id="rkh"></div>`);
+  const cv = $('#rkc'), ctx = cv.getContext('2d'), W = 640, H = 360, stars = Array.from({ length: 60 }, () => [Math.random() * W, Math.random() * H, Math.random() * 1.6 + .3]);
+  const d = devicePixelRatio || 1; cv.width = W * d; cv.height = H * d; ctx.setTransform(d, 0, 0, d, 0, 0);
+  const mAt = (f, t) => Math.floor(Math.exp(f.rate * Math.max(0, t - f.t0)) * 100) / 100;
+  function draw(m, t, state) { // state: fly | crash | idle
+    ctx.clearRect(0, 0, W, H);
+    for (const [x, y, r] of stars) { ctx.fillStyle = '#ffffff88'; ctx.beginPath(); ctx.arc(x, (y + t * 0.01 * r) % H, r, 0, 7); ctx.fill(); }
+    if (state === 'idle') return;
+    const span = Math.max(8000, t * 1.15), top = Math.max(2, m * 1.25), X = s => 30 + (s / span) * (W - 80), Y = v => H - 30 - (Math.log(v) / Math.log(top)) * (H - 80);
+    const g = ctx.createLinearGradient(0, H, W, 0); g.addColorStop(0, '#12c26a'); g.addColorStop(1, state === 'crash' ? '#ff4d5e' : '#ffc542');
+    ctx.strokeStyle = g; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.beginPath();
+    for (let s = 0; s <= t; s += Math.max(16, t / 120)) { const v = Math.min(m, Math.exp(fl.rate * s)); s ? ctx.lineTo(X(s), Y(v)) : ctx.moveTo(X(0), Y(1)); }
+    ctx.lineTo(X(t), Y(m)); ctx.stroke();
+    const tx = X(t), ty = Y(m);
+    ctx.save(); ctx.translate(tx, ty); ctx.font = '38px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (state === 'crash') ctx.fillText('💥', 0, 0); else { ctx.rotate(-0.6); ctx.fillText('🚀', 0, 0); }
+    ctx.restore();
+  }
+  const status = (t, cls = '') => { const el = $('#rkst'); el.textContent = t; el.className = 'rkst ' + cls; };
+  const paintHist = () => { $('#rkh').innerHTML = hist.slice(0, 12).map(c => `<span class="${c >= 10 ? 'gold' : c >= 2 ? 'good' : 'bad'}">${c.toFixed(2)}x</span>`).join(''); };
+  const buttons = () => { const flying = fl && !fl.over; $('#launch').classList.toggle('hidden', !!flying); $('#cash').classList.toggle('hidden', !(flying && !fl.cashed)); };
+  function tick() {
+    if (!fl || fl.over || !root.isConnected) return;
+    const now = performance.now(), t = now - fl.t0, m = mAt(fl, now);
+    draw(m, Math.max(0, t), 'fly');
+    if (t < 0) status(`Liftoff in ${Math.ceil(-t / 100) / 10}s…`); else if (!fl.cashed) status('Climbing… cash out before it blows!');
+    $('#rkm').textContent = m.toFixed(2) + 'x'; $('#rkm').className = 'rkm ' + (fl.cashed ? 'cashed' : '');
+    if (!fl.cashed) $('#cash').innerHTML = `💰 Cash out ${fmt(fl.bet * m)} 🪙 <kbd>Space</kbd>`;
+    loop = setTimeout(tick, 33);
+  }
+  function cashed(e) {
+    if (!fl || fl.cashed) return; fl.cashed = e.mult; setBal(e.balance); buttons(); sfx.play('cash');
+    status(`${e.auto ? 'Auto-' : ''}Cashed out at ${e.mult.toFixed(2)}x – watch where it would have crashed`, 'good');
+    resMsg(e.payout >= fl.bet, `${e.auto ? 'Auto ' : ''}Cashed out at ${e.mult.toFixed(2)}x · ${e.payout >= fl.bet ? '+' : '−'}${fmt(Math.abs(e.payout - fl.bet))} 🪙`);
+    if (e.payout > fl.bet) fx.win(e.mult >= 5);
+  }
+  function crashed(e) {
+    if (!fl || fl.over) return; fl.over = true; clearTimeout(loop);
+    const t = Math.log(e.crash) / fl.rate; draw(e.crash, t, 'crash');
+    $('#rkm').textContent = `${e.crash.toFixed(2)}x`; $('#rkm').className = 'rkm boom';
+    if (e.balance != null) setBal(e.balance);
+    if (!fl.cashed) { status(`💥 Blew up at ${e.crash.toFixed(2)}x`, 'bad'); resMsg(false, `Crashed at ${e.crash.toFixed(2)}x · −${fmt(fl.bet)} 🪙`); fx.lose(); }
+    else status(`Cashed at ${fl.cashed.toFixed(2)}x · it blew up at ${e.crash.toFixed(2)}x`, 'good');
+    hist.unshift(e.crash); paintHist(); buttons();
+  }
+  async function watch(id) {
+    try {
+      let e = await api('POST', '/arcade/rocket/watch', { id });
+      if (!root.isConnected || !fl || fl.id !== id) return e.balance != null && setBal(e.balance);
+      if (e.event === 'cashed') { cashed(e); e = await api('POST', '/arcade/rocket/watch', { id }); if (!root.isConnected || !fl || fl.id !== id) return; }
+      crashed(e);
+    } catch (er) { toast(er.message); }
+  }
+  function fly(f) { fl = { ...f, cashed: 0, over: false }; $('#res').textContent = ''; buttons(); clearTimeout(loop); tick(); watch(f.id); }
+  stopFns.push(() => { clearTimeout(loop); fl = null; });
+  $('#launch').onclick = act(async () => {
+    const a = $('#auto').value, r = await api('POST', '/arcade/rocket/start', { bet: readBet(), auto: a ? +a : null });
+    setBal(r.balance); fly({ id: r.id, bet: r.bet, rate: r.rate, t0: performance.now() + r.liftoff });
+  });
+  $('#cash').onclick = act(async () => {
+    if (!fl || fl.cashed || fl.over) return;
+    const e = await api('POST', '/arcade/rocket/cashout'); e.event === 'cashed' ? cashed(e) : crashed(e);
+  });
+  const [a, h] = await Promise.all([api('GET', '/arcade/active?game=rocket'), api('GET', '/arcade/rocket/history')]); if (my !== nav) return;
+  hist.push(...h.crashes); paintHist(); draw(1, 0, 'idle');
+  if (a.round) { fly({ id: a.round.id, bet: a.round.bet, rate: a.round.rate, t0: performance.now() - a.round.flying }); $('#res').textContent = 'Flight restored'; }
 }
 
 /* ---------- Luck Lab ---------- */

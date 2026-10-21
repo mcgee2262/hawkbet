@@ -13,7 +13,7 @@ let srv;
 
 before(async () => {
   srv = spawn(process.execPath, ['--no-warnings', path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT: String(PORT), DB_PATH: path.join(DIR, 'test.db'), BELL_DELAY_SCALE: '0.05', NODE_ENV: 'test' }, stdio: 'ignore',
+    env: { ...process.env, PORT: String(PORT), DB_PATH: path.join(DIR, 'test.db'), BELL_DELAY_SCALE: '0.05', ROCKET_RATE: '0.002', NODE_ENV: 'test' }, stdio: 'ignore',
   });
   for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/healthz')).ok) return; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
   throw new Error('server did not start');
@@ -71,7 +71,8 @@ test('skill games: practice is free, bets pay by score tier', async () => {
   for (let i = 0; i < 7; i++) r = await api('POST', '/arcade/trivia/answer', { choice: 0 });
   const tier = [[900, 3], [750, 2], [600, 1.5], [450, 1]].find(([m]) => r.score >= m);
   assert.equal(r.mult, tier ? tier[1] : 0); assert.equal(r.payout, Math.round(100 * r.mult)); assert.equal(r.balance, start - 100 + r.payout);
-  assert.equal((await api('POST', '/arcade/bell/start', { bet: 5000 })).status, 400, 'bet is capped');
+  const tooMuch = await api('POST', '/arcade/bell/start', { bet: 10 ** 9 });
+  assert.equal(tooMuch.status, 400); assert.match(tooMuch.error, /Not enough/, 'you can only bet what you have');
 });
 
 test('Bell Rush: early taps score 0, real taps score 1000 - ms, and the score is saved', async () => {
@@ -130,6 +131,28 @@ test('Seahawk Trivia: answers are checked server-side and scored 100 + speed bon
   }
 });
 
+test('Seahawk Launch: crash point stays secret, cash-outs and auto cash-outs pay correctly', async () => {
+  const api = await newUser('rocketeer');
+  const bal0 = (await api('GET', '/me')).user.balance;
+  let s = await api('POST', '/arcade/rocket/start', { bet: 100 });
+  assert.equal(s.balance, bal0 - 100); assert.ok(!('c' in s) && !('crash' in s), 'crash point is not sent');
+  assert.equal((await api('POST', '/arcade/rocket/start', { bet: 10 })).status, 409, 'one rocket at a time');
+  const early = await api('POST', '/arcade/rocket/cashout'); // before liftoff = 1.00x, you just get your bet back
+  assert.equal(early.event, 'cashed'); assert.equal(early.mult, 1); assert.equal(early.balance, bal0);
+  const after = await api('POST', '/arcade/rocket/watch', { id: s.id }); assert.equal(after.event, 'crash'); assert.ok(after.crash >= 1);
+  // auto cash-out at 1.5x: either it cashes at exactly 1.5x or the rocket crashed below 1.5x first
+  let wins = 0;
+  for (let i = 0; i < 6; i++) {
+    const b = (await api('GET', '/me')).user.balance; s = await api('POST', '/arcade/rocket/start', { bet: 10, auto: 1.5 });
+    const ev = await api('POST', '/arcade/rocket/watch', { id: s.id });
+    if (ev.event === 'cashed') { wins++; assert.equal(ev.mult, 1.5); assert.equal(ev.balance, b - 10 + 15); const end = await api('POST', '/arcade/rocket/watch', { id: s.id }); assert.ok(end.crash >= 1.5); }
+    else { assert.ok(ev.crash <= 1.5); assert.equal(ev.balance, b - 10); }
+  }
+  assert.equal((await api('POST', '/arcade/rocket/start', { bet: 10, auto: 0.5 })).status, 400, 'validates auto cash-out');
+  assert.equal((await api('POST', '/arcade/rocket/watch', { id: 999999 })).status, 404, 'cannot watch someone else’s flight');
+  assert.ok((await api('GET', '/arcade/rocket/history')).crashes.length >= 7);
+});
+
 test('existing flows still work: slips, bank and a chance game', async () => {
   const api = await newUser('regress');
   const me = (await api('GET', '/me')).user;
@@ -138,4 +161,9 @@ test('existing flows still work: slips, bank and a chance game', async () => {
   assert.equal((await api('POST', '/bank', { amount: 500 })).balance, me.balance - 10 + 500);
   const d = await api('POST', '/arcade/dice', { bet: 10, target: 50, over: true });
   assert.ok(typeof d.roll === 'number' && d.payout >= 0);
+  // no bet limit: a stake above the old 1,000 cap works when you can afford it
+  await api('POST', '/bank', { amount: 1000 });
+  const bal = (await api('GET', '/me')).user.balance, big = await api('POST', '/arcade/dice', { bet: 1500, target: 50, over: true });
+  assert.equal(big.bet, 1500); assert.equal(big.balance, bal - 1500 + big.payout);
+  assert.equal((await api('POST', '/arcade/dice', { bet: 0, target: 50, over: true })).status, 400, 'bet must be at least 1');
 });
