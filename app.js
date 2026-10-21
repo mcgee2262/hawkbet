@@ -48,14 +48,17 @@ const LUCK_FX = {
 const luckLevel = () => (U && U.luck) || 'normal';
 const luckFx = () => { const l = luckLevel(), t = LUCK_FX[l] || LUCK_FX.normal; return { ...t, m: l === 'normal' ? 1 : 0.5 + l * 0.1 }; }; // confetti amount: 0.6x at 1 … 1.5x at 10
 const luckEntry = () => LUCK.find(x => String(x[0]) === String(luckLevel())) || LUCK[0];
-const luckBadge = () => { const [lv, e, name] = luckEntry(); return `${e} Luck: ${name}${lv === 'normal' ? '' : ` (${lv})`} · looks only`; };
+const luckK = () => { const l = luckLevel(); return l === 'normal' ? 1 : Math.round((0.5 + 0.1 * l) * 10) / 10; }; // mirrors the server; the server decides
+const luckBadge = () => { const [lv, e, name] = luckEntry(); return `${e} Luck: ${name}${lv === 'normal' ? ' · standard odds' : ` (${lv}) · win chance ×${luckK()}`}`; };
+const pct = p => Math.round(p * 100) + '%';
+const luckLine = what => CFG.luck.k === 1 ? '' : `<div class="lucknote">🍀 Luck ×${CFG.luck.k}: ${what}</div>`;
 
 /* ---------- sound: tiny Web Audio synth, no files. Silent until the first tap or key press. ---------- */
 const sfx = (() => {
   let ac = null, out = null, on = true;
   try { on = localStorage.getItem('hb.sound') !== 'off'; } catch (e) {}
   function unlock() {
-    if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); out = ac.createGain(); out.gain.value = 0.55; out.connect(ac.destination); } catch (e) { return; } }
+    if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); const lim = ac.createDynamicsCompressor(); lim.threshold.value = -10; lim.knee.value = 6; lim.ratio.value = 8; lim.attack.value = 0.003; lim.release.value = 0.15; out = ac.createGain(); out.gain.value = 1.9; out.connect(lim); lim.connect(ac.destination); } catch (e) { return; } }
     if (ac.state === 'suspended') ac.resume();
   }
   addEventListener('pointerdown', unlock, true); addEventListener('keydown', unlock, true);
@@ -68,8 +71,8 @@ const sfx = (() => {
   const notes = (fs, step, d, type, g) => fs.forEach((f, k) => tone(f, k * step, d, type, g));
   function flavor() { const l = luckLevel(); if (l !== 'normal' && l <= 2) tone(120, 0, 0.25, 'sine', 0.08, 70); if (l >= 8) { tone(2093, 0.3, 0.35, 'sine', 0.035); tone(2637, 0.38, 0.35, 'sine', 0.03); } }
   const S = {
-    tap: () => tone(620, 0, 0.045, 'triangle', 0.025),
-    flip: () => tone(1100, 0, 0.05, 'triangle', 0.03, 1400),
+    tap: () => tone(620, 0, 0.05, 'triangle', 0.04),
+    flip: () => tone(1100, 0, 0.06, 'triangle', 0.05, 1400),
     start: () => notes([440, 660], 0.07, 0.1, 'triangle', 0.05),
     reveal: () => tone(880, 0, 0.11, 'sine', 0.06, 1320),
     streak: () => notes([660, 990], 0.06, 0.1, 'square', 0.025),
@@ -170,7 +173,7 @@ async function go() {
 window.addEventListener('hashchange', go);
 const paintSound = () => { const b = $('#sound'); b.textContent = sfx.on ? '🔊' : '🔇'; b.setAttribute('aria-pressed', String(sfx.on)); b.setAttribute('aria-label', sfx.on ? 'Sound on' : 'Sound off'); };
 $('#sound').onclick = () => { sfx.toggle(); paintSound(); toast(sfx.on ? '🔊 Sound on' : '🔇 Sound off'); }; paintSound();
-$('#logout').onclick = async () => { await api('POST', '/logout').catch(() => {}); U = null; Object.keys(pick).forEach(k => delete pick[k]); slipOpen = false; $('#slip').classList.add('hidden'); location.hash = ''; go(); };
+$('#logout').onclick = async () => { await api('POST', '/logout').catch(() => {}); U = null; CFG = null; Object.keys(pick).forEach(k => delete pick[k]); slipOpen = false; $('#slip').classList.add('hidden'); location.hash = ''; go(); };
 
 /* ---------- auth ---------- */
 function renderAuth(signup = false) {
@@ -315,7 +318,7 @@ const GAME_CATS = { bell: ['Skill', 'Reaction'], memory: ['Skill', 'Memory'], tr
 const catsOf = id => GAME_CATS[id] || ['Classic'];
 let arcCat = 'All';
 async function renderArcade(my) {
-  if (!CFG) CFG = await api('GET', '/arcade/config');
+  if (!CFG || CFG.user !== U.username) CFG = { ...(await api('GET', '/arcade/config')), user: U.username };
   STATS = await api('GET', '/arcade/stats').catch(() => STATS); if (my !== nav) return;
   const list = gameList(), byId = Object.fromEntries(list.map(g => [g.id, g])), shown = list.filter(g => arcCat === 'All' || catsOf(g.id).includes(arcCat));
   const week = Math.floor((Date.now() / 864e5 + 4) / 7), featured = [...new Set([0, 1, 2].map(k => list[(week * 3 + k * 5) % list.length]))]; // rotates every Monday
@@ -641,7 +644,7 @@ async function cross(root, my) {
     <div style="height:14px"></div><button class="btn" id="start">Start crossing</button>
     <button class="btn hidden" id="go" style="margin-top:8px">Next lane</button>
     <button class="btn gold hidden" id="cash" style="margin-top:8px"></button><div class="res" id="res"></div>
-    <div class="note">Each lane survived raises your multiplier. Get hit and you lose the bet.</div></div>
+    <div class="note">Each lane survived raises your multiplier. Get hit and you lose the bet.</div>${luckLine('fewer buses hit you, lane multipliers are smaller.')}</div>
     <div class="panel stage"><div class="mult" id="mult">—</div><div class="road" id="road"></div><div class="curb">🏫 South Lakes Dr → get to the stadium 🏟️</div></div></div>`;
   const mults = () => CFG.cross[d], at = () => st ? st.at : 0, multNow = () => at() ? mults()[at() - 1] : 0.99;
   function paint() {
@@ -698,7 +701,7 @@ async function flip(root, my) {
   root.innerHTML = gameShell(`${betBox()}<div style="height:14px"></div><button class="btn" id="start">Start a streak</button>
     <div class="duo hidden" id="calls"><button class="btn blue" data-call="hawk">🦅 Seymour</button><button class="btn blue" data-call="sl">SL</button></div>
     <button class="btn gold hidden" id="cash" style="margin-top:8px"></button>
-    <div class="note">Call the flip. Each right call doubles your streak (1.98x → 3.96x → 7.92x…) up to ${CFG.flipMax} in a row. One miss and it's gone.</div>`,
+    <div class="note">Call the flip. Win chance per call: <b>${pct(CFG.luck.flipP)}</b>. The first right call pays <b>${(0.99 / CFG.luck.flipP).toFixed(2)}x</b> and each one after multiplies it by ${(1 / CFG.luck.flipP).toFixed(2)}, up to ${CFG.flipMax} in a row. One miss and it's gone.</div>${luckLine('you win more calls, each pays less.')}`,
     `<div class="mult" id="mult">—</div><div class="flipcoin" id="coin"><div class="face front"><img src="logo.svg" alt=""></div><div class="face back">SL</div></div><div class="pips" id="pips"></div>`);
   function paint() {
     const live = st && st.live;
@@ -732,12 +735,12 @@ async function dice(root) {
     <label>Roll</label><div class="seg" id="ou"><button data-o="1" class="on">Over</button><button data-o="0">Under</button></div>
     <label>Target: <b id="tv">50</b></label><input id="tg" type="range" min="2" max="98" step="1" value="50" style="width:100%">
     <div class="stats"><div><small>Win chance</small><b id="wc"></b></div><div><small>Pays</small><b id="py"></b></div></div>
-    <button class="btn" id="roll">Roll</button><div class="note">Roll a number from 0 to 99.99 on the stadium scoreboard.</div>`,
+    <button class="btn" id="roll">Roll</button><div class="note">Roll a number from 0 to 99.99 on the stadium scoreboard.</div>${luckLine('your green win zone is resized, payouts adjust to match.')}`,
     `<div class="board"><small>SEAHAWKS · HOME</small><div class="led" id="led">00.00</div></div><div class="track" id="track"><div class="zone" id="zone"></div><div class="mark hidden" id="mark"></div></div><div class="ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>`);
   function paint() {
-    const ch = over ? 100 - target : target;
+    const ch = Math.round(Math.min(98, Math.max(2, (over ? 100 - target : target) * CFG.luck.k)) * 100) / 100; // luck-sized win zone
     $('#tv').textContent = target; $('#wc').textContent = ch + '%'; $('#py').textContent = (99 / ch).toFixed(2) + 'x';
-    const z = $('#zone'); z.style.left = over ? target + '%' : '0'; z.style.width = ch + '%';
+    const z = $('#zone'); z.style.left = over ? (100 - ch) + '%' : '0'; z.style.width = ch + '%';
   }
   $('#tg').oninput = e => { target = +e.target.value; paint(); };
   $('#ou').onclick = e => { const o = e.target.dataset.o; if (o == null) return; over = o === '1'; root.querySelectorAll('#ou button').forEach(b => b.classList.toggle('on', b.dataset.o === o)); paint(); };
@@ -756,12 +759,12 @@ async function dice(root) {
 /* Limbo: Hail Mary */
 async function limbo(root) {
   root.innerHTML = gameShell(`${betBox()}
-    <label>Target multiplier</label><input id="tgt" type="number" min="1.01" max="1000" step="0.01" value="2.00">
+    <label>Target distance (min ${(Math.ceil(1.01 * CFG.luck.k * 100) / 100).toFixed(2)}x)</label><input id="tgt" type="number" min="${Math.ceil(1.01 * CFG.luck.k * 100) / 100}" max="1000" step="0.01" value="${Math.max(2, Math.ceil(1.01 * CFG.luck.k * 100) / 100).toFixed(2)}">
     <div class="stats"><div><small>Win chance</small><b id="wc"></b></div><div><small>Pays</small><b id="py"></b></div></div>
-    <button class="btn" id="throw">Throw it 🏈</button><div class="note">The QB airs it out. If the throw goes at least as far as your target, you win the target.</div>`,
+    <button class="btn" id="throw">Throw it 🏈</button><div class="note">The QB airs it out. If the throw goes at least as far as your target, you win.</div>${luckLine('throws fly farther, a win pays target ÷ ' + CFG.luck.k + '.')}`,
     `<div class="mult" id="mult">1.00x</div><div class="field"><div class="ball" id="ball">🏈</div><div class="goal" id="goal"></div></div><div class="curb">🏟️ South Lakes Stadium</div>`);
-  const tgt = () => Math.max(1.01, Math.min(1000, +$('#tgt').value || 2));
-  const paint = () => { const t = tgt(); $('#wc').textContent = (99 / t).toFixed(2) + '%'; $('#py').textContent = t.toFixed(2) + 'x'; $('#goal').style.left = Math.min(92, 8 + Math.log(t) / Math.log(1000) * 84) + '%'; };
+  const tgt = () => Math.max(Math.ceil(1.01 * CFG.luck.k * 100) / 100, Math.min(1000, +$('#tgt').value || 2));
+  const paint = () => { const t = tgt(), k = CFG.luck.k; $('#wc').textContent = Math.min(99, 99 * k / t).toFixed(2) + '%'; $('#py').textContent = (t / k).toFixed(2) + 'x'; $('#goal').style.left = Math.min(92, 8 + Math.log(t) / Math.log(1000) * 84) + '%'; };
   $('#tgt').oninput = paint;
   $('#throw').onclick = act(async () => {
     const t = tgt(), r = await api('POST', '/arcade/limbo', { bet: readBet(), target: t }), m = $('#mult'), ball = $('#ball');
@@ -836,7 +839,7 @@ async function rps(root, my) {
   root.innerHTML = gameShell(`${betBox()}<div style="height:14px"></div><button class="btn" id="start">Step into the hallway</button>
     <div class="trio hidden" id="throws">${Object.entries(H).map(([k, e]) => `<button class="btn blue" data-t="${k}">${e}</button>`).join('')}</div>
     <button class="btn gold hidden" id="cash" style="margin-top:8px"></button>
-    <div class="note">Beat a Concorde District rival. Each win doubles your streak (1.96x → 3.92x…), ties replay, and a loss ends it. Up to ${CFG.rpsMax} in a row.</div>`,
+    <div class="note">Beat a Concorde District rival. 1 in 3 throws ties and replays; otherwise you win <b>${pct(CFG.luck.rpsP)}</b> of the time. First win pays <b>${(0.98 / CFG.luck.rpsP).toFixed(2)}x</b>, each one after ×${(1 / CFG.luck.rpsP).toFixed(2)}. Up to ${CFG.rpsMax} in a row.</div>${luckLine('rivals lose more often, wins pay less.')}`,
     `<div class="mult" id="mult">—</div><div class="vs"><div><div class="hand" id="me">✊</div><small>South Lakes</small></div><b>VS</b><div><div class="hand flip" id="them">✊</div><small id="rival">Rival</small></div></div><div class="pips" id="pips"></div>`);
   function paint() {
     const live = st && st.live;
@@ -924,18 +927,29 @@ function countUp(el, to, ms = 900) {
   const t0 = performance.now(), step = () => { const k = Math.min(1, (performance.now() - t0) / ms); el.textContent = fmt(from + (to - from) * (1 - Math.pow(1 - k, 3))); if (k < 1) setTimeout(step, 16); };
   step();
 }
+const skillBet = id => `${betBox()}<div class="tiers" aria-label="Payout by score">${CFG.skillTiers[id].map(([min, m]) => `<span>${fmt(min)}+ <b>${m}x</b></span>`).join('')}<span>lower <b>0</b></span></div>
+  <div class="duo"><button class="btn" id="start">🪙 Play for Hawk Bucks</button><button class="btn alt" id="practice">Practice (free)</button></div>
+  <div class="note">Your score sets the payout, and luck doesn't apply here. Starting over or leaving a paid game early forfeits the bet.</div>`;
+const lockStart = on => { $('#start').disabled = on; const p = $('#practice'); if (p) p.disabled = on; };
 function skillDone(id, r, great) {
-  STATS.best[id] = { score: r.best }; paintPB();
+  STATS.best[id] = { score: r.best }; paintPB(); lastRes = null;
+  if (r.bet) {
+    setBal(r.balance);
+    $('#res').insertAdjacentHTML('beforeend', r.payout ? ` <span class="win">· ${r.mult}x → +${fmt(r.payout - r.bet)} 🪙</span>` : ` <span class="lose">· −${fmt(r.bet)} 🪙</span>`);
+  }
   if (r.newBest) { fx.burst(150); sfx.play('pb'); setTimeout(() => toast(`🏆 New personal best: ${fmt(r.score)}!`), 300); fx.bump($('#pb')); }
+  else if (r.bet && r.payout > r.bet) fx.win(r.mult >= 2);
+  else if (r.bet && !r.payout) fx.lose();
   else if (great) fx.win(false); else sfx.play('win');
   loadHS(id);
 }
+function skillButtons(begin) { $('#start').onclick = () => begin(readBet())(); $('#practice').onclick = () => begin(0)(); }
 
 /* Reaction: Bell Rush */
 async function bell(root) {
   let st = null, tok = 0, ringing = false, busy = false;
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> press Start, wait for the bell, then tap the big button (or press Space) as fast as you can. 5 bells. Each bell is worth 1,000 minus your reaction time in milliseconds. Tap before it rings and that bell scores 0.</div>
-    <button class="btn" id="start">Start Bell Rush</button><div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Bell</small><b id="bn">–</b></div></div>${hsBox()}`,
+    ${skillBet('bell')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Bell</small><b id="bn">–</b></div></div>${hsBox()}`,
     `<button class="bellpad" id="pad" disabled><span class="bellemoji">🔔</span><b id="padtxt">Press Start</b></button><div class="pips" id="pips">${'<i></i>'.repeat(5)}</div>`);
   const pad = $('#pad'), txt = $('#padtxt'), setPad = (cls, t) => { pad.className = 'bellpad ' + cls; txt.textContent = t; };
   async function next() {
@@ -952,7 +966,7 @@ async function bell(root) {
       else { setPad('bad', r.res === 'early' ? 'Too early! +0' : 'Too slow! +0'); pip.classList.add('bad'); r.res === 'early' ? fx.lose() : sfx.play('miss'); }
       countUp($('#sc'), r.total, 400);
       if (r.done) {
-        st = null; pad.disabled = true; $('#start').disabled = false; $('#start').textContent = 'Play again';
+        st = null; pad.disabled = true; lockStart(false);
         setTimeout(() => { if (!root.isConnected) return; setPad('done', `Final: ${fmt(r.score)}`); resMsg(true, `Score ${fmt(r.score)}${r.bestMs ? ` · fastest ${r.bestMs} ms` : ''}`); skillDone('bell', r, r.score >= 3000); }, 700);
       } else setTimeout(() => { if (root.isConnected && st) next(); }, 850);
     } catch (e) { toast(e.message); } finally { busy = false; }
@@ -960,10 +974,10 @@ async function bell(root) {
   pad.onclick = () => { if (st && (ringing || pad.classList.contains('wait'))) tap(); };
   const key = e => { if (e.code === 'Space' && st && root.isConnected && e.target.tagName !== 'INPUT') { e.preventDefault(); if (e.target !== pad) pad.onclick(); } };
   document.addEventListener('keydown', key); stopFns.push(() => { tok++; document.removeEventListener('keydown', key); });
-  $('#start').onclick = act(async () => {
-    await api('POST', '/arcade/bell/start'); st = {}; $('#start').disabled = true; $('#sc').textContent = '0'; $('#res').textContent = '';
+  skillButtons(bet => act(async () => {
+    const s0 = await api('POST', '/arcade/bell/start', { bet }); if (s0.bet) setBal(s0.balance); st = {}; lockStart(true); $('#sc').textContent = '0'; $('#res').textContent = '';
     [...$('#pips').children].forEach(i => i.className = ''); pad.focus(); next();
-  });
+  }));
   loadHS('bell');
 }
 
@@ -971,17 +985,17 @@ async function bell(root) {
 async function memory(root, my) {
   const IC = ['🦅', '🏈', '📚', '🔔', '🧪', '🎒', '🍕', '🚌']; let st = null, tick = 0, t0 = 0;
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> flip two cards at a time to find the 8 matching pairs. Score starts at 3,000: −100 for each try past 8 and −10 per second.</div>
-    <button class="btn" id="start">Start Memory</button><div class="stats"><div><small>Tries</small><b id="mv">0</b></div><div><small>Time</small><b id="tm">0.0s</b></div></div>${hsBox()}`,
+    ${skillBet('memory')}<div class="stats"><div><small>Tries</small><b id="mv">0</b></div><div><small>Time</small><b id="tm">0.0s</b></div></div>${hsBox()}`,
     `<div class="mgrid" id="mg">${Array.from({ length: 16 }, (_, i) => `<button class="mcard" data-i="${i}" disabled aria-label="Card ${i + 1}, face down"><span class="mback"><img src="logo.svg" alt=""></span><span class="mface"></span></button>`).join('')}</div>`);
   const cards = [...root.querySelectorAll('.mcard')];
   const face = (i, sym) => { cards[i].querySelector('.mface').textContent = IC[sym]; cards[i].classList.add('up'); cards[i].setAttribute('aria-label', `Card ${i + 1}, ${IC[sym]}`); };
   const hide = i => { cards[i].classList.remove('up'); cards[i].setAttribute('aria-label', `Card ${i + 1}, face down`); };
   const clock = () => { clearInterval(tick); tick = setInterval(() => { if (!root.isConnected) return clearInterval(tick); $('#tm').textContent = ((performance.now() - t0) / 1000).toFixed(1) + 's'; }, 100); };
   stopFns.push(() => clearInterval(tick));
-  function begin() { st = {}; cards.forEach((c, i) => { c.disabled = false; c.classList.remove('matched', 'nope'); hide(i); }); t0 = performance.now(); clock(); $('#start').disabled = true; }
+  function begin() { st = {}; cards.forEach((c, i) => { c.disabled = false; c.classList.remove('matched', 'nope'); hide(i); }); t0 = performance.now(); clock(); lockStart(true); }
   const a = (await api('GET', '/arcade/active?game=memory')).round; if (my !== nav) return;
   if (a) { begin(); a.matched.forEach(({ i, sym }) => { face(i, sym); cards[i].classList.add('matched'); cards[i].disabled = true; }); $('#mv').textContent = a.moves; $('#res').textContent = 'Game restored (the server kept your time)'; }
-  $('#start').onclick = act(async () => { await api('POST', '/arcade/memory/start'); begin(); $('#mv').textContent = '0'; $('#res').textContent = ''; });
+  skillButtons(bet => act(async () => { const s0 = await api('POST', '/arcade/memory/start', { bet }); if (s0.bet) setBal(s0.balance); begin(); $('#mv').textContent = '0'; $('#res').textContent = ''; }));
   $('#mg').onclick = act(async e => {
     const c = e.target.closest('.mcard'); if (!c || !st || c.disabled || c.classList.contains('up')) return;
     const i = +c.dataset.i, r = await api('POST', '/arcade/memory/flip', { i }); if (!root.isConnected) return;
@@ -992,7 +1006,7 @@ async function memory(root, my) {
       else { sfx.play('miss'); r.pair.forEach(k => cards[k].classList.add('nope')); await wait(calm ? 350 : 750); if (!root.isConnected) return; r.pair.forEach(k => { cards[k].classList.remove('nope'); hide(k); }); }
     }
     if (r.done) {
-      st = null; clearInterval(tick); $('#tm').textContent = r.secs.toFixed(1) + 's'; $('#start').disabled = false; $('#start').textContent = 'Play again';
+      st = null; clearInterval(tick); $('#tm').textContent = r.secs.toFixed(1) + 's'; lockStart(false);
       resMsg(true, `Score ${fmt(r.score)} · ${r.moves} tries in ${r.secs}s`); skillDone('memory', r, r.score >= 2000);
     }
   });
@@ -1003,7 +1017,7 @@ async function memory(root, my) {
 async function trivia(root) {
   let st = null, timer = 0;
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> 7 questions, 20 seconds each. 100 points for each right answer, plus a speed bonus of up to 50 (it drops 5 points per second).</div>
-    <button class="btn" id="start">Start Trivia</button><div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Question</small><b id="qn">–</b></div></div>${hsBox()}`,
+    ${skillBet('trivia')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Question</small><b id="qn">–</b></div></div>${hsBox()}`,
     `<div class="tq"><div class="tboard"><h3 id="tqq">Ready for a pop quiz? 📝</h3></div><div class="tbar"><i id="tt"></i></div><div class="tans" id="ta"></div></div>`);
   stopFns.push(() => clearTimeout(timer));
   function show(q) {
@@ -1012,7 +1026,7 @@ async function trivia(root) {
     const bar = $('#tt'); bar.style.transition = 'none'; bar.style.width = '100%'; void bar.offsetWidth; bar.style.transition = `width ${q.secs}s linear`; bar.style.width = '0%';
     clearTimeout(timer); timer = setTimeout(() => { const b = root.querySelector('.tbtn:not(:disabled)'); if (b && st) { st.timeout = true; b.click(); } }, (q.secs + 0.4) * 1000);
   }
-  $('#start').onclick = act(async () => { const r = await api('POST', '/arcade/trivia/start'); st = {}; $('#start').disabled = true; $('#sc').textContent = '0'; $('#res').textContent = ''; show(r.question); });
+  skillButtons(bet => act(async () => { const r = await api('POST', '/arcade/trivia/start', { bet }); if (r.bet) setBal(r.balance); st = {}; lockStart(true); $('#sc').textContent = '0'; $('#res').textContent = ''; show(r.question); }));
   $('#ta').onclick = act(async e => {
     const b = e.target.closest('.tbtn'); if (!b || !st) return; clearTimeout(timer);
     const r = await api('POST', '/arcade/trivia/answer', { choice: +b.dataset.c }); if (!root.isConnected) return;
@@ -1022,7 +1036,7 @@ async function trivia(root) {
     countUp($('#sc'), r.score, 400);
     await wait(calm ? 400 : 1100); if (!root.isConnected) return;
     if (r.done) {
-      st = null; $('#tqq').textContent = `Final score: ${fmt(r.score)} · ${r.correct}/${r.of} right`; $('#ta').innerHTML = ''; $('#start').disabled = false; $('#start').textContent = 'Play again';
+      st = null; $('#tqq').textContent = `Final score: ${fmt(r.score)} · ${r.correct}/${r.of} right`; $('#ta').innerHTML = ''; lockStart(false);
       resMsg(true, `${r.correct}/${r.of} right · ${fmt(r.score)} pts`); skillDone('trivia', r, r.correct >= 6);
     } else show(r.next);
   });
@@ -1033,13 +1047,15 @@ async function trivia(root) {
 async function renderLuck() {
   const cur = String(luckLevel());
   $('#app').innerHTML = `<h1>🍀 Luck Lab</h1>
-    <div class="panel luckinfo"><b>This is a style setting, not a cheat code.</b> Luck only changes how wins <i>look and sound</i>: confetti colors, how much confetti, lucky-charm particles and win chimes.
-      It <b>never</b> changes odds, payouts, scores, Hawk Bucks, sports picks or leaderboards. The server decides every result the same way for everyone. HawkBet is a pretend-money arcade, not real gambling.</div>
-    <div class="luckgrid">${LUCK.map(([lv, e, name, desc]) => `<button class="luckcard ${String(lv) === cur ? 'on' : ''}" data-luck="${lv}" aria-pressed="${String(lv) === cur}"><span class="le">${e}</span><b>${lv === 'normal' ? 'Normal' : `${lv} · ${name}`}</b><small>${desc}</small>${lv === 'normal' ? '' : `<i class="lm">Confetti ×${(0.5 + lv * 0.1).toFixed(1)}</i>`}</button>`).join('')}</div>
+    <div class="panel luckinfo"><b>Luck really changes your odds</b> in 5 arcade games: 🪙 Seymour Flip, ✊ Hallway RPS, 🚌 Seahawk Crossing, 🎲 Scoreboard Roll and 🏈 Hail Mary.
+      Higher luck = you <b>win more often</b>, but each win pays less. Lower luck = fewer wins, bigger payouts. The <b>average payback stays the same</b> at every level, so the leaderboard stays fair.
+      <br><br>Each level multiplies your win chance: level 1 ×0.6 … level 5 ×1.0 … level 10 ×1.5. Example: Seymour Flip is 50/50 on Normal, 75% at level 10 (pays 1.32x a call), 30% at level 1 (pays 3.30x).
+      Your luck is locked in when a round starts. It doesn't touch Hawk Drop, Locker Hunt, Slots, Roulette, Hawk 21, skill games or sports picks. It also changes the confetti and win sounds. Hawk Bucks are pretend: no real money, ever.</div>
+    <div class="luckgrid">${LUCK.map(([lv, e, name, desc]) => `<button class="luckcard ${String(lv) === cur ? 'on' : ''}" data-luck="${lv}" aria-pressed="${String(lv) === cur}"><span class="le">${e}</span><b>${lv === 'normal' ? 'Normal' : `${lv} · ${name}`}</b><small>${desc}</small><i class="lm">${lv === 'normal' ? 'Standard odds' : `Win chance ×${(0.5 + lv * 0.1).toFixed(1)}`}</i></button>`).join('')}</div>
     <div class="panel lucktest"><button class="btn" id="preview">✨ Preview a win</button><div class="note">Saved to your account, so it follows you to any device.</div></div>`;
   document.querySelectorAll('[data-luck]').forEach(b => b.onclick = act(async () => {
     const v = b.dataset.luck === 'normal' ? 'normal' : +b.dataset.luck, r = await api('POST', '/luck', { luck: v });
-    U.luck = r.luck; renderLuck(); fx.burst(110); sfx.play('big'); toast(`Luck set to ${luckEntry()[2]}`);
+    U.luck = r.luck; CFG = null; renderLuck(); fx.burst(110); sfx.play('big'); toast(`Luck set to ${luckEntry()[2]}`);
   }));
   $('#preview').onclick = () => { fx.burst(160); sfx.play('big'); };
 }

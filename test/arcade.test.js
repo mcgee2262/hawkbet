@@ -40,15 +40,38 @@ test('luck defaults to normal, validates input, and persists across logins', asy
   assert.equal((await api('POST', '/luck', { luck: 'normal' })).luck, 'normal');
 });
 
-test('luck never changes odds, payouts or game tables', async () => {
+test('luck changes win chances but keeps average payback the same', async () => {
   const api = await newUser('fairplay');
-  const snap = async () => ({
-    cfg: await api('GET', '/arcade/config'),
-    plinko: (await api('GET', '/arcade/plinko-table?rows=12&risk=high')).mults,
-    dice: (await api('POST', '/arcade/dice', { bet: 1, target: 30, over: true })).pays,
-  });
-  const normal = await snap();
-  for (const l of [1, 5, 10]) { await api('POST', '/luck', { luck: l }); assert.deepEqual(await snap(), normal, `luck ${l}`); }
+  const dice = async () => (await api('POST', '/arcade/dice', { bet: 1, target: 50, over: true }));
+  const plinko = async () => (await api('GET', '/arcade/plinko-table?rows=12&risk=high')).mults;
+  const normal = { d: await dice(), p: await plinko(), cfg: await api('GET', '/arcade/config') };
+  assert.equal(normal.d.zone, 50); assert.equal(normal.d.pays, 1.98);
+  await api('POST', '/luck', { luck: 10 });
+  const lucky = { d: await dice(), p: await plinko(), cfg: await api('GET', '/arcade/config') };
+  assert.equal(lucky.d.zone, 75, 'luck 10 widens the dice win zone by 1.5x');
+  assert.ok(Math.abs(lucky.d.pays * lucky.d.zone / 100 - 0.99) < 1e-9, 'dice RTP still 99%');
+  assert.deepEqual(lucky.p, normal.p, 'plinko is fixed-odds');
+  assert.equal(lucky.cfg.luck.k, 1.5); assert.equal(lucky.cfg.luck.flipP, 0.75);
+  assert.ok(lucky.cfg.cross.med[0] < normal.cfg.cross.med[0], 'safer lanes pay less');
+  assert.equal((await api('POST', '/arcade/limbo', { bet: 1, target: 1.2 })).status, 400, 'limbo minimum target rises with luck');
+  const l = await api('POST', '/arcade/limbo', { bet: 1, target: 3 }); assert.equal(l.pays, 2);
+  // Seymour Flip: measure the real win rate at luck 10 vs luck 1
+  const rate = async () => { let w = 0; for (let i = 0; i < 300; i++) { await api('POST', '/arcade/flip/start', { bet: 1 }); const r = await api('POST', '/arcade/flip/call', { call: 'hawk' }); if (r.lost) continue; w++; await api('POST', '/arcade/flip/cashout'); } return w / 300; };
+  const hi = await rate(); await api('POST', '/luck', { luck: 1 }); const lo = await rate();
+  assert.ok(hi > 0.65 && hi < 0.85, `luck 10 win rate ${hi}`); assert.ok(lo > 0.2 && lo < 0.4, `luck 1 win rate ${lo}`);
+});
+
+test('skill games: practice is free, bets pay by score tier', async () => {
+  const api = await newUser('skillbet');
+  const start = (await api('GET', '/me')).user.balance;
+  let r = await api('POST', '/arcade/trivia/start'); assert.equal(r.bet, 0);
+  for (let i = 0; i < 7; i++) r = await api('POST', '/arcade/trivia/answer', { choice: 1 });
+  assert.equal(r.payout, 0); assert.equal((await api('GET', '/me')).user.balance, start, 'practice never touches the balance');
+  r = await api('POST', '/arcade/trivia/start', { bet: 100 }); assert.equal(r.bet, 100); assert.equal(r.balance, start - 100);
+  for (let i = 0; i < 7; i++) r = await api('POST', '/arcade/trivia/answer', { choice: 0 });
+  const tier = [[900, 3], [750, 2], [600, 1.5], [450, 1]].find(([m]) => r.score >= m);
+  assert.equal(r.mult, tier ? tier[1] : 0); assert.equal(r.payout, Math.round(100 * r.mult)); assert.equal(r.balance, start - 100 + r.payout);
+  assert.equal((await api('POST', '/arcade/bell/start', { bet: 5000 })).status, 400, 'bet is capped');
 });
 
 test('Bell Rush: early taps score 0, real taps score 1000 - ms, and the score is saved', async () => {
