@@ -1,0 +1,33 @@
+# Fly.io config. Change `app` to something unique (e.g. hawkbet-slhs) before running `fly launch --copy-config`.
+app = "hawkbet-change-me"
+primary_region = "iad"   # Virginia, closest to Reston
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  TRUST_PROXY = "1"
+  PORT = "8080"
+  DB_PATH = "/data/hawkbet.db"
+
+[[mounts]]
+  source = "hawkbet_data"   # persistent volume: keeps accounts, balances and backups across deploys
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true          # HTTP -> HTTPS redirect
+  auto_stop_machines = "off"  # SQLite on one machine: keep it running, never scale to 2
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "3s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

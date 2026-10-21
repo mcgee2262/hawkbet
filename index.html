@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HawkBet – South Lakes Pick'em</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#board">
+    <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0a8f4e"/><stop offset="1" stop-color="#1b4fd8"/></linearGradient></defs><rect width="34" height="34" rx="9" fill="url(#g)"/><path d="M7 21c4 1 7-1 9-5 1 3 4 5 8 4-2 3-5 5-9 5-3 0-6-1-8-4z" fill="#fff"/><circle cx="22" cy="12" r="2.2" fill="#fff"/></svg>
+    <span>HawkBet</span>
+  </a>
+  <nav class="tabs" id="nav">
+    <a href="#board" data-v="board">Picks</a>
+    <a href="#arcade" data-v="arcade">Arcade</a>
+    <a href="#lineups" data-v="lineups">My Lineups</a>
+    <a href="#leaders" data-v="leaders">Leaderboard</a>
+    <a href="#admin" data-v="admin" id="adminLink" class="hidden">Admin</a>
+  </nav>
+  <div class="bal" id="balbox" title="Fake credits only"><span class="coin">🪙</span><b id="bal">0</b><small>Hawk Bucks</small></div>
+  <button class="pill hidden" id="logout"></button>
+</header>
+
+<div class="banner">Fake credits only · no real money · not affiliated with South Lakes HS or FCPS · lines are demo data</div>
+
+<main id="app"></main>
+
+<div id="slipbar" class="slipbar hidden"><button id="slipbtn"></button></div>
+<aside id="slip" class="slip hidden"></aside>
+<div id="toast" class="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
