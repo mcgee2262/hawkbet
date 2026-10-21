@@ -2,7 +2,14 @@
 
 South Lakes pick'em and arcade, played with fake Hawk Bucks only. No real money, not affiliated with South Lakes HS or FCPS.
 
-**Run it:** `node server.js` then open <http://localhost:8622>. **Put it online:** see [DEPLOY.md](DEPLOY.md).
+## ▶ [Open HawkBet](http://localhost:8622)
+
+That link opens HawkBet on your own computer once it's running:
+
+1. **Mac:** double-click [`HawkBet.command`](HawkBet.command) in this folder. It starts the server and opens the site for you.
+2. **Anywhere else:** run `node server.js`, then click **[Open HawkBet](http://localhost:8622)**.
+
+A public link anyone can click (for example `https://hawkbet-slhs.fly.dev`) comes after deploying. See [DEPLOY.md](DEPLOY.md).
 
 Zero-dependency Node server (needs Node 22.5+ for built-in SQLite). No `npm install`.
 
