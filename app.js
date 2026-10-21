@@ -15,7 +15,43 @@ async function api(method, path, body) {
   return j;
 }
 function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2200); }
-const showBal = () => { $('#bal').textContent = U ? fmt(U.balance - pending) : '0'; };
+/* ---------- effects: confetti, shake, count-up balance ---------- */
+const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const fx = (() => {
+  const cv = $('#fx'), ctx = cv.getContext('2d'); let parts = [], raf = 0;
+  const COLORS = ['#12c26a', '#16e0c0', '#2f6bff', '#ffc542', '#ffffff', '#5b8cff'];
+  function size() { const d = devicePixelRatio || 1; cv.width = innerWidth * d; cv.height = innerHeight * d; ctx.setTransform(d, 0, 0, d, 0, 0); }
+  addEventListener('resize', size); size();
+  function tick() {
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    parts = parts.filter(p => p.life > 0);
+    for (const p of parts) {
+      p.vy += 0.25; p.vx *= 0.99; p.x += p.vx; p.y += p.vy; p.r += p.vr; p.life--;
+      ctx.save(); ctx.globalAlpha = Math.min(1, p.life / 30); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.c; ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); ctx.restore();
+    }
+    raf = parts.length ? requestAnimationFrame(tick) : 0;
+  }
+  function burst(n = 120, x = innerWidth / 2, y = innerHeight / 3) {
+    if (calm) return;
+    for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = 4 + Math.random() * 9; parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 5, r: Math.random() * 6, vr: (Math.random() - .5) * .4, w: 6 + Math.random() * 6, h: 4 + Math.random() * 4, c: COLORS[i % COLORS.length], life: 80 + Math.random() * 50 }); }
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+  const pulse = (el, cls, ms = 800) => { if (!el || calm) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); setTimeout(() => el.classList.remove(cls), ms); };
+  return {
+    burst,
+    win(big) { burst(big ? 220 : 90); pulse($('.stage') || $('#app'), 'flash-win'); },
+    lose() { pulse($('.stage') || $('#app'), 'shake', 500); },
+    bump(el) { pulse(el, 'bump', 400); },
+  };
+})();
+let shownBal = null;
+const showBal = () => {
+  const el = $('#bal'), target = U ? U.balance - pending : 0, from = shownBal ?? target; shownBal = target;
+  if (from === target || calm) { el.textContent = fmt(target); return; }
+  const box = $('#balbox'); box.classList.remove('up', 'down'); void box.offsetWidth; box.classList.add(target > from ? 'up' : 'down');
+  const t0 = performance.now(), step = t => { const k = Math.min(1, (t - t0) / 500), e = 1 - Math.pow(1 - k, 3); el.textContent = fmt(from + (target - from) * e); if (k < 1 && shownBal === target) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+};
 const setBal = n => { U.balance = n; showBal(); };
 const act = fn => async (...a) => { if (act.busy) return; act.busy = true; try { await fn(...a); } catch (e) { toast(e.message); } finally { act.busy = false; } };
 
@@ -124,7 +160,7 @@ function renderSlip() {
   $('#place').onclick = act(async () => {
     const r = await api('POST', '/slips', { mode, entry, picks: ids.map(id => ({ propId: Number(id), dir: pick[id] })) });
     setBal(r.balance); ids.forEach(id => delete pick[id]);
-    slipOpen = false; el.classList.add('hidden'); toast('Lineup placed – good luck!'); location.hash = '#lineups';
+    slipOpen = false; el.classList.add('hidden'); toast('Lineup placed – good luck!'); fx.burst(70); location.hash = '#lineups';
   });
 }
 
@@ -229,6 +265,7 @@ async function plinko(root, my) {
   }
   function land(b) {
     pending = Math.max(0, pending - b.payout); showBal();
+    if (b.mult >= 2) fx.win(b.mult >= 5);
     $('#res').innerHTML = `<span class="${b.mult >= 1 ? 'win' : 'lose'}">${b.mult.toFixed(2)}x · ${b.payout - b.bet >= 0 ? '+' : ''}${fmt(b.payout - b.bet)} 🪙</span>`;
   }
   $('#drop').onclick = act(async () => {
@@ -267,6 +304,7 @@ async function mines(root, my) {
   function finish(r, win) {
     if (r.mines) st.mines = new Set(r.mines); st.live = false; setBal(r.balance); paint(true);
     $('#res').innerHTML = win ? `<span class="win">Cashed out +${fmt(r.payout - st.bet)} 🪙</span>` : `<span class="lose">Hall monitor! −${fmt(st.bet)} 🪙</span>`;
+    win ? fx.win(st.mult >= 3) : fx.lose();
   }
   const a = (await api('GET', '/arcade/active?game=mines')).round; if (my !== nav) return;
   if (a) { st = { bet: a.bet, nm: a.m, opened: new Set(a.opened), mult: a.mult, live: true }; nm = a.m; $('#mn').value = nm; $('#mv').textContent = nm; $('#res').textContent = 'Round restored'; }
@@ -279,7 +317,7 @@ async function mines(root, my) {
     const b = e.target.closest('.lk'); if (!b || !st || !st.live) return; const i = +b.dataset.i;
     const r = await api('POST', '/arcade/mines/reveal', { i });
     if (r.bust) { st.hit = i; return finish(r, false); }
-    st.opened = new Set(r.opened); st.mult = r.mult; if (r.cashed) return finish(r, true); paint();
+    st.opened = new Set(r.opened); st.mult = r.mult; if (r.cashed) return finish(r, true); paint(); fx.bump($('#mult'));
   });
   $('#cash').onclick = act(async () => { if (st && st.live) { const r = await api('POST', '/arcade/mines/cashout'); st.mult = r.mult; finish(r, true); } });
   paint();
@@ -313,6 +351,7 @@ async function cross(root, my) {
   function finish(r, win) {
     st.live = false; setBal(r.balance); paint();
     $('#res').innerHTML = win ? `<span class="win">Cashed out +${fmt(r.payout - st.bet)} 🪙</span>` : `<span class="lose">Splat! −${fmt(st.bet)} 🪙</span>`;
+    win ? fx.win(r.payout >= st.bet * 3) : fx.lose();
   }
   const a = (await api('GET', '/arcade/active?game=cross')).round; if (my !== nav) return;
   if (a) { d = a.diff; st = { bet: a.bet, at: a.at, live: true }; document.querySelectorAll('#df button').forEach(b => b.classList.toggle('on', b.dataset.d === d)); $('#res').textContent = 'Round restored'; }
@@ -324,7 +363,7 @@ async function cross(root, my) {
   $('#go').onclick = act(async () => {
     if (!st || !st.live) return; const r = await api('POST', '/arcade/cross/step');
     if (r.hit) { st.at = r.lane; st.hitLane = r.lane; return finish(r, false); }
-    st.at = r.at; if (r.cashed) return finish(r, true); paint();
+    st.at = r.at; if (r.cashed) return finish(r, true); paint(); fx.bump($('#mult'));
   });
   $('#cash').onclick = act(async () => { if (st && st.live) finish(await api('POST', '/arcade/cross/cashout'), true); });
   paint();
