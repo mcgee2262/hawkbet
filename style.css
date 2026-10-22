@@ -869,7 +869,8 @@ body.out .side,body.out .tabbar,body.out .lvlchip,body.out .menubtn,body.out .sc
 .dnum .pt{font-style:normal;margin:0 -2px;width:auto;height:auto;background:none;border-radius:0}
 .dnum .dd.lock{color:#fff4c2}
 .board.good .dnum{color:#19e58a;text-shadow:0 0 28px #12c26acc}.board.bad .dnum{color:#ff5d6c;text-shadow:0 0 28px #ff4d5ecc}
-.dbar{height:38px;border-radius:12px;background:#0d3b1e;overflow:hidden}
+.dbar{height:38px;border-radius:12px;background:#0d3b1e}
+.dbar .dclip{position:absolute;inset:0;border-radius:12px;overflow:hidden}
 .dbar .turf{position:absolute;inset:0;background:repeating-linear-gradient(90deg,#14532d 0 9.99%,#176a38 10% 20%);opacity:.9}
 .dbar .dz{opacity:.82;mix-blend-mode:normal}
 .dbar .dz.lose{border-radius:0;background:linear-gradient(90deg,#6b1220cc,#a3202ecc)}.dbar .dz.win{border-radius:0;background:linear-gradient(90deg,#16e0c0cc,#19e58acc);box-shadow:inset 0 0 14px #fff6}
@@ -931,3 +932,9 @@ body.out .side,body.out .tabbar,body.out .lvlchip,body.out .menubtn,body.out .sc
 .pricein{width:120px}
 .bankshut{background:var(--panel2);border-radius:12px;padding:14px;margin:12px 0;font-size:15px}
 @media (max-width:760px){.shopwrap,.admgrid{grid-template-columns:1fr}.mecard,.admside{position:static}.igrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.dball{position:absolute;left:0;top:50%;width:30px;height:30px;margin-left:-15px;z-index:4;pointer-events:none;display:grid;place-items:center;transform:translate(-100px,-50%);will-change:transform}
+.dball i{font-style:normal;font-size:26px;line-height:1;filter:drop-shadow(0 2px 3px #000a)}
+.dball::before{content:"";position:absolute;inset:-4px;border-radius:50%;opacity:0;box-shadow:0 0 16px 4px #ffc542;transition:opacity .2s}
+.dball.rolling::before{opacity:.8}.dball.good::before{opacity:1;box-shadow:0 0 18px 6px #19e58a}.dball.bad::before{opacity:1;box-shadow:0 0 18px 6px #ff4d5e}
+.dbar .dslider{z-index:5}

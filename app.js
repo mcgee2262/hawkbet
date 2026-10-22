@@ -848,7 +848,7 @@ async function dice(root) {
     `<div class="dstage"><div class="board" id="board"><div class="bbulbs" aria-hidden="true">${Array.from({ length: 18 }, (_, k) => `<i style="--k:${k}"></i>`).join('')}</div>
       <div class="bhead"><span>🦅 SEAHAWKS</span><span id="rollno">ROLL #1</span><span id="fire" class="fire hidden">🔥 HOT</span></div>
       <div class="dnum" id="dnum" aria-live="polite">${[0, 1, '.', 2, 3].map(d => d === '.' ? '<i class="pt">.</i>' : `<i class="dd">5</i>`).join('')}</div></div>
-      <div class="dbar" id="dbar"><div class="turf"></div><div class="dz lose" id="dzl"></div><div class="dz win" id="dzw"></div><input type="range" id="tg" class="dslider" min="2" max="98" step="0.01" value="50" aria-label="Dice target"><div class="dmark hidden" id="dmark"><span id="dmv"></span></div></div>
+      <div class="dbar" id="dbar"><div class="dclip"><div class="turf"></div><div class="dz lose" id="dzl"></div><div class="dz win" id="dzw"></div></div><div class="dball" id="dball" aria-hidden="true"><i>🏈</i></div><input type="range" id="tg" class="dslider" min="2" max="98" step="0.01" value="50" aria-label="Dice target"><div class="dmark hidden" id="dmark"><span id="dmv"></span></div></div>
       <div class="dticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
       <div class="dhist" id="dh" aria-label="Recent rolls"></div><div class="ddet" id="ddet"></div>
       <div class="dstats" id="dstats"></div><svg class="dgraph" id="dgraph" viewBox="0 0 300 70" preserveAspectRatio="none" aria-label="Session profit"></svg>
@@ -897,6 +897,26 @@ async function dice(root) {
       all ? done() : setTimeout(step, 45); }; step(); });
     cs.forEach(c => c.classList.remove('lock'));
   }
+  /* the football: rolls back and forth along the field while the digits spin, then settles on the roll */
+  let ballAt = 50, ballSpin = 0;
+  const ballX = v => { const w = $r('#dbar').clientWidth; return 17 + (w - 34) * v / 100; };
+  const placeBall = (v, spin = ballSpin) => { const b = $r('#dball'); if (b) b.style.transform = `translate(${ballX(v)}px,-50%) rotate(${spin}deg)`; };
+  function rollBall(to, dur) {
+    const b = $r('#dball'), pts = [ballAt], side = ballAt < 50;
+    for (let i = 0; i < 3; i++) pts.push((side === (i % 2 === 0)) ? 62 + Math.random() * 36 : Math.random() * 38); // zig-zag across the field
+    pts.push(to);
+    const wts = [1, 0.9, 0.8, 1.5], tot = wts.reduce((a, c) => a + c, 0), ends = wts.map((w, i) => wts.slice(0, i + 1).reduce((a, c) => a + c, 0) / tot * dur);
+    const ease = k => k < .5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2, easeOut = k => 1 - (1 - k) ** 3 * (1 - 2.2 * k * (1 - k)); // last leg overshoots a hair, then settles
+    const t0 = performance.now(), w = $r('#dbar').clientWidth, spin0 = ballSpin; b.classList.add('rolling');
+    return new Promise(done => { const step = () => {
+      if (!b.isConnected) return done();
+      const el = Math.min(dur, performance.now() - t0); let i = ends.findIndex(e => el <= e); if (i < 0) i = 3;
+      const a = i ? ends[i - 1] : 0, k = (el - a) / ((ends[i] - a) || 1), v = pts[i] + (pts[i + 1] - pts[i]) * (i === 3 ? easeOut(k) : ease(k));
+      ballSpin = spin0 + (v - pts[0]) * (w - 34) / 100 / 14 * 57.3; placeBall(v); // spin matches the distance rolled
+      if (el < dur) setTimeout(step, 16); else { ballAt = to; b.classList.remove('rolling'); done(); }
+    }; step(); });
+  }
+  const onRs = () => placeBall(ballAt); addEventListener('resize', onRs); stopFns.push(() => removeEventListener('resize', onRs)); setTimeout(onRs, 0);
   function pill() {
     $r('#dh').innerHTML = S.rolls.slice(0, 25).map((h, i) => `<button data-i="${i}" class="${h.win ? 'good' : 'bad'}${sel === h ? ' sel' : ''}">${h.roll.toFixed(2)}</button>`).join('');
   }
@@ -934,12 +954,10 @@ async function dice(root) {
     if (rolling) return false; rolling = true; $r('#roll').disabled = true;
     try {
       const r = await api('POST', '/arcade/dice', { bet: readBet(), target, over }), mk = $r('#dmark'), bar = $r('#dbar'), board = $r('#board');
-      $r('#res').textContent = ''; board.classList.remove('good', 'bad'); mk.className = 'dmark scan'; bar.classList.remove('flash-g', 'flash-r');
-      const scan = setInterval(() => { mk.style.left = pos(Math.random() * 100); }, 55);
-      if (!calm) await odometer(r.roll); else showRoll(r.roll);
-      clearInterval(scan);
+      $r('#res').textContent = ''; board.classList.remove('good', 'bad'); mk.className = 'dmark hidden'; bar.classList.remove('flash-g', 'flash-r'); $r('#dball').classList.remove('good', 'bad');
+      if (!calm) await Promise.all([odometer(r.roll), rollBall(r.roll, fast ? 210 : 820)]); else { showRoll(r.roll); ballAt = r.roll; placeBall(r.roll); }
       if (!root.isConnected) { setBal(r.balance); return false; }
-      mk.style.left = pos(r.roll); mk.className = 'dmark land ' + (r.win ? 'good' : 'bad'); $r('#dmv').textContent = r.roll.toFixed(2);
+      mk.style.left = pos(r.roll); mk.className = 'dmark land ' + (r.win ? 'good' : 'bad'); $r('#dball').classList.add(r.win ? 'good' : 'bad'); $r('#dmv').textContent = r.roll.toFixed(2);
       board.classList.add(r.win ? 'good' : 'bad'); bar.classList.add(r.win ? 'flash-g' : 'flash-r');
       streak = r.win ? streak + 1 : 0; bestStreak = Math.max(bestStreak, streak); if (r.win && r.mult >= 3) fx.bump(board);
       S.rolls.unshift(r); S.profit += r.payout - r.bet; if (r.win) S.best = Math.max(S.best, r.mult);
