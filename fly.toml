@@ -1,5 +1,5 @@
 # Fly.io config. Change `app` to something unique (e.g. hawkbet-slhs) before running `fly launch --copy-config`.
-app = "hawkbet-change-me"
+app = "playhawkbet"
 primary_region = "iad"   # Virginia, closest to Reston
 
 [build]

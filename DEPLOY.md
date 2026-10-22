@@ -1,5 +1,7 @@
 # Deploying HawkBet to Fly.io
 
+**Live now:** https://playhawkbet.fly.dev (app `playhawkbet`, region `iad`, admin username `blaise`, open signups).
+
 Why Fly.io: free automatic HTTPS, a small persistent disk (needed because accounts and balances live in a SQLite file), and a Virginia region near Reston. Expect roughly $2–5 a month for one small machine. Free tiers on other hosts (Render, Heroku-style) wipe the disk on every restart, which would erase everyone's balance, so don't use them for this.
 
 ## One-time setup
@@ -23,6 +25,8 @@ Why Fly.io: free automatic HTTPS, a small persistent disk (needed because accoun
 6. Open `https://hawkbet-slhs.fly.dev`, create **your** account (username = your `ADMIN_USERNAME`, plus the invite code). You'll see the Admin tab.
 
 ## Day to day
+- Update the live site: `fly deploy -a playhawkbet --ha=false`.
+- Forgot a password (even the admin's): `fly ssh console -a playhawkbet -C "node reset-password.js USERNAME NEWPASSWORD"`. Locally: `node reset-password.js USERNAME NEWPASSWORD`.
 - Update the site: `fly deploy -a hawkbet-slhs --ha=false`. The disk and accounts survive.
 - Add/lock/grade lines in the Admin tab before and after each game.
 - Logs: `fly logs -a hawkbet-slhs`. Health check is `/healthz`.
