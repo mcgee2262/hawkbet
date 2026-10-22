@@ -9,13 +9,13 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const PORT = 18000 + Math.floor(Math.random() * 2000);
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hawkbet-test-'));
 const BASE = `http://127.0.0.1:${PORT}`;
-let srv;
+let srv, boss; // boss = the first account, which makes it the admin
 
 before(async () => {
   srv = spawn(process.execPath, ['--no-warnings', path.join(__dirname, '..', 'server.js')], {
     env: { ...process.env, PORT: String(PORT), DB_PATH: path.join(DIR, 'test.db'), BELL_DELAY_SCALE: '0.05', ROCKET_RATE: '0.002', HB_TEST_CHALLENGES: 'play10,games3,win5', NODE_ENV: 'test' }, stdio: 'ignore',
   });
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/healthz')).ok) return; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
+  for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/healthz')).ok) { boss = client(); assert.equal((await boss('POST', '/register', { username: 'boss', password: 'testpass1' })).user.isAdmin, true); return; } } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
   throw new Error('server did not start');
 });
 after(() => { srv.kill(); fs.rmSync(DIR, { recursive: true, force: true }); });
@@ -28,16 +28,19 @@ function client() { // tiny cookie-keeping API client
     return { status: r.status, ...(await r.json()) };
   };
 }
-async function newUser(name) { const api = client(); const r = await api('POST', '/register', { username: name, password: 'testpass1' }); assert.equal(r.status, 200); return api; }
+async function newUser(name) { const api = client(); const r = await api('POST', '/register', { username: name, password: 'testpass1' }); assert.equal(r.status, 200); api.user = name; return api; }
+const setLuck = (api, luck) => boss('POST', '/admin/luck', { username: api.user, luck }); // the Luck Lab is admin-only now
+const give = (api, amount) => boss('POST', '/admin/money', { username: api.user, amount });
 
-test('luck defaults to normal, validates input, and persists across logins', async () => {
+test('luck defaults to normal; only the admin can set it, input is validated, and it persists', async () => {
   const api = await newUser('lucky');
   assert.equal((await api('GET', '/me')).user.luck, 'normal');
-  for (const bad of [0, 11, 5.5, '5', 'max', null, -1, 'x3', 'x1', 'X5']) assert.equal((await api('POST', '/luck', { luck: bad })).status, 400, `rejects ${JSON.stringify(bad)}`);
-  assert.equal((await api('POST', '/luck', { luck: 10 })).luck, 10);
+  assert.equal((await api('POST', '/luck', { luck: 10 })).status, 403, 'players cannot use the Luck Lab');
+  for (const bad of [0, 11, 5.5, '5', 'max', null, -1, 'x3', 'x1', 'X5']) assert.equal((await setLuck(api, bad)).status, 400, `rejects ${JSON.stringify(bad)}`);
+  assert.equal((await setLuck(api, 10)).luck, 10);
   const again = client(); await again('POST', '/login', { username: 'lucky', password: 'testpass1' });
   assert.equal((await again('GET', '/me')).user.luck, 10);
-  assert.equal((await api('POST', '/luck', { luck: 'normal' })).luck, 'normal');
+  assert.equal((await setLuck(api, 'normal')).luck, 'normal');
 });
 
 test('luck changes win chances but keeps average payback the same', async () => {
@@ -46,7 +49,7 @@ test('luck changes win chances but keeps average payback the same', async () => 
   const plinko = async () => (await api('GET', '/arcade/plinko-table?rows=12&risk=high')).mults;
   const normal = { d: await dice(), p: await plinko(), cfg: await api('GET', '/arcade/config') };
   assert.equal(normal.d.zone, 50); assert.equal(normal.d.pays, 1.98);
-  await api('POST', '/luck', { luck: 10 });
+  await setLuck(api, 10);
   const lucky = { d: await dice(), p: await plinko(), cfg: await api('GET', '/arcade/config') };
   assert.equal(lucky.d.zone, 75, 'luck 10 widens the dice win zone by 1.5x');
   assert.ok(Math.abs(lucky.d.pays * lucky.d.zone / 100 - 0.99) < 1e-9, 'dice RTP still 99%');
@@ -57,19 +60,19 @@ test('luck changes win chances but keeps average payback the same', async () => 
   const l = await api('POST', '/arcade/limbo', { bet: 1, target: 3 }); assert.equal(l.pays, 2);
   // Seymour Flip: measure the real win rate at luck 10 vs luck 1
   const rate = async () => { let w = 0; for (let i = 0; i < 300; i++) { await api('POST', '/arcade/flip/start', { bet: 1 }); const r = await api('POST', '/arcade/flip/call', { call: 'heads' }); if (r.lost) continue; w++; await api('POST', '/arcade/flip/cashout'); } return w / 300; };
-  const hi = await rate(); await api('POST', '/luck', { luck: 1 }); const lo = await rate();
+  const hi = await rate(); await setLuck(api, 1); const lo = await rate();
   assert.ok(hi > 0.65 && hi < 0.85, `luck 10 win rate ${hi}`); assert.ok(lo > 0.2 && lo < 0.4, `luck 1 win rate ${lo}`);
 });
 
 test('Super Luck x2/x5/x10 divides your chance to lose, keeps payouts, and is excluded from the leaderboard', async () => {
   const api = await newUser('superfan');
   for (const [lv, flipP] of [['x2', 0.75], ['x5', 0.9], ['x10', 0.95]]) {
-    assert.equal((await api('POST', '/luck', { luck: lv })).luck, lv);
+    assert.equal((await setLuck(api, lv)).luck, lv);
     const cfg = (await api('GET', '/arcade/config')).luck;
     assert.equal(cfg.sup, 1); assert.equal(cfg.pk, 1); assert.ok(Math.abs(cfg.flipP - flipP) < 1e-9, `${lv} flip chance ${cfg.flipP}`);
     assert.ok(Math.abs(cfg.flipPay - 0.5) < 1e-9, 'payouts stay priced at Normal');
   }
-  await api('POST', '/luck', { luck: 'x5' });
+  await setLuck(api, 'x5');
   const d = await api('POST', '/arcade/dice', { bet: 1, target: 50, over: true });
   assert.equal(d.zone, 90); assert.equal(d.pays, 1.98, 'dice pays like Normal');
   assert.equal((await api('POST', '/arcade/limbo', { bet: 1, target: 1.01 })).status, 200, 'no raised minimum under Super Luck');
@@ -77,7 +80,7 @@ test('Super Luck x2/x5/x10 divides your chance to lose, keeps payouts, and is ex
   assert.ok(w / 300 > 0.83 && w / 300 < 0.96, `x5 win rate ${w / 300}`);
   const lb = await api('GET', '/leaderboard'), me = (await api('GET', '/me')).user;
   assert.notEqual(me.balance, 1000, 'balance moved'); assert.equal(lb.me.net, 0, 'Super Luck play does not count toward net winnings');
-  await api('POST', '/luck', { luck: 'normal' });
+  await setLuck(api, 'normal');
   assert.equal((await api('GET', '/arcade/config')).luck.sup, 0);
 });
 
@@ -97,7 +100,7 @@ test('Seahawk Slots: 3x3 grid, 5 paylines, wild hawk, payout matches the grid, ~
   const api = await newUser('slotfan');
   const cfg = (await api('GET', '/arcade/config')).slots;
   assert.ok(cfg.rtp > 0.95 && cfg.rtp < 1, `exact payback ${cfg.rtp}`); assert.equal(cfg.lines.length, 5); assert.equal(cfg.pays.trophy / 5, 250);
-  await api('POST', '/bank', { amount: 1000 }); await api('POST', '/bank', { amount: 1000 });
+  await give(api, 2000);
   const lineOf = (g, L) => L.map((r, c) => g[r][c]);
   const expect = g => { let t = 0; for (const L of cfg.lines) { const s = lineOf(g, L), non = s.filter(x => x !== 'hawk'); let sym = null;
     if (s[0] === s[1] && s[1] === s[2]) sym = s[0]; else if (!s.includes('trophy') && non.length && non.every(x => x === non[0])) sym = non[0]; if (sym) t += cfg.pays[sym]; } return t / 5; };
@@ -246,11 +249,11 @@ test('existing flows still work: slips, bank and a chance game', async () => {
   const me = (await api('GET', '/me')).user;
   const slip = await api('POST', '/slips', { mode: 'power', entry: 10, picks: [{ propId: 1, dir: 'more' }, { propId: 2, dir: 'less' }] });
   assert.equal(slip.balance, me.balance - 10);
-  assert.equal((await api('POST', '/bank', { amount: 500 })).balance, me.balance - 10 + 500);
+  assert.equal((await api('POST', '/bank')).status, 400, 'the Bank only helps when you are broke');
   const d = await api('POST', '/arcade/dice', { bet: 10, target: 50, over: true });
   assert.ok(typeof d.roll === 'number' && d.payout >= 0);
   // no bet limit: a stake above the old 1,000 cap works when you can afford it
-  await api('POST', '/bank', { amount: 1000 });
+  await give(api, 1000);
   const bal = (await api('GET', '/me')).user.balance, big = await api('POST', '/arcade/dice', { bet: 1500, target: 50, over: true });
   assert.equal(big.bet, 1500); assert.equal(big.balance, bal - 1500 + big.payout);
   assert.equal((await api('POST', '/arcade/dice', { bet: 0, target: 50, over: true })).status, 400, 'bet must be at least 1');
@@ -268,4 +271,68 @@ test('Scoreboard Roll is provably fair: rolls recompute from the revealed seed, 
     const v = Math.floor(crypto.createHmac('sha256', rot.revealed.serverSeed).update(`${r.clientSeed}:${r.nonce}`).digest().readUInt32BE(0) / 4294967296 * 10000) / 100;
     assert.equal(v, r.roll, 'roll recomputes exactly');
   }
+});
+
+test('Hawk Shop: gear adds luck, boosters run out, Mythic items are gated and wear out, spending never hurts your rank', async () => {
+  const api = await newUser('shopper');
+  assert.equal((await api('POST', '/shop/buy', { itemId: 'hat_snap' })).status, 400, 'cannot afford it yet');
+  await give(api, 100000);
+  assert.equal((await api('GET', '/notes')).notes.length, 1, 'gift shows up as a note'); assert.equal((await api('GET', '/notes')).notes.length, 0, 'notes are shown once');
+  const net0 = (await api('GET', '/leaderboard')).me.net;
+  let s = await api('POST', '/shop/buy', { itemId: 'hat_snap' }); assert.equal(s.luck.level, 6); assert.equal(s.gear.hat, 'hat_snap');
+  s = await api('POST', '/shop/buy', { itemId: 'face_shades' }); assert.equal(s.luck.level, 7);
+  assert.equal((await api('GET', '/me')).user.luck, 7); assert.ok(Math.abs((await api('GET', '/arcade/config')).luck.k - 1.2) < 1e-9);
+  assert.equal((await api('GET', '/leaderboard')).me.net, net0, 'buying cosmetics does not lower net winnings');
+  assert.equal((await api('POST', '/shop/buy', { itemId: 'hat_snap' })).status, 400, 'no buying twice');
+  s = await api('POST', '/shop/equip', { slot: 'hat', itemId: null }); assert.equal(s.luck.level, 6, 'unequipping drops the luck');
+  assert.equal((await api('POST', '/shop/equip', { slot: 'hat', itemId: 'hat_grad' })).status, 400, 'cannot wear what you do not own');
+  s = await api('POST', '/shop/booster', { id: 'penny' }); assert.equal(s.luck.level, 7); assert.equal(s.boosters.find(b => b.id === 'penny').active, 25);
+  for (let i = 0; i < 25; i++) await api('POST', '/arcade/dice', { bet: 1, target: 50, over: true });
+  assert.equal((await api('GET', '/shop')).luck.level, 6, 'the booster ran out after 25 luck-game rounds');
+  // Mythic: gated by level even with the money
+  await give(api, 60e6);
+  const m = await api('POST', '/shop/buy', { itemId: 'myth_diamond' }); assert.equal(m.status, 400); assert.match(m.error, /level 5/);
+  const shop = await api('GET', '/shop'), wings = shop.items.find(i => i.id === 'myth_wings');
+  assert.ok(wings.locks.some(l => /Diamond Trophy/.test(l)) && wings.locks.some(l => /leaderboard winnings/.test(l)), 'wings show every missing gate');
+  // the admin can hand one out; it gives Super Luck x2 and uses a charge per luck-game round
+  assert.equal((await boss('POST', '/admin/give-item', { username: 'shopper', itemId: 'myth_diamond' })).ok, true);
+  s = await api('POST', '/shop/equip', { slot: 'mythic', itemId: 'myth_diamond' }); assert.equal(s.luck.luck, 'x2');
+  const before = (await api('GET', '/leaderboard')).me.net;
+  for (let i = 0; i < 3; i++) await api('POST', '/arcade/dice', { bet: 1000, target: 50, over: true });
+  assert.equal((await api('GET', '/shop')).items.find(i => i.id === 'myth_diamond').charges, 997);
+  assert.equal((await api('GET', '/leaderboard')).me.net, before, 'Super Luck rounds stay off the leaderboard');
+  await api('POST', '/arcade/plinko', { bet: 1, rows: 8, risk: 'low' });
+  assert.equal((await api('GET', '/shop')).items.find(i => i.id === 'myth_diamond').charges, 997, 'non-luck games do not use charges');
+  s = await api('POST', '/shop/recharge', { itemId: 'myth_diamond' }); assert.equal(s.items.find(i => i.id === 'myth_diamond').charges, 1000);
+});
+
+test('admin tools: players, money for one or everyone, balance, shop prices and sales, password reset, bans, log; Bank only when broke', async () => {
+  const api = await newUser('student'), other = await newUser('student2');
+  assert.equal((await api('GET', '/admin/users')).status, 403, 'players cannot open admin tools');
+  assert.equal((await api('POST', '/admin/money', { username: 'student', amount: 5 })).status, 403);
+  const users = (await boss('GET', '/admin/users')).users; assert.ok(users.some(u => u.username === 'student'));
+  const b0 = (await other('GET', '/me')).user.balance;
+  assert.equal((await boss('POST', '/admin/money', { all: true, amount: 250, note: 'Homecoming!' })).ok, true);
+  assert.equal((await other('GET', '/me')).user.balance, b0 + 250);
+  assert.match((await other('GET', '/notes')).notes[0].msg, /Homecoming/);
+  await boss('POST', '/admin/money', { username: 'student', amount: -100000 }); assert.equal((await api('GET', '/me')).user.balance, 0, 'taking stops at zero');
+  // Bank: refill only when broke, once an hour
+  const bk = await api('POST', '/bank'); assert.equal(bk.balance, 1000); assert.equal((await api('POST', '/bank')).status, 400);
+  assert.equal((await boss('POST', '/admin/balance', { username: 'student', balance: 50 })).balance, 50);
+  assert.match((await api('POST', '/bank')).error, /once an hour/);
+  // shop control
+  await boss('POST', '/admin/shop', { itemId: 'hat_bow', price: 10 }); await boss('POST', '/admin/shop', { sale: 50 });
+  assert.equal((await api('GET', '/shop')).items.find(i => i.id === 'hat_bow').price, 5);
+  await boss('POST', '/admin/shop', { itemId: 'hat_bow', off: true }); assert.equal((await api('POST', '/shop/buy', { itemId: 'hat_bow' })).status, 400, 'turned-off items cannot be bought');
+  await boss('POST', '/admin/shop', { sale: 0, itemId: 'hat_bow', price: null, off: false });
+  // password reset logs them out; bans block login
+  assert.equal((await boss('POST', '/admin/password', { username: 'student', password: 'newpass9' })).ok, true);
+  assert.equal((await api('GET', '/me')).user, null, 'old session ended');
+  const re = client(); assert.equal((await re('POST', '/login', { username: 'student', password: 'newpass9' })).status, 200);
+  await boss('POST', '/admin/ban', { username: 'student', banned: true });
+  assert.equal((await re('GET', '/me')).user, null); assert.equal((await re('POST', '/login', { username: 'student', password: 'newpass9' })).status, 403);
+  assert.equal((await boss('POST', '/admin/ban', { username: 'boss', banned: true })).status, 400, 'cannot ban an admin');
+  await boss('POST', '/admin/ban', { username: 'student', banned: false });
+  assert.equal((await re('POST', '/login', { username: 'student', password: 'newpass9' })).status, 200);
+  const log = (await boss('GET', '/admin/log')).log; assert.ok(['give', 'take', 'set_balance', 'sale', 'password', 'ban', 'unban'].every(a => log.some(l => l.action === a)), 'every action is logged');
 });

@@ -12,7 +12,7 @@ const INVITE_CODE = process.env.INVITE_CODE || ''; // if set, signups must inclu
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(path.dirname(process.env.DB_PATH || path.join(__dirname, 'data', 'x')), 'backups');
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'hawkbet.db');
 const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || '').toLowerCase(); // if set, only this username is admin; otherwise the first account is
-const START_BAL = 1000, MAX_BAL = 1e15, capAmt = n => Math.min(MAX_BAL, n), CLAIM_AMT = 100, CLAIM_BELOW = 100, CLAIM_EVERY_MS = 24 * 3600e3;
+const START_BAL = 1000, MAX_BAL = 1e15, capAmt = n => Math.min(MAX_BAL, n), CLAIM_AMT = 1000, CLAIM_BELOW = 100, CLAIM_EVERY_MS = 3600e3; // the Bank only helps when you're broke: 1,000 once an hour
 const SESSION_MS = 30 * 24 * 3600e3;
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -90,9 +90,9 @@ function newSession(uid, res) {
 function userFrom(req) {
   const m = /(?:^|;\s*)sp_sid=([a-f0-9]{64})/.exec(req.headers.cookie || ''); if (!m) return null;
   const row = db.prepare('SELECT u.*, s.expires FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?').get(sha(m[1]));
-  if (!row || row.expires < now()) return null; return row;
+  if (!row || row.expires < now() || row.banned) return null; return row;
 }
-const publicUser = u => ({ username: u.username, balance: u.balance, added: u.added || 0, lvl: levelInfo(u.xp), luck: luckOut(u.luck), isAdmin: !!u.is_admin, canClaim: u.balance < CLAIM_BELOW && now() - u.last_claim >= CLAIM_EVERY_MS });
+const publicUser = u => ({ username: u.username, balance: u.balance, added: u.added || 0, lvl: levelInfo(u.xp), luck: luckOut(effLuck(u)), override: hasOverride(u), gear: gearOf(u), isAdmin: !!u.is_admin, canClaim: u.balance < CLAIM_BELOW && now() - u.last_claim >= CLAIM_EVERY_MS, nextClaim: Math.max(0, u.last_claim + CLAIM_EVERY_MS - now()) });
 const hits = new Map(); // crude per-IP limiter for auth routes
 function limit(ip) { const t = now(), a = (hits.get(ip) || []).filter(x => t - x < 600e3); a.push(t); hits.set(ip, a); if (a.length > 30) bad('Too many attempts, try again in a few minutes', 429); }
 
@@ -116,6 +116,7 @@ function login(ctx) {
   const name = String(ctx.body.username || '').trim().toLowerCase(), u = db.prepare('SELECT * FROM users WHERE username=?').get(name);
   const ok = u && crypto.timingSafeEqual(Buffer.from(hashPw(String(ctx.body.password || ''), u.salt), 'hex'), Buffer.from(u.hash, 'hex'));
   if (!ok) bad('Wrong username or password', 401);
+  if (u.banned) bad('This account has been banned. Talk to the admin.', 403);
   newSession(u.id, ctx.res); return { user: publicUser(u) };
 }
 
@@ -209,7 +210,10 @@ const MINES_N = 25, minesMult = (k, m) => { let r = 0.99; for (let i = 0; i < k;
 /* Luck: k = 0.6 (level 1) … 1.0 (level 5 / Normal) … 1.5 (level 10). In the five luck games it multiplies your chance to win,
    and payouts shrink to match, so the average payback (RTP) is identical at every level. Locked in when a round starts. */
 const luckInfo = u => { // k = how strongly odds move; pk = how strongly payouts move
-  const l = u && u.luck; if (l == null || l === 'normal') return { k: 1, pk: 1, sup: 0 };
+  if (!u) return { k: 1, pk: 1, sup: 0 }; if (!u._luck) u._luck = luckOf(effLuck(u)); return u._luck;
+};
+const luckOf = l => {
+  if (l == null || l === 'normal') return { k: 1, pk: 1, sup: 0 };
   if (l[0] === 'x') return { k: Number(l.slice(1)), pk: 1, sup: 1 }; // Super Luck: odds improve, payouts do NOT shrink
   const k = 0.5 + 0.1 * Number(l); return { k, pk: k, sup: 0 };
 };
@@ -227,6 +231,7 @@ function activeRound(uid, game) { return db.prepare("SELECT * FROM rounds WHERE 
 function startRound(ctx, game, state) {
   const bet = stake(ctx.body.bet);
   if (activeRound(ctx.user.id, game)) bad('Finish your current round first', 409);
+  spendLuck(ctx.user, game);
   const id = Number(db.prepare('INSERT INTO rounds(user_id,game,bet,state,created) VALUES(?,?,?,?,?)').run(ctx.user.id, game, bet, JSON.stringify(state), now()).lastInsertRowid);
   return { id, bet, balance: adjust(ctx.user.id, -bet, game + '_bet', id) };
 }
@@ -295,6 +300,7 @@ const arcade = {
 /* ---------- more arcade games ---------- */
 function oneShot(ctx, game, state, mult, bet = stake(ctx.body.bet)) { // bet, decide and pay in one transaction
   adjust(ctx.user.id, -bet, game + '_bet');
+  spendLuck(ctx.user, game);
   const payout = capAmt(Math.round(bet * mult));
   if (state && state.sup) superNet(ctx.user.id, payout - bet);
   addXp(ctx.user.id, 10 + (payout > bet ? 5 : 0));
@@ -459,7 +465,7 @@ arcade.active = ctx => {
   return { round: r ? VIEWS[game](r, JSON.parse(r.state)) : null };
 };
 const baseConfig = arcade.config;
-arcade.config = ctx => ({ ...baseConfig(ctx), luck: { ...luckInfo(ctx.user), flipP: streakP(ctx), flipPay: streakPay(ctx), rpsP: streakP(ctx), rpsPay: streakPay(ctx) }, skillTiers: SKILL_TIERS, slots: { pays: SLOT_PAYS, lines: SLOT_LINES, rtp: SLOT_RTP }, flipMax: FLIP_MAX, rpsMax: RPS_MAX });
+arcade.config = ctx => ({ ...baseConfig(ctx), luckName: luckOut(effLuck(ctx.user)), luck: { ...luckInfo(ctx.user), flipP: streakP(ctx), flipPay: streakPay(ctx), rpsP: streakP(ctx), rpsPay: streakPay(ctx) }, skillTiers: SKILL_TIERS, slots: { pays: SLOT_PAYS, lines: SLOT_LINES, rtp: SLOT_RTP }, flipMax: FLIP_MAX, rpsMax: RPS_MAX });
 
 /* ---------- Seahawk Launch (crash): cash out before the rocket blows ----------
    The server picks the crash point and keeps the clock. The browser never learns the crash point early:
@@ -626,6 +632,198 @@ function setLuck(ctx) {
   db.prepare('UPDATE users SET luck=? WHERE id=?').run(v, ctx.user.id); return { luck: luckOut(v) };
 }
 
+/* ---------- Hawk Shop: cosmetics that carry luck, Luck Boosters, Mythic Super Luck items ----------
+   Everyone plays at Luck 5 (Normal). Each equipped item adds its luck (Rare +1, Epic +2, Legendary +3), boosters add more,
+   capped at 10. Levels 6-10 keep the same 99% payback, so that play still counts on the leaderboard.
+   Mythic items give Super Luck x2/x5/x10 (more money, so those rounds stay off the leaderboard), wear out after a set number
+   of luck-game rounds, and are gated by level, prerequisites and leaderboard winnings that Super Luck can't farm.
+   The admin can override anyone's luck (the Luck Lab); an override ignores gear and boosters. */
+db.exec(`CREATE TABLE IF NOT EXISTS inventory(user_id INTEGER NOT NULL, item_id TEXT NOT NULL, charges INTEGER, ts INTEGER NOT NULL, PRIMARY KEY(user_id, item_id));
+CREATE TABLE IF NOT EXISTS boosters(user_id INTEGER NOT NULL, kind TEXT NOT NULL, rounds_left INTEGER NOT NULL, PRIMARY KEY(user_id, kind));
+CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY, admin_id INTEGER NOT NULL, action TEXT NOT NULL, target TEXT, detail TEXT, ts INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, msg TEXT NOT NULL, ts INTEGER NOT NULL, seen INTEGER NOT NULL DEFAULT 0);`);
+for (const [col, def] of [['gear', "TEXT NOT NULL DEFAULT '{}'"], ['spent', 'INTEGER NOT NULL DEFAULT 0'], ['banned', 'INTEGER NOT NULL DEFAULT 0']]) if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name=?").get(col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} ${def}`);
+const getSetting = (k, d = null) => { const r = db.prepare('SELECT value FROM settings WHERE key=?').get(k); return r ? JSON.parse(r.value) : d; };
+const putSetting = (k, v) => db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k, JSON.stringify(v));
+if (!getSetting('luck_reset_v1')) { db.exec("UPDATE users SET luck='normal' WHERE is_admin=0"); putSetting('luck_reset_v1', true); } // luck is earned in the shop now
+// net winnings for the leaderboard: free money (added) and Super Luck results don't count; shop spending doesn't hurt you
+const NET_SQL = `balance-${START_BAL}-added-super_net+spent`;
+const LUCK_GAMES = new Set(['flip', 'rps', 'cross', 'dice', 'limbo']);
+const SLOTS = ['skin', 'hat', 'face', 'body', 'held', 'bg', 'mythic'];
+const RARITY_LUCK = { common: 0, rare: 1, epic: 2, legendary: 3 };
+const ITEMS = [ // [id, slot, name, emoji, rarity, price, extra]
+  ['skin_classic', 'skin', 'Classic Seahawk', '🦅', 'common', 0], ['skin_blue', 'skin', 'Lake Blue', '🦅', 'common', 5000], ['skin_ice', 'skin', 'Ice Hawk', '🦅', 'common', 8000],
+  ['skin_shadow', 'skin', 'Shadow Hawk', '🦅', 'rare', 30000], ['skin_neon', 'skin', 'Neon Hawk', '🦅', 'epic', 300000], ['skin_gold', 'skin', 'Golden Hawk', '🦅', 'legendary', 6000000],
+  ['hat_bow', 'hat', 'Spirit Bow', '🎀', 'common', 1500], ['hat_sun', 'hat', 'Beach Hat', '👒', 'common', 2500], ['hat_snap', 'hat', 'South Lakes Snapback', '🧢', 'rare', 25000],
+  ['hat_grad', 'hat', 'Graduation Cap', '🎓', 'epic', 250000], ['hat_top', 'hat', 'Golden Top Hat', '🎩', 'legendary', 2500000],
+  ['face_nerd', 'face', 'Study Glasses', '👓', 'common', 1000], ['face_shades', 'face', 'Shades', '🕶️', 'rare', 20000], ['face_goggles', 'face', 'Swim Goggles', '🥽', 'epic', 200000], ['face_star', 'face', 'Star Eyes', '🤩', 'legendary', 2000000],
+  ['body_tee', 'body', 'Spirit Tee', '👕', 'common', 2000], ['body_hoodie', 'body', 'Seahawks Hoodie', '🧥', 'rare', 30000], ['body_tie', 'body', 'Prom Tie', '👔', 'epic', 300000], ['body_medal', 'body', 'Gold Medal', '🥇', 'legendary', 3000000],
+  ['held_finger', 'held', 'Foam Finger', '☝️', 'common', 1500], ['held_football', 'held', 'Game Ball', '🏈', 'rare', 25000], ['held_bball', 'held', 'Basketball', '🏀', 'rare', 25000],
+  ['held_money', 'held', 'Money Bag', '💰', 'epic', 400000], ['held_trophy', 'held', 'Golden Trophy', '🏆', 'legendary', 4000000],
+  ['bg_stadium', 'bg', 'Stadium Lights', '🏟️', 'common', 3000], ['bg_cafe', 'bg', 'Cafeteria', '🍕', 'common', 3000], ['bg_bus', 'bg', 'Bus Loop', '🚌', 'rare', 40000],
+  ['bg_space', 'bg', 'Outer Space', '🌌', 'epic', 500000], ['bg_aurora', 'bg', 'Aurora', '🌈', 'legendary', 5000000],
+  ['myth_diamond', 'mythic', 'Diamond Trophy', '💎', 'mythic', 50e6, { sup: 2, charges: 1000, level: 5 }],
+  ['myth_wings', 'mythic', 'Golden Seahawk Wings', '🪽', 'mythic', 5e9, { sup: 5, charges: 500, level: 6, needs: 'myth_diamond', net: 1e6 }],
+  ['myth_crown', 'mythic', 'Crown of the Lakes', '👑', 'mythic', 1e12, { sup: 10, charges: 250, level: 7, needs: 'myth_wings', net: 25e6, allAch: true }],
+].map(([id, slot, name, emoji, rarity, price, x = {}]) => ({ id, slot, name, emoji, rarity, price, luck: RARITY_LUCK[rarity] || 0, sup: 0, ...x }));
+const ITEM = Object.fromEntries(ITEMS.map(i => [i.id, i]));
+const BOOSTERS = { penny: { name: 'Lucky Penny', emoji: '🪙', luck: 1, rounds: 25, price: 5000 }, clover: { name: 'Four-Leaf Clover', emoji: '🍀', luck: 2, rounds: 50, price: 40000 }, feather: { name: 'Golden Feather', emoji: '🪶', sup: 2, rounds: 10, price: 500000 } };
+const shopCfg = () => getSetting('shop', { sale: 0, items: {} }); // admin edits: { sale: %, items: { id: { price, off } } }
+const itemPrice = (it, cfg = shopCfg()) => Math.round(((cfg.items[it.id] && cfg.items[it.id].price) ?? it.price) * (1 - (cfg.sale || 0) / 100));
+const gearOf = u => { try { return JSON.parse(u.gear || '{}'); } catch (e) { return {}; } };
+function luckParts(u) { // where your luck comes from right now
+  const gear = gearOf(u), parts = []; let lv = 0, sup = 0;
+  for (const s of SLOTS) {
+    const it = ITEM[gear[s]]; if (!it) continue;
+    if (it.sup) { const inv = db.prepare('SELECT charges FROM inventory WHERE user_id=? AND item_id=?').get(u.id, it.id); if (inv && inv.charges > 0) { sup = Math.max(sup, it.sup); parts.push({ src: it.name, emoji: it.emoji, sup: it.sup, charges: inv.charges }); } }
+    else if (it.luck) { lv += it.luck; parts.push({ src: it.name, emoji: it.emoji, luck: it.luck }); }
+  }
+  for (const b of db.prepare('SELECT kind, rounds_left FROM boosters WHERE user_id=? AND rounds_left>0').all(u.id)) {
+    const B = BOOSTERS[b.kind]; if (!B) continue; if (B.sup) sup = Math.max(sup, B.sup); else lv += B.luck;
+    parts.push({ src: B.name, emoji: B.emoji, luck: B.luck, sup: B.sup, rounds: b.rounds_left, booster: true });
+  }
+  const level = Math.min(10, 5 + lv);
+  return { level, sup, parts, luck: sup ? 'x' + sup : level === 5 ? 'normal' : String(level) };
+}
+const hasOverride = u => u.luck != null && u.luck !== 'normal';
+const effLuck = u => hasOverride(u) ? u.luck : luckParts(u).luck;
+function spendLuck(u, game) { // a luck-game round uses up one booster round and one Mythic charge (only the ones actually in play)
+  if (!LUCK_GAMES.has(game) || hasOverride(u)) return;
+  db.prepare('UPDATE boosters SET rounds_left=rounds_left-1 WHERE user_id=? AND rounds_left>0').run(u.id);
+  db.prepare('DELETE FROM boosters WHERE user_id=? AND rounds_left<=0').run(u.id);
+  const m = ITEM[gearOf(u).mythic]; if (m) db.prepare('UPDATE inventory SET charges=charges-1 WHERE user_id=? AND item_id=? AND charges>0').run(u.id, m.id);
+}
+const netOf = uid => db.prepare(`SELECT ${NET_SQL} AS n FROM users WHERE id=?`).get(uid).n;
+function itemLocks(u, it, owned) { // reasons you can't buy it yet (empty = buyable)
+  const out = [], lvl = levelInfo(u.xp).level;
+  if (it.level && lvl < it.level) out.push(`Reach level ${it.level} (${LEVELS[it.level - 1][1]})`);
+  if (it.needs && !owned.has(it.needs)) out.push(`Own the ${ITEM[it.needs].name}`);
+  if (it.net && netOf(u.id) < it.net) out.push(`Earn ${it.net.toLocaleString('en-US')} in leaderboard winnings`);
+  if (it.allAch && db.prepare('SELECT COUNT(*) n FROM achievements WHERE user_id=?').get(u.id).n < ACH.length) out.push('Unlock every achievement');
+  return out;
+}
+function shopState(ctx) {
+  const u = db.prepare('SELECT * FROM users WHERE id=?').get(ctx.user.id), cfg = shopCfg(), gear = gearOf(u);
+  const inv = new Map(db.prepare('SELECT item_id, charges FROM inventory WHERE user_id=?').all(u.id).map(r => [r.item_id, r.charges])); inv.set('skin_classic', null);
+  const owned = new Set(inv.keys()), lp = luckParts(u);
+  return {
+    balance: u.balance, sale: cfg.sale || 0, gear, override: hasOverride(u) ? luckOut(u.luck) : null, luck: { level: lp.level, sup: lp.sup, parts: lp.parts, luck: luckOut(effLuck(u)) },
+    items: ITEMS.map(it => ({ id: it.id, slot: it.slot, name: it.name, emoji: it.emoji, rarity: it.rarity, luck: it.luck, sup: it.sup, maxCharges: it.charges || null, price: itemPrice(it, cfg), basePrice: it.price,
+      off: !!(cfg.items[it.id] && cfg.items[it.id].off), owned: owned.has(it.id), charges: inv.get(it.id) ?? null, equipped: gear[it.slot] === it.id, locks: owned.has(it.id) ? [] : itemLocks(u, it, owned) })),
+    boosters: Object.entries(BOOSTERS).map(([id, b]) => ({ id, ...b, price: Math.round(b.price * (1 - (cfg.sale || 0) / 100)), active: (db.prepare('SELECT rounds_left FROM boosters WHERE user_id=? AND kind=?').get(u.id, id) || {}).rounds_left || 0 })),
+  };
+}
+function spend(uid, amt, kind) { db.prepare('UPDATE users SET spent=spent+? WHERE id=?').run(amt, uid); return adjust(uid, -amt, kind); }
+function buyItem(ctx) {
+  const it = ITEM[String(ctx.body.itemId)]; if (!it) bad('No such item');
+  tx(() => {
+    const u = db.prepare('SELECT * FROM users WHERE id=?').get(ctx.user.id), cfg = shopCfg();
+    if (cfg.items[it.id] && cfg.items[it.id].off) bad('That item is not for sale right now');
+    const owned = new Set(db.prepare('SELECT item_id FROM inventory WHERE user_id=?').all(u.id).map(r => r.item_id)); owned.add('skin_classic');
+    if (owned.has(it.id)) bad('You already own that');
+    const locks = itemLocks(u, it, owned); if (locks.length) bad('Locked: ' + locks.join(' · '));
+    const price = itemPrice(it, cfg); if (u.balance < price) bad('Not enough Hawk Bucks');
+    if (price) spend(u.id, price, 'shop');
+    db.prepare('INSERT INTO inventory(user_id,item_id,charges,ts) VALUES(?,?,?,?)').run(u.id, it.id, it.charges || null, now());
+    const gear = gearOf(u); gear[it.slot] = it.id; db.prepare('UPDATE users SET gear=? WHERE id=?').run(JSON.stringify(gear), u.id); // wear it right away
+  });
+  return shopState(ctx);
+}
+function buyBooster(ctx) {
+  const id = String(ctx.body.id), B = BOOSTERS[id]; if (!B) bad('No such booster');
+  tx(() => {
+    const price = Math.round(B.price * (1 - (shopCfg().sale || 0) / 100)); if (balanceOf(ctx.user.id) < price) bad('Not enough Hawk Bucks');
+    spend(ctx.user.id, price, 'booster');
+    db.prepare('INSERT INTO boosters(user_id,kind,rounds_left) VALUES(?,?,?) ON CONFLICT(user_id,kind) DO UPDATE SET rounds_left=rounds_left+excluded.rounds_left').run(ctx.user.id, id, B.rounds);
+  });
+  return shopState(ctx);
+}
+function equipItem(ctx) {
+  const slot = String(ctx.body.slot); if (!SLOTS.includes(slot)) bad('Bad slot');
+  const id = ctx.body.itemId == null ? null : String(ctx.body.itemId), u = db.prepare('SELECT * FROM users WHERE id=?').get(ctx.user.id), gear = gearOf(u);
+  if (id) { const it = ITEM[id]; if (!it || it.slot !== slot) bad('That item does not go there'); if (id !== 'skin_classic' && !db.prepare('SELECT 1 FROM inventory WHERE user_id=? AND item_id=?').get(u.id, id)) bad("You don't own that"); gear[slot] = id; }
+  else delete gear[slot];
+  db.prepare('UPDATE users SET gear=? WHERE id=?').run(JSON.stringify(gear), u.id);
+  return shopState(ctx);
+}
+function rechargeItem(ctx) {
+  const it = ITEM[String(ctx.body.itemId)]; if (!it || !it.charges) bad('Only Mythic items need recharging');
+  tx(() => {
+    const inv = db.prepare('SELECT charges FROM inventory WHERE user_id=? AND item_id=?').get(ctx.user.id, it.id); if (!inv) bad("You don't own that");
+    if (inv.charges >= it.charges) bad('Already fully charged');
+    const price = Math.round(itemPrice(it) / 10); if (balanceOf(ctx.user.id) < price) bad('Not enough Hawk Bucks');
+    spend(ctx.user.id, price, 'recharge'); db.prepare('UPDATE inventory SET charges=? WHERE user_id=? AND item_id=?').run(it.charges, ctx.user.id, it.id);
+  });
+  return shopState(ctx);
+}
+
+/* ---------- admin tools: money, items, luck, shop, passwords, bans. Every action is logged. ---------- */
+const alog = (ctx, action, target, detail) => db.prepare('INSERT INTO admin_log(admin_id,action,target,detail,ts) VALUES(?,?,?,?,?)').run(ctx.user.id, action, target, detail, now());
+const note = (uid, msg, from) => { if (uid !== from) db.prepare('INSERT INTO notes(user_id,msg,ts) VALUES(?,?,?)').run(uid, msg, now()); }; // no notes to yourself
+const targetUser = ctx => { const u = db.prepare('SELECT * FROM users WHERE username=?').get(String(ctx.body.username || '').toLowerCase()); if (!u) bad('No player with that username', 404); return u; };
+const adminText = v => String(v ?? '').trim().slice(0, 120);
+function adminUsers() {
+  return { users: db.prepare(`SELECT id, username, balance, xp, added, spent, ${NET_SQL} AS net, luck, banned, is_admin, gear, created, (SELECT MAX(created) FROM rounds WHERE user_id=users.id) AS last FROM users ORDER BY id`).all()
+    .map(u => ({ ...u, gear: gearOf(u), level: levelInfo(u.xp).level, luck: luckOut(u.luck), banned: !!u.banned, isAdmin: !!u.is_admin, items: db.prepare('SELECT item_id FROM inventory WHERE user_id=?').all(u.id).map(r => r.item_id) })) };
+}
+function adminMoney(ctx) {
+  const amt = ctx.body.amount, why = adminText(ctx.body.note);
+  if (!Number.isInteger(amt) || amt === 0 || Math.abs(amt) > MAX_BAL) bad('Amount must be a whole number (negative to take)');
+  return tx(() => {
+    const list = ctx.body.all === true ? db.prepare('SELECT * FROM users WHERE banned=0').all() : [targetUser(ctx)];
+    for (const u of list) {
+      if (amt > 0) { db.prepare('UPDATE users SET added=added+? WHERE id=?').run(amt, u.id); adjust(u.id, Math.min(amt, MAX_BAL - u.balance), 'admin_gift'); note(u.id, `🎁 The admin sent you ${amt.toLocaleString('en-US')} Hawk Bucks!${why ? ' "' + why + '"' : ''}`, ctx.user.id); }
+      else { const take = Math.min(-amt, balanceOf(u.id)); if (take) adjust(u.id, -take, 'admin_take'); note(u.id, `The admin removed ${take.toLocaleString('en-US')} Hawk Bucks.${why ? ' "' + why + '"' : ''}`, ctx.user.id); }
+    }
+    alog(ctx, amt > 0 ? 'give' : 'take', ctx.body.all === true ? 'everyone' : list[0].username, `${amt}${why ? ' · ' + why : ''}`);
+    return { ok: true, count: list.length };
+  });
+}
+function adminSetBalance(ctx) {
+  const v = ctx.body.balance; if (!Number.isInteger(v) || v < 0 || v > MAX_BAL) bad('Balance must be a whole number from 0 to 1,000,000,000,000,000');
+  return tx(() => { const u = targetUser(ctx), d = v - u.balance; if (d > 0) db.prepare('UPDATE users SET added=added+? WHERE id=?').run(d, u.id); if (d) adjust(u.id, d, 'admin_set'); alog(ctx, 'set_balance', u.username, `${u.balance} → ${v}`); return { ok: true, balance: v }; });
+}
+function adminItem(ctx, give) {
+  const it = ITEM[String(ctx.body.itemId)]; if (!it || it.id === 'skin_classic') bad('No such item');
+  return tx(() => {
+    const u = targetUser(ctx);
+    if (give) { db.prepare('INSERT INTO inventory(user_id,item_id,charges,ts) VALUES(?,?,?,?) ON CONFLICT(user_id,item_id) DO UPDATE SET charges=excluded.charges').run(u.id, it.id, it.charges || null, now()); note(u.id, `🎁 The admin gave you ${it.emoji} ${it.name}! Find it in your Locker.`, ctx.user.id); }
+    else { db.prepare('DELETE FROM inventory WHERE user_id=? AND item_id=?').run(u.id, it.id); const g = gearOf(u); if (g[it.slot] === it.id) { delete g[it.slot]; db.prepare('UPDATE users SET gear=? WHERE id=?').run(JSON.stringify(g), u.id); } }
+    alog(ctx, give ? 'give_item' : 'take_item', u.username, it.name); return { ok: true };
+  });
+}
+function adminLuck(ctx) {
+  const v = parseLuck(ctx.body.luck); if (v === null) bad('Luck must be "normal", 1-10, or x2 / x5 / x10');
+  const u = targetUser(ctx); db.prepare('UPDATE users SET luck=? WHERE id=?').run(v, u.id); alog(ctx, 'luck', u.username, String(v));
+  if (u.id !== ctx.user.id) note(u.id, v === 'normal' ? 'The admin cleared your luck override. Your gear decides your luck again.' : `🍀 The admin set your luck to ${String(v)[0] === 'x' ? 'Super Luck ' + v : 'level ' + v}!`);
+  return { ok: true, luck: luckOut(v) };
+}
+function adminShop(ctx) {
+  const cfg = shopCfg();
+  if (ctx.body.sale != null) { const s = ctx.body.sale; if (!Number.isInteger(s) || s < 0 || s > 90) bad('Sale must be 0-90%'); cfg.sale = s; alog(ctx, 'sale', null, s + '%'); }
+  if (ctx.body.itemId != null) {
+    const it = ITEM[String(ctx.body.itemId)]; if (!it) bad('No such item'); const c = cfg.items[it.id] || {};
+    if (ctx.body.price !== undefined) { const p = ctx.body.price; if (p === null) delete c.price; else if (!Number.isInteger(p) || p < 0 || p > MAX_BAL) bad('Bad price'); else c.price = p; }
+    if (ctx.body.off !== undefined) c.off = !!ctx.body.off;
+    cfg.items[it.id] = c; alog(ctx, 'shop_item', it.name, JSON.stringify(c));
+  }
+  putSetting('shop', cfg); return { ok: true, shop: cfg };
+}
+function adminPassword(ctx) {
+  const pw = String(ctx.body.password || ''); if (pw.length < 6 || pw.length > 100) bad('Password must be at least 6 characters');
+  const u = targetUser(ctx), salt = crypto.randomBytes(16).toString('hex');
+  db.prepare('UPDATE users SET salt=?, hash=? WHERE id=?').run(salt, hashPw(pw, salt), u.id); db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id);
+  alog(ctx, 'password', u.username, 'reset'); return { ok: true };
+}
+function adminBan(ctx) {
+  const u = targetUser(ctx), on = ctx.body.banned === true; if (u.is_admin) bad("You can't ban an admin");
+  db.prepare('UPDATE users SET banned=? WHERE id=?').run(on ? 1 : 0, u.id); if (on) db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id);
+  alog(ctx, on ? 'ban' : 'unban', u.username, adminText(ctx.body.note)); return { ok: true };
+}
+const adminLog = () => ({ log: db.prepare('SELECT l.*, u.username AS admin FROM admin_log l JOIN users u ON u.id=l.admin_id ORDER BY l.id DESC LIMIT 100').all() });
+function myNotes(ctx) { const n = db.prepare('SELECT id, msg, ts FROM notes WHERE user_id=? AND seen=0 ORDER BY id').all(ctx.user.id); if (n.length) db.prepare('UPDATE notes SET seen=1 WHERE user_id=? AND seen=0').run(ctx.user.id); return { notes: n, balance: balanceOf(ctx.user.id) }; }
+
 /* ---------- rewards: XP and levels, daily challenges, the daily wheel, achievements, weekly tournament ----------
    All progress is computed on the server from the rounds and scores tables. Free Hawk Bucks from rewards go through grant(),
    which also counts them as `added`, so they never count toward leaderboard net winnings. */
@@ -738,14 +936,13 @@ function tournament(ctx) { // best multiplier of the week (Super Luck rounds and
 }
 
 /* ---------- bank: free Hawk Bucks top-ups (tracked so the leaderboard ranks real winnings) ---------- */
-const BANK_AMOUNTS = [100, 500, 1000], BANK_MAX_BAL = 1e6, bankHits = new Map();
-function bank(ctx) {
-  const amt = ctx.body.amount; if (!BANK_AMOUNTS.includes(amt)) bad('Pick 100, 500 or 1,000');
-  const t = now(), a = (bankHits.get(ctx.user.id) || []).filter(x => t - x < 600e3); if (a.length >= 30) bad('Slow down – try again in a few minutes', 429); a.push(t); bankHits.set(ctx.user.id, a);
+function bank(ctx) { // broke-only refill: under 100 Hawk Bucks, once an hour
   return tx(() => {
-    if (balanceOf(ctx.user.id) + amt > BANK_MAX_BAL) bad('Your balance is already maxed out');
-    db.prepare('UPDATE users SET added=added+? WHERE id=?').run(amt, ctx.user.id);
-    return { balance: adjust(ctx.user.id, amt, 'bank'), added: db.prepare('SELECT added FROM users WHERE id=?').get(ctx.user.id).added };
+    const u = db.prepare('SELECT * FROM users WHERE id=?').get(ctx.user.id);
+    if (u.balance >= CLAIM_BELOW) bad(`The Bank only helps when you're under ${CLAIM_BELOW} Hawk Bucks`);
+    if (now() - u.last_claim < CLAIM_EVERY_MS) bad(`The Bank refills once an hour. Try again in ${Math.ceil((u.last_claim + CLAIM_EVERY_MS - now()) / 60e3)} min`);
+    db.prepare('UPDATE users SET last_claim=?, added=added+? WHERE id=?').run(now(), CLAIM_AMT, u.id);
+    return { balance: adjust(u.id, CLAIM_AMT, 'bank'), added: u.added + CLAIM_AMT, nextClaim: CLAIM_EVERY_MS };
   });
 }
 
@@ -756,21 +953,16 @@ const routes = {
   'POST /api/register': ctx => { limit(ctx.ip); return register(ctx); },
   'POST /api/login': ctx => { limit(ctx.ip); return login(ctx); },
   'POST /api/logout': ctx => { const m = /sp_sid=([a-f0-9]{64})/.exec(ctx.req.headers.cookie || ''); if (m) db.prepare('DELETE FROM sessions WHERE token_hash=?').run(sha(m[1])); ctx.res.setHeader('Set-Cookie', `sp_sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${PROD ? '; Secure' : ''}`); return { ok: true }; },
-  'POST /api/claim': need(ctx => tx(() => {
-    const u = db.prepare('SELECT * FROM users WHERE id=?').get(ctx.user.id);
-    if (u.balance >= CLAIM_BELOW) bad(`You can claim only when under ${CLAIM_BELOW} Hawk Bucks`);
-    if (now() - u.last_claim < CLAIM_EVERY_MS) bad('Come back tomorrow for another top-up');
-    db.prepare('UPDATE users SET last_claim=?, added=added+? WHERE id=?').run(now(), CLAIM_AMT, u.id); return { balance: adjust(u.id, CLAIM_AMT, 'claim') };
-  })),
+  'POST /api/claim': need(bank),
   'GET /api/props': need(() => ({ props: db.prepare("SELECT id,sport,who,lvl,vs,stat,type,line,init,status,actual FROM props ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'locked' THEN 1 ELSE 2 END, id").all() })),
   'POST /api/slips': need(placeSlip),
   'GET /api/slips': need(mySlips),
   'GET /api/leaderboard': need(ctx => {
     // ranked by net winnings (balance minus the starting 1,000 and any free top-ups), so adding Hawk Bucks can't buy a top spot
-    const top = db.prepare(`SELECT username, balance, balance-${START_BAL}-added-super_net AS net FROM users ORDER BY net DESC, id LIMIT 20`).all();
-    const me = db.prepare(`SELECT username, balance, balance-${START_BAL}-added-super_net AS net FROM users WHERE id=?`).get(ctx.user.id);
-    me.rank = db.prepare(`SELECT COUNT(*)+1 AS r FROM users WHERE balance-${START_BAL}-added-super_net>?`).get(me.net).r;
-    return { top, me };
+    const top = db.prepare(`SELECT username, balance, gear, ${NET_SQL} AS net FROM users WHERE banned=0 ORDER BY net DESC, id LIMIT 20`).all();
+    const me = db.prepare(`SELECT username, balance, gear, ${NET_SQL} AS net FROM users WHERE id=?`).get(ctx.user.id);
+    me.rank = db.prepare(`SELECT COUNT(*)+1 AS r FROM users WHERE banned=0 AND ${NET_SQL}>?`).get(me.net).r;
+    return { top: top.map(x => ({ ...x, gear: gearOf(x) })), me: { ...me, gear: gearOf(me) } };
   }),
   'POST /api/admin/props': need(admin(addProp)),
   'POST /api/admin/lock': need(admin(c => setProp(c, 'lock'))),
@@ -803,7 +995,24 @@ const routes = {
   'POST /api/arcade/bj/stand': need(arcade.bjStand),
   'POST /api/arcade/bj/double': need(arcade.bjDouble),
   'POST /api/bank': need(bank),
-  'POST /api/luck': need(setLuck),
+  'POST /api/luck': need(admin(setLuck)),
+  'GET /api/shop': need(shopState),
+  'POST /api/shop/buy': need(buyItem),
+  'POST /api/shop/booster': need(buyBooster),
+  'POST /api/shop/equip': need(equipItem),
+  'POST /api/shop/recharge': need(rechargeItem),
+  'GET /api/notes': need(myNotes),
+  'GET /api/admin/users': need(admin(adminUsers)),
+  'GET /api/admin/log': need(admin(adminLog)),
+  'GET /api/admin/shop': need(admin(() => ({ shop: shopCfg(), items: ITEMS, boosters: BOOSTERS }))),
+  'POST /api/admin/money': need(admin(adminMoney)),
+  'POST /api/admin/balance': need(admin(adminSetBalance)),
+  'POST /api/admin/give-item': need(admin(c => adminItem(c, true))),
+  'POST /api/admin/take-item': need(admin(c => adminItem(c, false))),
+  'POST /api/admin/luck': need(admin(adminLuck)),
+  'POST /api/admin/shop': need(admin(adminShop)),
+  'POST /api/admin/password': need(admin(adminPassword)),
+  'POST /api/admin/ban': need(admin(adminBan)),
   'POST /api/progress': need(ctx => progress(ctx.user.id)),
   'GET /api/rewards': need(rewardsState),
   'POST /api/challenges/claim': need(claimChallenge),

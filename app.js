@@ -176,20 +176,20 @@ async function go() {
   document.body.classList.toggle('out', !U);
   $('#logout').classList.toggle('hidden', !U); $('#adminLink').classList.toggle('hidden', !(U && U.isAdmin)); $('#lvlchip').classList.toggle('hidden', !U);
   if (!U) return renderAuth();
-  $('#logout').textContent = `${U.username} · Log out`; showBal();
+  $('#logout').textContent = `${U.username} · Log out`; showBal(); paintMe(); $('#lucklink').classList.toggle('hidden', !U.isAdmin);
   view = location.hash.slice(1) || 'home';
   document.querySelectorAll('[data-v]').forEach(a => a.classList.toggle('on', a.dataset.v === view));
   document.querySelectorAll('#origlist a').forEach(a => a.classList.toggle('on', view === 'arcade' && a.dataset.og === game));
   if (view !== 'arcade') document.documentElement.style.removeProperty('--ga');
   paintLevel(); document.body.classList.remove('drawer');
-  const R = { rewards: renderRewards, home: renderHome, board: renderBoard, arcade: renderArcade, lineups: renderLineups, leaders: renderLeaders, admin: renderAdmin, bank: renderBank, luck: renderLuck };
+  const R = { rewards: renderRewards, home: renderHome, board: renderBoard, arcade: renderArcade, lineups: renderLineups, leaders: renderLeaders, admin: renderAdmin, bank: renderBank, luck: renderLuck, shop: renderShop };
   try { await (R[view] || renderHome)(my); const ap = $('#app'); ap.classList.remove('pagein'); void ap.offsetWidth; ap.classList.add('pagein'); } catch (e) { if (my === nav) $('#app').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   renderSlipBar();
 }
 window.addEventListener('hashchange', go);
 const paintSound = () => { const b = $('#sound'); b.textContent = sfx.on ? '🔊' : '🔇'; b.setAttribute('aria-pressed', String(sfx.on)); b.setAttribute('aria-label', sfx.on ? 'Sound on' : 'Sound off'); };
 $('#sound').onclick = () => { sfx.toggle(); paintSound(); toast(sfx.on ? '🔊 Sound on' : '🔇 Sound off'); }; paintSound();
-$('#logout').onclick = async () => { await api('POST', '/logout').catch(() => {}); U = null; CFG = null; Object.keys(pick).forEach(k => delete pick[k]); slipOpen = false; $('#slip').classList.add('hidden'); location.hash = ''; go(); };
+$('#logout').onclick = async () => { await api('POST', '/logout').catch(() => {}); U = null; $('#meav').classList.add('hidden'); CFG = null; Object.keys(pick).forEach(k => delete pick[k]); slipOpen = false; $('#slip').classList.add('hidden'); location.hash = ''; go(); };
 
 /* ---------- auth ---------- */
 function renderAuth(signup = false) {
@@ -302,19 +302,18 @@ async function renderLeaders(my) {
     const r = await api('GET', '/leaderboard'); if (my !== nav) return;
     const inTop = r.top.some(x => x.username === r.me.username);
     const net = n => `<span class="${n > 0 ? 'win' : n < 0 ? 'lose' : ''}">${n > 0 ? '+' : ''}${fmt(n)}</span>`;
-    const row = (x, rank) => `<tr class="${x.username === r.me.username ? 'me' : ''}"><td>${rank}</td><td>${esc(x.username)}</td><td class="mutecell">${fmt(x.balance)}</td><td>${net(x.net)} 🪙</td></tr>`;
+    const row = (x, rank) => `<tr class="${x.username === r.me.username ? 'me' : ''}"><td>${rank}</td><td class="lbname">${avatar(x.gear, 30)}${esc(x.username)}</td><td class="mutecell">${fmt(x.balance)}</td><td>${net(x.net)} 🪙</td></tr>`;
     $('#app').innerHTML = `<h1>Leaderboard</h1>${tabs}<div class="panel"><table class="lb"><tr><th>#</th><th>Player</th><th>Balance</th><th>Net winnings</th></tr>
       ${r.top.map((x, i) => row(x, i + 1)).join('')}${inTop ? '' : row(r.me, r.me.rank)}</table>
-      <div class="note">Ranked by net winnings: balance minus the starting 1,000 and anything added at the Bank or earned from rewards.</div></div>`;
+      <div class="note">Ranked by net winnings: balance minus the starting 1,000 and anything added at the Bank, by the admin or from rewards. Super Luck rounds don't count. Shop spending doesn't lower your rank.</div></div>`;
   }
   document.querySelectorAll('[data-lbt]').forEach(b => b.onclick = () => { lbTab = b.dataset.lbt; renderLeaders(nav); });
 }
 
 /* ---------- admin ---------- */
-async function renderAdmin(my) {
-  if (!U.isAdmin) { location.hash = '#home'; return; }
+async function renderLines(my) {
   await loadProps(); if (my !== nav) return;
-  $('#app').innerHTML = `<h1>Admin</h1><div class="panel adm"><h2>Add a line</h2><form id="pf" class="addf">
+  $('#app').innerHTML = `<div class="panel adm"><h2>Add a line</h2><form id="pf" class="addf">
       <select name="sport"><option>Football</option><option>Volleyball</option><option>Field Hockey</option><option>Flag Football</option></select>
       <input name="who" placeholder="Team (SL Varsity)" required><input name="lvl" placeholder="Level (Varsity)"><input name="vs" placeholder="vs Westfield · Fri 7 PM · Home">
       <input name="stat" placeholder="Stat (Points scored)" required><input name="type" placeholder="Filter (Points)"><input name="line" type="number" step="0.5" placeholder="Line (34.5)" required>
@@ -344,13 +343,13 @@ const CATS = [['all', 'All'], ['featured', '⭐ Featured'], ['recent', '🕘 Rec
 const SKILL_IDS = new Set(['bell', 'memory', 'trivia']);
 let arcCat = 'all';
 async function renderArcade(my) {
-  if (!CFG || CFG.user !== U.username) CFG = { ...(await api('GET', '/arcade/config')), user: U.username };
+  CFG = { ...(await api('GET', '/arcade/config')), user: U.username }; U.luck = CFG.luckName; // luck can change between visits (boosters and charges run out)
   if (Date.now() - (renderArcade.at || 0) > 30000) { STATS = await api('GET', '/arcade/stats').catch(() => STATS); renderArcade.at = Date.now(); } if (my !== nav) return;
   const list = gameList(), byId = Object.fromEntries(list.map(g => [g.id, g]));
   const week = Math.floor((Date.now() / 864e5 + 4) / 7), featured = [...new Set([0, 1, 2].map(k => list[(week * 3 + k * 5) % list.length]))]; // rotates every Monday
   const shown = { all: list, featured, recent: STATS.recent.map(id => byId[id]).filter(Boolean), classic: list.filter(g => !SKILL_IDS.has(g.id)), skill: list.filter(g => SKILL_IDS.has(g.id)) }[arcCat] || list;
   const cur = byId[game] || list[0]; document.documentElement.style.setProperty('--ga', GAME_COLOR[cur.id] || '#3d6bff');
-  $('#app').innerHTML = `<div class="archead"><h1>Seahawk Arcade</h1><a class="luckchip" href="#luck">${luckBadge()}</a></div>
+  $('#app').innerHTML = `<div class="archead"><h1>Seahawk Arcade</h1><a class="luckchip" href="#shop">${luckBadge()}</a></div>
     <div class="pills cats" role="group" aria-label="Filter games">${CATS.map(([k, l]) => `<button class="pill ${k === arcCat ? 'on' : ''}" data-cat="${k}" aria-pressed="${k === arcCat}">${l}</button>`).join('')}</div>
     <div class="gstrip">${shown.map(g => `<button class="gtile ${g.id === game ? 'on' : ''}" data-g="${g.id}" aria-label="${esc(g.title)}"><span>${esc(g.emoji)}</span><b>${esc(g.title)}</b><small>${esc(bestText(g.id) ? '🏆 ' + bestText(g.id) : g.tag)}</small></button>`).join('') || '<div class="mutecell gempty">Nothing here yet – play a game first!</div>'}</div>
     <div class="gamehead"><span class="ge">${esc(cur.emoji)}</span><div class="gt"><h2>${esc(cur.title)}</h2><small>${esc(cur.desc)}</small></div><div class="pbbar" id="pb"></div></div>
@@ -572,7 +571,7 @@ async function renderHome(my) {
   const ticker = feed.big.length ? feed.big.concat(feed.big).map(b => `<span>🔥 <b>${esc(b.username)}</b> hit <b class="win">${b.mult.toFixed(2)}x</b> on ${esc(gameLabel(b.game))} <b class="win">+${fmt(b.payout - b.bet)} 🪙</b></span>`).join('') : '';
   $('#app').innerHTML = `<section class="hero"><div class="heroin"><div class="floaties" aria-hidden="true"><span style="left:46%;top:14%;--d:7s">🪙</span><span style="left:60%;top:58%;--d:9s;--l:-2s">🎲</span><span style="left:74%;top:12%;--d:8s;--l:-4s">♠️</span><span style="left:88%;top:52%;--d:10s;--l:-1s">💎</span><span style="left:34%;top:62%;--d:8.5s;--l:-3s">🍀</span><span style="left:94%;top:10%;--d:7.5s;--l:-5s">🏈</span></div><div><small>Welcome back</small><h1>${esc(U.username)}</h1></div>
       <div class="herobal"><small>Your balance</small><b>${fmt(U.balance)}</b><span>Hawk Bucks</span></div>
-      <div class="heroact"><a class="btn gold" href="#arcade">🎰 Play now</a><a class="btn alt" href="#bank">🏦 Bank</a><a class="btn alt" href="#luck">🍀 Luck Lab</a></div></div></section>
+      <div class="heroact"><a class="btn gold" href="#arcade">🎰 Play now</a><a class="btn alt" href="#bank">🏦 Bank</a><a class="btn alt" href="#shop">🛍️ Hawk Shop</a></div></div></section>
     ${ticker ? `<div class="marq" aria-label="Recent big wins"><div class="marqin">${ticker}</div></div>` : ''}
     <div class="statbar"><div><b>${fmt(feed.stats.players)}</b><small>Players</small></div><div><b>${fmt(feed.stats.rounds)}</b><small>Rounds played</small></div><div><b>${feed.stats.biggest ? feed.stats.biggest.toFixed(1) + 'x' : '–'}</b><small>Biggest multiplier</small></div></div>
     <div id="showcase"></div>
@@ -1293,16 +1292,12 @@ async function bj(root, my) {
 /* ---------- bank ---------- */
 async function renderBank(my) {
   const m = await api('GET', '/me'); if (my !== nav) return; U = m.user; showBal();
+  const broke = U.balance < 100, wait = Math.ceil(U.nextClaim / 60e3);
   $('#app').innerHTML = `<h1>Hawk Bank</h1><div class="panel bank"><img class="bank-logo" src="logo.svg" alt="">
     <div class="bigbal"><small>Your balance</small><b id="bb">${fmt(U.balance)}</b><span>Hawk Bucks</span></div>
-    <div class="trio">${[100, 500, 1000].map(n => `<button class="btn ${n === 1000 ? 'gold' : ''}" data-amt="${n}">+${fmt(n)}</button>`).join('')}</div>
-    <div class="note" id="bnote"></div></div>`;
-  const note = () => { $('#bnote').innerHTML = `Free, always – no real money, no cash value. You've added <b>${fmt(U.added)}</b> so far. The leaderboard ranks <b>net winnings</b>, so adding Hawk Bucks won't move you up.`; };
-  document.querySelectorAll('[data-amt]').forEach(b => b.onclick = act(async () => {
-    const n = +b.dataset.amt, r = await api('POST', '/bank', { amount: n }); U.added = r.added; setBal(r.balance);
-    $('#bb').textContent = fmt(r.balance); fx.bump($('#bb')); sfx.play('cash'); fx.burst(n >= 1000 ? 120 : 50); toast(`+${fmt(n)} Hawk Bucks`); note();
-  }));
-  note();
+    ${broke && U.canClaim ? '<button class="btn gold bjbig" id="claim">🆘 Get 1,000 Hawk Bucks</button>' : `<div class="bankshut">${broke ? `⏳ The Bank refills once an hour. Come back in <b>${wait} min</b>.` : '🔒 The Bank only opens when you\'re <b>broke</b> (under 100 Hawk Bucks).'}</div>`}
+    <div class="note">The Bank is a safety net: when you're under 100 Hawk Bucks it gives you 1,000, once an hour. Want more? Win it in the <a href="#arcade">Arcade</a>, finish <a href="#rewards">daily challenges</a>, or spin the daily wheel. Hawk Bucks are pretend: no real money, no cash value.</div></div>`;
+  if ($('#claim')) $('#claim').onclick = act(async () => { const r = await api('POST', '/bank'); setBal(r.balance); $('#bb').textContent = fmt(r.balance); fx.bump($('#bb')); sfx.play('cash'); fx.burst(120); toast('+1,000 Hawk Bucks'); renderBank(nav); });
 }
 
 /* ---------- skill games UI (score-only; the server keeps the clock and the answers) ---------- */
@@ -1582,9 +1577,10 @@ async function renderRewards(my) {
 
 /* ---------- Luck Lab ---------- */
 async function renderLuck() {
+  if (!U.isAdmin) { location.hash = '#shop'; return; }
   const cur = String(luckLevel()), reg = LUCK.filter(x => String(x[0])[0] !== 'x'), sup = LUCK.filter(x => String(x[0])[0] === 'x');
   const card = ([lv, e, name, desc]) => `<button class="luckcard ${String(lv)[0] === 'x' ? 'super' : ''} ${String(lv) === cur ? 'on' : ''}" data-luck="${lv}" aria-pressed="${String(lv) === cur}"><span class="le">${e}</span><b>${lv === 'normal' ? 'Normal' : String(lv)[0] === 'x' ? name : `${lv} · ${name}`}</b><small>${desc}</small><i class="lm">${lv === 'normal' ? 'Standard odds' : String(lv)[0] === 'x' ? `Lose chance ÷${String(lv).slice(1)}` : `Win chance ×${(0.5 + lv * 0.1).toFixed(1)}`}</i></button>`;
-  $('#app').innerHTML = `<h1>🍀 Luck Lab</h1>
+  $('#app').innerHTML = `<h1>🍀 Luck Lab <small class="mutecell">admin only</small></h1><div class="panel luckinfo">This sets <b>your own</b> luck override. To set a player's luck, open <a href="#admin">Admin → Players</a>. Everyone else earns luck from gear in the <a href="#shop">Hawk Shop</a>.</div>
     <div class="panel luckinfo"><b>Luck really changes your odds</b> in 5 arcade games: 🪙 Heads or Tails, ✊ Hallway RPS, 🚌 Seahawk Crossing, 🎲 Scoreboard Roll and 🏈 Hail Mary.
       <br><br><b>Levels 1–10:</b> higher luck = you <b>win more often</b>, but each win pays less. Lower luck = fewer wins, bigger payouts. The <b>average payback stays the same</b> at every level. Level 1 ×0.6 … level 5 ×1.0 … level 10 ×1.5 win chance. Example: Heads or Tails is 50/50 on Normal, 75% at level 10 (pays 1.32x a call), 30% at level 1 (pays 3.30x).
       <br><br>Your luck is locked in when a round starts. It doesn't touch Hawk Drop, Locker Hunt, Slots, Roulette, Hawk 21, Seahawk Launch, skill games or sports picks. It also changes your confetti and win sounds. Hawk Bucks are pretend: no real money, ever.</div>
@@ -1598,6 +1594,125 @@ async function renderLuck() {
     U.luck = r.luck; CFG = null; renderLuck(); fx.burst(String(raw)[0] === 'x' ? 220 : 110); sfx.play('big'); toast(`${luckEntry()[2]} is on`);
   }));
   $('#preview').onclick = () => { fx.burst(160); sfx.play('big'); };
+}
+
+/* ---------- avatars: a Seahawk you dress up. Skins recolor the hawk; the other slots are layered on top ---------- */
+const SKIN_FX = { skin_classic: '', skin_blue: 'hue-rotate(55deg) saturate(1.3)', skin_ice: 'hue-rotate(35deg) saturate(.35) brightness(1.35)', skin_shadow: 'grayscale(1) brightness(.5) contrast(1.5)',
+  skin_neon: 'hue-rotate(170deg) saturate(2.6) brightness(1.15) drop-shadow(0 0 3px #ff4fd8)', skin_gold: 'sepia(1) saturate(3.2) hue-rotate(-12deg) brightness(1.08) drop-shadow(0 0 3px #ffc542)' };
+const ITEM_EMO = { hat_bow: '🎀', hat_sun: '👒', hat_snap: '🧢', hat_grad: '🎓', hat_top: '🎩', face_nerd: '👓', face_shades: '🕶️', face_goggles: '🥽', face_star: '✨', body_tee: '👕', body_hoodie: '🧥', body_tie: '👔', body_medal: '🥇',
+  held_finger: '☝️', held_football: '🏈', held_bball: '🏀', held_money: '💰', held_trophy: '🏆', myth_diamond: '💎', myth_wings: '🪽', myth_crown: '👑' };
+function avatar(gear = {}, size = 40, extra = '') {
+  const g = gear || {}, layer = (slot, cls) => g[slot] && ITEM_EMO[g[slot]] ? `<i class="${cls}">${ITEM_EMO[g[slot]]}</i>` : '';
+  const m = g.mythic, myth = m === 'myth_wings' ? '<i class="avwings">🪽</i>' : '', top = m === 'myth_crown' ? '<i class="avcrown">👑</i>' : m === 'myth_diamond' ? '<i class="avgem">💎</i>' : '';
+  return `<span class="av ${g.bg ? 'bg-' + g.bg.slice(3) : ''} ${m ? 'myth' : ''} ${extra}" style="--s:${size}px" aria-hidden="true">${myth}<img src="hawk.svg" alt="" style="filter:${SKIN_FX[g.skin] || 'none'}">${layer('body', 'avbody')}${layer('face', 'avface')}${layer('hat', 'avhat')}${layer('held', 'avheld')}${top}</span>`;
+}
+const RARITY = { common: ['Common', '#9fb0c8'], rare: ['Rare', '#3d8bff'], epic: ['Epic', '#a855ff'], legendary: ['Legendary', '#ffb21a'], mythic: ['Mythic', '#ff4fd8'] };
+const SLOT_NAMES = [['skin', '🦅 Skins'], ['hat', '🧢 Hats'], ['face', '🕶️ Face'], ['body', '👕 Body'], ['held', '🏈 Held'], ['bg', '🌌 Backgrounds'], ['mythic', '💎 Mythic']];
+const luckTag = it => it.sup ? `<span class="ltag sup">🔥 Super Luck ×${it.sup}</span>` : it.luck ? `<span class="ltag">🍀 +${it.luck} luck</span>` : '<span class="ltag none">Just for looks</span>';
+const luckSum = l => l.sup ? `🔥 Super Luck ×${l.sup}` : `🍀 Luck ${l.level}${l.level === 5 ? ' · Normal' : l.level === 10 ? ' · MAX' : ''}`;
+function paintMe() { const el = $('#meav'); if (!el || !U) return; el.innerHTML = avatar(U.gear, 34); el.classList.toggle('hidden', !U); }
+let shopTab = 'shop', shopSlot = 'all', tryOn = null;
+async function renderShop(my) {
+  const S = await api('GET', '/shop'); if (my !== nav) return;
+  U.gear = S.gear; U.luck = S.luck.luck; U.balance = S.balance; CFG = null; showBal(); paintMe();
+  const preview = { ...S.gear, ...(tryOn ? { [tryOn.slot]: tryOn.id } : {}) };
+  const card = it => { const [rn, rc] = RARITY[it.rarity], locked = !it.owned && it.locks.length, off = it.off && !it.owned;
+    const btn = it.owned ? (it.equipped ? `<button class="btn alt" data-unequip="${it.slot}" ${it.slot === 'skin' ? 'disabled' : ''}>✓ Wearing</button>` : `<button class="btn alt" data-equip="${it.id}" data-slot="${it.slot}">Wear it</button>`)
+      : off ? '<button class="btn alt" disabled>Not for sale</button>' : locked ? '<button class="btn alt" disabled>🔒 Locked</button>' : `<button class="btn ${it.rarity === 'mythic' ? 'gold' : ''}" data-buy="${it.id}">Buy · ${fmt(it.price)} 🪙</button>`;
+    return `<div class="icard r-${it.rarity} ${it.owned ? 'own' : ''}" style="--rc:${rc}"><button class="itry" data-try="${it.id}" data-slot="${it.slot}" title="Try it on">${it.slot === 'skin' ? avatar({ skin: it.id }, 64) : it.slot === 'bg' ? `<span class="bgsw bg-${it.id.slice(3)}"></span>` : `<span class="iemo">${ITEM_EMO[it.id] || it.emoji}</span>`}</button>
+      <small class="rar">${rn}</small><b>${esc(it.name)}</b>${luckTag(it)}${!it.owned && it.price !== it.basePrice && it.price < it.basePrice ? `<s class="was">${fmt(it.basePrice)}</s>` : ''}
+      ${it.maxCharges ? `<small class="chg">${it.owned ? `⚡ ${it.charges}/${it.maxCharges} charges` : `Lasts ${it.maxCharges} luck-game rounds`}</small>` : ''}
+      ${locked ? `<ul class="locks">${it.locks.map(l => `<li>🔒 ${esc(l)}</li>`).join('')}</ul>` : ''}${btn}
+      ${it.owned && it.maxCharges && it.charges < it.maxCharges ? `<button class="pill" data-recharge="${it.id}">Recharge · ${fmt(Math.round(it.price / 10))} 🪙</button>` : ''}</div>`; };
+  const list = S.items.filter(it => (shopTab === 'locker' ? it.owned : true) && (shopSlot === 'all' || it.slot === shopSlot));
+  $('#app').innerHTML = `<div class="archead"><h1>🛍️ Hawk Shop</h1><div class="sub"><button class="pill ${shopTab === 'shop' ? 'on' : ''}" data-st="shop">🛍️ Shop</button><button class="pill ${shopTab === 'locker' ? 'on' : ''}" data-st="locker">🎒 My Locker</button></div></div>
+    ${S.sale ? `<div class="salebar">🔥 SALE: everything ${S.sale}% off!</div>` : ''}
+    <div class="shopwrap"><aside class="panel mecard">${avatar(preview, 170, 'big')}
+      ${tryOn ? `<div class="trynote">Trying on: <b>${esc(S.items.find(i => i.id === tryOn.id).name)}</b> <button class="pill" id="untry">✕</button></div>` : ''}
+      <div class="lucktotal ${S.luck.sup ? 'sup' : ''}">${luckSum(S.luck)}</div>
+      ${S.override ? `<div class="note">The admin set your luck to <b>${esc(String(S.override))}</b>. Gear is ignored until they clear it.</div>` : ''}
+      <ul class="lparts">${S.luck.parts.map(p => `<li>${p.emoji} ${esc(p.src)} <b>${p.sup ? '×' + p.sup + ' Super' : '+' + p.luck}</b>${p.rounds ? ` · ${p.rounds} rounds left` : ''}${p.charges ? ` · ${p.charges} charges` : ''}</li>`).join('') || '<li class="mutecell">No luck gear yet. Everyone starts at Luck 5 (Normal).</li>'}</ul>
+      <div class="note">Luck 6–10 = you win more often but each win pays a bit less (same 99% payback), and it <b>counts</b> on the leaderboard. 🔥 Super Luck pays full price, so those rounds <b>don't count</b> on the leaderboard. Luck works in Heads or Tails, RPS, Crossing, Scoreboard Roll and Hail Mary. Max total: Luck 10.</div></aside>
+    <div class="shopmain"><div class="pills">${[['all', 'All'], ...SLOT_NAMES].map(([k, l]) => `<button class="pill ${shopSlot === k ? 'on' : ''}" data-ss="${k}">${l}</button>`).join('')}</div>
+      ${shopTab === 'shop' && (shopSlot === 'all') ? `<h2>⚡ Luck Boosters</h2><div class="igrid">${S.boosters.map(b => `<div class="icard r-rare" style="--rc:#19e58a"><span class="iemo">${b.emoji}</span><small class="rar">Booster</small><b>${esc(b.name)}</b>
+        <span class="ltag ${b.sup ? 'sup' : ''}">${b.sup ? '🔥 Super Luck ×' + b.sup : '🍀 +' + b.luck + ' luck'} for ${b.rounds} rounds</span>${b.active ? `<small class="chg">Active: ${b.active} rounds left</small>` : ''}<button class="btn" data-boost="${b.id}">Buy · ${fmt(b.price)} 🪙</button></div>`).join('')}</div>` : ''}
+      ${list.length ? `<div class="igrid">${list.map(card).join('')}</div>` : '<div class="empty">Nothing here yet. Go shopping! 🛍️</div>'}</div></div>`;
+  const redo = () => renderShop(nav), apply = r => { U.gear = r.gear; U.luck = r.luck.luck; CFG = null; setBal(r.balance); paintMe(); };
+  document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { shopTab = b.dataset.st; redo(); });
+  document.querySelectorAll('[data-ss]').forEach(b => b.onclick = () => { shopSlot = b.dataset.ss; redo(); });
+  document.querySelectorAll('[data-try]').forEach(b => b.onclick = () => { tryOn = { id: b.dataset.try, slot: b.dataset.slot }; redo(); });
+  if ($('#untry')) $('#untry').onclick = () => { tryOn = null; redo(); };
+  document.querySelectorAll('[data-buy]').forEach(b => b.onclick = act(async () => { const it = S.items.find(i => i.id === b.dataset.buy);
+    if (it.price >= 1e6 && !confirm(`Buy ${it.name} for ${fmt(it.price)} Hawk Bucks?`)) return;
+    apply(await api('POST', '/shop/buy', { itemId: it.id })); tryOn = null; sfx.play(it.rarity === 'mythic' || it.rarity === 'legendary' ? 'jackpot' : 'cash'); fx.burst(it.rarity === 'mythic' ? 260 : 90); toast(`${it.emoji} ${it.name} is yours!`); redo(); }));
+  document.querySelectorAll('[data-boost]').forEach(b => b.onclick = act(async () => { apply(await api('POST', '/shop/booster', { id: b.dataset.boost })); sfx.play('cash'); fx.burst(60); toast('Booster active!'); redo(); }));
+  document.querySelectorAll('[data-equip]').forEach(b => b.onclick = act(async () => { apply(await api('POST', '/shop/equip', { slot: b.dataset.slot, itemId: b.dataset.equip })); tryOn = null; sfx.play('flip'); redo(); }));
+  document.querySelectorAll('[data-unequip]').forEach(b => b.onclick = act(async () => { apply(await api('POST', '/shop/equip', { slot: b.dataset.unequip, itemId: null })); sfx.play('tap'); redo(); }));
+  document.querySelectorAll('[data-recharge]').forEach(b => b.onclick = act(async () => { apply(await api('POST', '/shop/recharge', { itemId: b.dataset.recharge })); sfx.play('cash'); toast('⚡ Fully charged'); redo(); }));
+}
+
+/* gifts and messages from the admin */
+async function checkNotes() {
+  if (!U) return;
+  try { const r = await api('GET', '/notes'); if (!r.notes.length) return; setBal(r.balance);
+    showModal(`<div class="bigbadge">🎁</div><h2>Message from the admin</h2>${r.notes.map(n => `<p>${esc(n.msg)}</p>`).join('')}<button class="btn gold" data-close>Nice!</button>`); fx.burst(140); sfx.play('big');
+    const m = await api('GET', '/me'); U = m.user || U; paintMe(); } catch (e) {}
+}
+setInterval(() => { if (!document.hidden) checkNotes(); }, 20000);
+
+/* ---------- admin: players, money, items, luck, shop, log ---------- */
+let admTab = 'players', admSel = null;
+async function renderAdmin(my) {
+  if (!U.isAdmin) { location.hash = '#home'; return; }
+  const tabs = `<div class="sub">${[['players', '👥 Players'], ['shop', '🛍️ Shop'], ['log', '📜 Log'], ['lines', '🏈 Sports lines']].map(([k, l]) => `<button class="pill ${admTab === k ? 'on' : ''}" data-at="${k}">${l}</button>`).join('')}</div>`;
+  const wire = () => document.querySelectorAll('[data-at]').forEach(b => b.onclick = () => { admTab = b.dataset.at; renderAdmin(nav); });
+  if (admTab === 'lines') { await renderLines(my); if (my !== nav) return; $('#app').insertAdjacentHTML('afterbegin', `<h1>🛠️ Admin</h1>${tabs}`); return wire(); }
+  if (admTab === 'log') {
+    const { log } = await api('GET', '/admin/log'); if (my !== nav) return;
+    $('#app').innerHTML = `<h1>🛠️ Admin</h1>${tabs}<div class="panel"><table class="lb"><tr><th>When</th><th>Admin</th><th>Action</th><th>Player</th><th>Detail</th></tr>
+      ${log.map(l => `<tr><td class="mutecell">${new Date(l.ts).toLocaleString()}</td><td>${esc(l.admin)}</td><td><b>${esc(l.action)}</b></td><td>${esc(l.target || '')}</td><td class="mutecell">${esc(l.detail || '')}</td></tr>`).join('') || '<tr><td colspan="5" class="mutecell">Nothing yet.</td></tr>'}</table></div>`;
+    return wire();
+  }
+  if (admTab === 'shop') {
+    const r = await api('GET', '/admin/shop'); if (my !== nav) return; const cfg = r.shop;
+    $('#app').innerHTML = `<h1>🛠️ Admin</h1>${tabs}<div class="panel adm"><h2>Store-wide sale</h2><div class="admrow"><input id="sale" type="number" min="0" max="90" value="${cfg.sale || 0}"> % off <button class="btn" id="saleb">Set sale</button></div></div>
+      <div class="panel adm"><h2>Items</h2><table class="lb"><tr><th>Item</th><th>Rarity</th><th>Default</th><th>Price</th><th>For sale</th></tr>
+      ${r.items.filter(i => i.id !== 'skin_classic').map(i => { const c = cfg.items[i.id] || {}; return `<tr><td>${ITEM_EMO[i.id] || i.emoji} ${esc(i.name)}</td><td>${RARITY[i.rarity][0]}</td><td class="mutecell">${fmt(i.price)}</td>
+        <td><input type="number" min="0" class="pricein" data-pid="${i.id}" value="${c.price ?? i.price}"></td><td><button class="pill ${c.off ? '' : 'on'}" data-toff="${i.id}" data-off="${c.off ? 1 : 0}">${c.off ? 'Off' : 'On'}</button></td></tr>`; }).join('')}</table>
+      <div class="note">Change a price and press Enter. Mythic gates (level, prerequisites, leaderboard winnings) still apply.</div></div>`;
+    $('#saleb').onclick = act(async () => { await api('POST', '/admin/shop', { sale: Math.floor(+$('#sale').value || 0) }); toast('Sale updated'); renderAdmin(nav); });
+    document.querySelectorAll('.pricein').forEach(i => i.onchange = act(async () => { await api('POST', '/admin/shop', { itemId: i.dataset.pid, price: Math.floor(+i.value) }); toast('Price saved'); }));
+    document.querySelectorAll('[data-toff]').forEach(b => b.onclick = act(async () => { await api('POST', '/admin/shop', { itemId: b.dataset.toff, off: b.dataset.off !== '1' }); renderAdmin(nav); }));
+    return wire();
+  }
+  const [{ users }, shop] = await Promise.all([api('GET', '/admin/users'), api('GET', '/admin/shop')]); if (my !== nav) return;
+  const sel = users.find(u => u.username === admSel);
+  const luckOpts = ['normal', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 'x2', 'x5', 'x10'];
+  $('#app').innerHTML = `<h1>🛠️ Admin</h1>${tabs}
+    <div class="panel adm"><h2>🎁 Give everyone Hawk Bucks</h2><div class="admrow"><input id="allamt" type="number" placeholder="Amount (e.g. 1000)"><input id="allnote" placeholder="Note, e.g. Happy Homecoming!" maxlength="120"><button class="btn gold" id="allgo">Send to everyone</button></div></div>
+    <div class="admgrid"><div class="panel"><table class="lb plist"><tr><th></th><th>Player</th><th>Balance</th><th>Lvl</th><th>Net</th><th>Luck</th><th>Last played</th></tr>
+      ${users.map(u => `<tr class="${u.username === admSel ? 'me' : ''} ${u.banned ? 'banned' : ''}" data-pu="${esc(u.username)}"><td>${avatar(u.gear, 28)}</td><td><b>${esc(u.username)}</b>${u.isAdmin ? ' 🛠️' : ''}${u.banned ? ' 🚫' : ''}</td><td>${fmt(u.balance)}</td><td>${u.level}</td><td>${fmt(u.net)}</td><td>${esc(String(u.luck))}</td><td class="mutecell">${u.last ? new Date(u.last).toLocaleDateString() : '–'}</td></tr>`).join('')}</table></div>
+    <div class="panel adm admside">${sel ? `<div class="admwho">${avatar(sel.gear, 72)}<div><h2>${esc(sel.username)}</h2><small>${fmt(sel.balance)} 🪙 · Level ${sel.level} · ${sel.items.length} items</small></div></div>
+      <h3>💰 Give or take Hawk Bucks</h3><div class="admrow"><input id="amt" type="number" placeholder="Amount (negative takes)"><input id="anote" placeholder="Note (optional)" maxlength="120"></div><button class="btn" id="amtgo">Send</button>
+      <h3>🧮 Set exact balance</h3><div class="admrow"><input id="setbal" type="number" min="0" value="${sel.balance}"><button class="btn alt" id="setgo">Set</button></div>
+      <h3>🎁 Give or take an item</h3><div class="admrow"><select id="itsel">${shop.items.filter(i => i.id !== 'skin_classic').map(i => `<option value="${i.id}">${ITEM_EMO[i.id] || i.emoji} ${esc(i.name)}${sel.items.includes(i.id) ? ' (owned)' : ''}</option>`).join('')}</select></div>
+      <div class="duo"><button class="btn alt" id="itgive">Give item</button><button class="btn alt" id="ittake">Take item</button></div>
+      <h3>🍀 Luck override (Luck Lab)</h3><div class="admrow"><select id="lk">${luckOpts.map(l => `<option ${String(l) === String(sel.luck) ? 'selected' : ''} value="${l}">${l === 'normal' ? 'No override (gear decides)' : String(l)[0] === 'x' ? 'Super Luck ' + l : 'Level ' + l}</option>`).join('')}</select><button class="btn alt" id="lkgo">Set</button></div>
+      <h3>🔑 Reset password</h3><div class="admrow"><input id="pw" type="text" placeholder="New password (6+)" autocomplete="off"><button class="btn alt" id="pwgo">Reset</button></div>
+      ${sel.isAdmin ? '' : `<h3>🚫 Ban</h3><button class="btn ${sel.banned ? '' : 'alt'}" id="ban">${sel.banned ? 'Unban player' : 'Ban player'}</button>`}`
+      : '<div class="empty">👈 Pick a player to manage them.</div>'}</div></div>`;
+  wire();
+  document.querySelectorAll('[data-pu]').forEach(r => r.onclick = () => { admSel = r.dataset.pu; renderAdmin(nav); });
+  $('#allgo').onclick = act(async () => { const n = Math.floor(+$('#allamt').value); if (!n || !confirm(`Send ${fmt(n)} Hawk Bucks to every player?`)) return; const r = await api('POST', '/admin/money', { all: true, amount: n, note: $('#allnote').value }); toast(`Sent to ${r.count} players`); sfx.play('cash'); renderAdmin(nav); });
+  if (!sel) return;
+  const who = { username: sel.username }, done = msg => { toast(msg); sfx.play('cash'); renderAdmin(nav); };
+  $('#amtgo').onclick = act(async () => { const n = Math.floor(+$('#amt').value); if (!n) return toast('Type an amount'); await api('POST', '/admin/money', { ...who, amount: n, note: $('#anote').value }); done(n > 0 ? `Sent ${fmt(n)} to ${sel.username}` : `Took ${fmt(-n)} from ${sel.username}`); });
+  $('#setgo').onclick = act(async () => { await api('POST', '/admin/balance', { ...who, balance: Math.floor(+$('#setbal').value) }); done('Balance set'); });
+  $('#itgive').onclick = act(async () => { await api('POST', '/admin/give-item', { ...who, itemId: $('#itsel').value }); done('Item given'); });
+  $('#ittake').onclick = act(async () => { await api('POST', '/admin/take-item', { ...who, itemId: $('#itsel').value }); done('Item taken'); });
+  $('#lkgo').onclick = act(async () => { const v = $('#lk').value, r = await api('POST', '/admin/luck', { ...who, luck: v === 'normal' || v[0] === 'x' ? v : +v }); if (sel.username === U.username) { U.luck = r.luck; CFG = null; } done('Luck set'); });
+  $('#pwgo').onclick = act(async () => { await api('POST', '/admin/password', { ...who, password: $('#pw').value }); done('Password reset. Tell them the new one.'); });
+  if ($('#ban')) $('#ban').onclick = act(async () => { if (!sel.banned && !confirm(`Ban ${sel.username}? They'll be logged out.`)) return; await api('POST', '/admin/ban', { ...who, banned: !sel.banned }); done(sel.banned ? 'Unbanned' : 'Banned'); });
 }
 
 /* ---------- levels, achievements, shell ---------- */
