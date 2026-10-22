@@ -12,7 +12,7 @@ const INVITE_CODE = process.env.INVITE_CODE || ''; // if set, signups must inclu
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(path.dirname(process.env.DB_PATH || path.join(__dirname, 'data', 'x')), 'backups');
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'hawkbet.db');
 const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || '').toLowerCase(); // if set, only this username is admin; otherwise the first account is
-const START_BAL = 1000, MAX_BAL = 1e15, CLAIM_AMT = 100, CLAIM_BELOW = 100, CLAIM_EVERY_MS = 24 * 3600e3;
+const START_BAL = 1000, MAX_BAL = 1e15, capAmt = n => Math.min(MAX_BAL, n), CLAIM_AMT = 100, CLAIM_BELOW = 100, CLAIM_EVERY_MS = 24 * 3600e3;
 const SESSION_MS = 30 * 24 * 3600e3;
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -71,7 +71,7 @@ function adjust(uid, delta, kind, ref = null) { // the only place a balance chan
   const u = db.prepare('SELECT balance FROM users WHERE id=?').get(uid), nb = Math.min(MAX_BAL, u.balance + delta); // ceiling keeps numbers exact
   if (nb < 0) bad('Not enough Hawk Bucks');
   db.prepare('UPDATE users SET balance=? WHERE id=?').run(nb, uid);
-  db.prepare('INSERT INTO txns(user_id,delta,kind,ref,balance,ts) VALUES(?,?,?,?,?,?)').run(uid, delta, kind, ref, nb, now());
+  db.prepare('INSERT INTO txns(user_id,delta,kind,ref,balance,ts) VALUES(?,?,?,?,?,?)').run(uid, Math.max(-MAX_BAL, Math.min(MAX_BAL, delta)), kind, ref, nb, now());
   return nb;
 }
 const balanceOf = uid => db.prepare('SELECT balance FROM users WHERE id=?').get(uid).balance;
@@ -159,7 +159,7 @@ function settleSlip(sid) {
     mult = table ? (table[hits] || 0) : (hits === valid ? POWER[valid] : 0);
     status = mult > 0 ? 'won' : 'lost';
   }
-  const payout = Math.round(s.entry * mult);
+  const payout = capAmt(Math.round(s.entry * mult));
   db.prepare('UPDATE slips SET status=?, mult=?, payout=? WHERE id=?').run(status, mult, payout, sid);
   if (payout > 0) adjust(s.user_id, payout, status === 'void' ? 'slip_refund' : 'slip_win', sid);
 }
@@ -230,9 +230,9 @@ function startRound(ctx, game, state) {
   const id = Number(db.prepare('INSERT INTO rounds(user_id,game,bet,state,created) VALUES(?,?,?,?,?)').run(ctx.user.id, game, bet, JSON.stringify(state), now()).lastInsertRowid);
   return { id, bet, balance: adjust(ctx.user.id, -bet, game + '_bet', id) };
 }
-function superNet(uid, delta) { db.prepare('UPDATE users SET super_net=super_net+? WHERE id=?').run(delta, uid); }
+function superNet(uid, delta) { db.prepare('UPDATE users SET super_net=MAX(?,MIN(?,super_net+?)) WHERE id=?').run(-MAX_BAL, MAX_BAL, delta, uid); }
 function finishRound(r, status, mult) {
-  const payout = status === 'cashed' ? Math.round(r.bet * mult) : 0;
+  const payout = status === 'cashed' ? capAmt(Math.round(r.bet * mult)) : 0;
   try { if (JSON.parse(r.state).sup) superNet(r.user_id, payout - r.bet); } catch (e) {}
   addXp(r.user_id, 10 + (payout > r.bet ? 5 : 0));
   db.prepare('UPDATE rounds SET status=?, mult=?, payout=? WHERE id=?').run(status, mult, payout, r.id);
@@ -247,7 +247,7 @@ const arcade = {
   plinko: ctx => tx(() => {
     const rows = int(ctx.body.rows, 8, 16, 'Rows'), risk = ctx.body.risk; if (!PLINKO_RISK[risk]) bad('Bad risk');
     const bet = stake(ctx.body.bet); adjust(ctx.user.id, -bet, 'plinko_bet');
-    const path = Array.from({ length: rows }, () => crypto.randomInt(2)), k = path.reduce((a, b) => a + b, 0), mult = plinkoMults(rows, risk)[k], payout = Math.round(bet * mult);
+    const path = Array.from({ length: rows }, () => crypto.randomInt(2)), k = path.reduce((a, b) => a + b, 0), mult = plinkoMults(rows, risk)[k], payout = capAmt(Math.round(bet * mult));
     addXp(ctx.user.id, 10 + (payout > bet ? 5 : 0));
     const id = Number(db.prepare("INSERT INTO rounds(user_id,game,bet,state,status,mult,payout,created) VALUES(?,?,?,?,?,?,?,?)").run(ctx.user.id, 'plinko', bet, JSON.stringify({ rows, risk, path }), 'done', mult, payout, now()).lastInsertRowid);
     const balance = payout ? adjust(ctx.user.id, payout, 'plinko_win', id) : balanceOf(ctx.user.id);
@@ -295,7 +295,7 @@ const arcade = {
 /* ---------- more arcade games ---------- */
 function oneShot(ctx, game, state, mult, bet = stake(ctx.body.bet)) { // bet, decide and pay in one transaction
   adjust(ctx.user.id, -bet, game + '_bet');
-  const payout = Math.round(bet * mult);
+  const payout = capAmt(Math.round(bet * mult));
   if (state && state.sup) superNet(ctx.user.id, payout - bet);
   addXp(ctx.user.id, 10 + (payout > bet ? 5 : 0));
   const id = Number(db.prepare("INSERT INTO rounds(user_id,game,bet,state,status,mult,payout,created) VALUES(?,?,?,?,'done',?,?,?)").run(ctx.user.id, game, bet, JSON.stringify(state), mult, payout, now()).lastInsertRowid);
@@ -516,7 +516,7 @@ function skillStart(ctx, game, state) {
 }
 function skillFinish(ctx, r, st, score, detail = {}) {
   const prev = db.prepare('SELECT MAX(score) AS b FROM scores WHERE user_id=? AND game=?').get(ctx.user.id, r.game).b;
-  const mult = r.bet ? skillMult(r.game, score) : 0, payout = Math.round(r.bet * mult);
+  const mult = r.bet ? skillMult(r.game, score) : 0, payout = capAmt(Math.round(r.bet * mult));
   save(r, st); db.prepare("UPDATE rounds SET status='done', mult=?, payout=? WHERE id=?").run(mult, payout, r.id);
   db.prepare('INSERT INTO scores(user_id,game,score,detail,created) VALUES(?,?,?,?,?)').run(ctx.user.id, r.game, score, JSON.stringify(detail), now());
   addXp(ctx.user.id, 25 + Math.min(25, Math.round(score / 200))); // skill games earn the most XP
