@@ -36,7 +36,8 @@ CREATE INDEX IF NOT EXISTS idx_slips_user ON slips(user_id); CREATE INDEX IF NOT
 if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='added'").get()) db.exec('ALTER TABLE users ADD COLUMN added INTEGER NOT NULL DEFAULT 0'); // free top-ups so far
 for (const [col, def] of [['xp', 'INTEGER NOT NULL DEFAULT 0'], ['level', 'INTEGER NOT NULL DEFAULT 1'], ['last_wheel', "TEXT NOT NULL DEFAULT ''"]]) if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name=?").get(col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} ${def}`); // rewards
 db.exec(`CREATE TABLE IF NOT EXISTS challenge_claims(user_id INTEGER NOT NULL, day TEXT NOT NULL, cid TEXT NOT NULL, PRIMARY KEY(user_id, day, cid));
-CREATE TABLE IF NOT EXISTS achievements(user_id INTEGER NOT NULL, key TEXT NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY(user_id, key));`);
+CREATE TABLE IF NOT EXISTS achievements(user_id INTEGER NOT NULL, key TEXT NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY(user_id, key));
+CREATE TABLE IF NOT EXISTS dice_seed(user_id INTEGER PRIMARY KEY, server_seed TEXT NOT NULL, client_seed TEXT NOT NULL, nonce INTEGER NOT NULL DEFAULT 0);`);
 if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='super_net'").get()) db.exec('ALTER TABLE users ADD COLUMN super_net INTEGER NOT NULL DEFAULT 0'); // net result of Super Luck play, excluded from the leaderboard
 if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='luck'").get()) db.exec("ALTER TABLE users ADD COLUMN luck TEXT NOT NULL DEFAULT 'normal'"); // Luck Lab (cosmetic)
 db.exec(`CREATE TABLE IF NOT EXISTS scores(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), game TEXT NOT NULL, score INTEGER NOT NULL, detail TEXT, created INTEGER NOT NULL);
@@ -300,6 +301,24 @@ function oneShot(ctx, game, state, mult, bet = stake(ctx.body.bet)) { // bet, de
   const id = Number(db.prepare("INSERT INTO rounds(user_id,game,bet,state,status,mult,payout,created) VALUES(?,?,?,?,'done',?,?,?)").run(ctx.user.id, game, bet, JSON.stringify(state), mult, payout, now()).lastInsertRowid);
   return { bet, mult, payout, balance: payout ? adjust(ctx.user.id, payout, game + '_win', id) : balanceOf(ctx.user.id) };
 }
+/* Provably fair dice: roll = first 4 bytes of HMAC-SHA256(server_seed, "client_seed:nonce") scaled to 0.00-99.99.
+   Players see sha256(server_seed) up front; the seed itself is revealed when they rotate, so any roll can be recomputed. */
+const sha256 = x => crypto.createHash('sha256').update(x).digest('hex');
+function diceSeed(uid) {
+  let r = db.prepare('SELECT * FROM dice_seed WHERE user_id=?').get(uid);
+  if (!r) { db.prepare('INSERT INTO dice_seed(user_id,server_seed,client_seed,nonce) VALUES(?,?,?,0)').run(uid, crypto.randomBytes(32).toString('hex'), crypto.randomBytes(5).toString('hex')); r = db.prepare('SELECT * FROM dice_seed WHERE user_id=?').get(uid); }
+  return r;
+}
+const fairRoll = (server, client, nonce) => Math.floor(crypto.createHmac('sha256', server).update(`${client}:${nonce}`).digest().readUInt32BE(0) / 4294967296 * 10000) / 100;
+const fairInfo = uid => { const r = diceSeed(uid); return { hash: sha256(r.server_seed), clientSeed: r.client_seed, nonce: r.nonce }; };
+function fairRotate(ctx) {
+  const cs = String(ctx.body.clientSeed ?? '').trim().slice(0, 40);
+  return tx(() => {
+    const old = diceSeed(ctx.user.id);
+    db.prepare('UPDATE dice_seed SET server_seed=?, client_seed=?, nonce=0 WHERE user_id=?').run(crypto.randomBytes(32).toString('hex'), cs || crypto.randomBytes(5).toString('hex'), ctx.user.id);
+    return { revealed: { serverSeed: old.server_seed, hash: sha256(old.server_seed), clientSeed: old.client_seed, rolls: old.nonce }, ...fairInfo(ctx.user.id) };
+  });
+}
 const FLIP_MAX = 10, flipMult = (n, p = 0.5) => 0.99 / p ** n; // at Normal p = 0.5, so each right call doubles (one 1% edge on the streak)
 const RPS_MAX = 10, rpsMult = (n, p = 0.5) => 0.98 / p ** n;    // ties replay; p is the chance of winning a decisive throw
 const streakP = ctx => winP(0.5, luckInfo(ctx.user)), streakPay = ctx => payP(0.5, luckInfo(ctx.user)); // win chance: 30% at luck 1 … 50% Normal … 75% at luck 10 … 75/90/95% at Super x2/x5/x10
@@ -368,8 +387,9 @@ Object.assign(arcade, {
     if (!Number.isFinite(t) || t < 2 || t > 98) bad('Target must be between 2 and 98');
     const L = luckInfo(ctx.user), z0 = over ? 100 - t : t, c2 = x => Math.round(Math.min(98, Math.max(2, x)) * 100) / 100;
     const zone = c2(L.sup ? 100 - (100 - z0) / L.k : z0 * L.k), edge = over ? 100 - zone : zone, zonePay = c2(z0 * L.pk); // luck resizes the win zone
-    const roll = crypto.randomInt(10000) / 100, win = over ? roll > edge : roll < edge, pays = 0.99 / (zonePay / 100);
-    return { roll, target: t, edge, zone, over, pays, win, ...oneShot(ctx, 'dice', { roll, t, edge, over, sup: L.sup }, win ? pays : 0) };
+    const sd = diceSeed(ctx.user.id), nonce = sd.nonce; db.prepare('UPDATE dice_seed SET nonce=nonce+1 WHERE user_id=?').run(ctx.user.id);
+    const roll = fairRoll(sd.server_seed, sd.client_seed, nonce), win = over ? roll > edge : roll < edge, pays = 0.99 / (zonePay / 100);
+    return { roll, target: t, edge, zone, over, pays, win, nonce, clientSeed: sd.client_seed, hash: sha256(sd.server_seed), ...oneShot(ctx, 'dice', { roll, t, edge, zone, over, nonce, sup: L.sup }, win ? pays : 0) };
   }),
   limbo: ctx => tx(() => {
     const target = Math.round(Number(ctx.body.target) * 100) / 100;
@@ -640,6 +660,8 @@ const CHALLENGES = [
   { id: 'flip3', title: 'Call 3 heads or tails in a row', desc: 'A streak of 3 in one run', goal: 3, reward: 125, icon: '🪙', p: (u, t) => q1("SELECT COALESCE(MAX(json_extract(state,'$.streak')),0) n FROM rounds WHERE user_id=? AND game='flip' AND created>=?", u, t).n },
   { id: 'rps3', title: 'Win 3 Hallway RPS throws in a row', desc: 'Beat the rival', goal: 3, reward: 125, icon: '✊', p: (u, t) => q1("SELECT COALESCE(MAX(json_extract(state,'$.streak')),0) n FROM rounds WHERE user_id=? AND game='rps' AND created>=?", u, t).n },
   { id: 'cross5', title: 'Hop 5 lanes in one crossing', desc: 'Dodge the buses', goal: 5, reward: 125, icon: '🚌', p: (u, t) => q1("SELECT COALESCE(MAX(json_extract(state,'$.at')),0) n FROM rounds WHERE user_id=? AND game='cross' AND created>=?", u, t).n },
+  { id: 'dice5', title: 'Win 5 Scoreboard Rolls', desc: 'Beat the scoreboard 5 times', goal: 5, reward: 125, icon: '🎲', p: (u, t) => q1("SELECT COUNT(*) n FROM rounds WHERE user_id=? AND game='dice' AND payout>bet AND created>=?", u, t).n },
+  { id: 'dicelow', title: 'Win a long-shot roll', desc: 'Win Scoreboard Roll at 10% chance or less', goal: 1, reward: 150, icon: '🎯', p: (u, t) => q1("SELECT COUNT(*) n FROM rounds WHERE user_id=? AND game='dice' AND payout>bet AND json_extract(state,'$.zone')<=10 AND created>=?", u, t).n },
   { id: 'mines5', title: 'Open 5 lockers in one Locker Hunt', desc: 'Avoid the hall monitor', goal: 5, reward: 125, icon: '🔐', p: (u, t) => q1("SELECT COALESCE(MAX(json_array_length(json_extract(state,'$.opened'))),0) n FROM rounds WHERE user_id=? AND game='mines' AND created>=?", u, t).n },
 ];
 function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -666,6 +688,8 @@ const ACH = [ // [key, icon, title, description, xp, check(uid)]
   ['bell4000', '🔔', 'Lightning', 'Score 4,000+ in Bell Rush', 200, u => !!q1("SELECT 1 FROM scores WHERE user_id=? AND game='bell' AND score>=4000 LIMIT 1", u)],
   ['memory2800', '🧠', 'Photographic', 'Score 2,800+ in Classroom Memory', 200, u => !!q1("SELECT 1 FROM scores WHERE user_id=? AND game='memory' AND score>=2800 LIMIT 1", u)],
   ['trivia7', '❓', 'Honor Roll', 'Get all 7 right in Seahawk Trivia', 250, u => !!q1("SELECT 1 FROM scores WHERE user_id=? AND game='trivia' AND json_extract(detail,'$.correct')=7 LIMIT 1", u)],
+  ['sniper', '🎯', 'Sniper', 'Win Scoreboard Roll at 5% chance or less', 150, u => !!q1("SELECT 1 FROM rounds WHERE user_id=? AND game='dice' AND payout>bet AND json_extract(state,'$.zone')<=5 LIMIT 1", u)],
+  ['bullseye', '🔔', 'Bullseye', 'Roll exactly 50.00 on Scoreboard Roll', 100, u => !!q1("SELECT 1 FROM rounds WHERE user_id=? AND game='dice' AND json_extract(state,'$.roll')=50 LIMIT 1", u)],
   ['wheel', '🎡', 'Spin Doctor', 'Spin the daily wheel', 50, u => !!q1("SELECT 1 FROM users WHERE id=? AND last_wheel!=''", u)],
   ['claims10', '📋', 'Overachiever', 'Finish 10 daily challenges', 200, u => q1('SELECT COUNT(*) n FROM challenge_claims WHERE user_id=?', u).n >= 10],
   ['varsity', '🎓', 'Varsity', 'Reach level 5', 300, u => q1('SELECT level FROM users WHERE id=?', u).level >= 5],
@@ -763,6 +787,8 @@ const routes = {
   'POST /api/arcade/cross/step': need(arcade.crossStep),
   'POST /api/arcade/cross/cashout': need(arcade.crossCash),
   'POST /api/arcade/dice': need(arcade.dice),
+  'GET /api/fair': need(ctx => fairInfo(ctx.user.id)),
+  'POST /api/fair/rotate': need(fairRotate),
   'POST /api/arcade/limbo': need(arcade.limbo),
   'POST /api/arcade/slots': need(arcade.slots),
   'POST /api/arcade/roulette': need(arcade.roulette),

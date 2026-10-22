@@ -255,3 +255,17 @@ test('existing flows still work: slips, bank and a chance game', async () => {
   assert.equal(big.bet, 1500); assert.equal(big.balance, bal - 1500 + big.payout);
   assert.equal((await api('POST', '/arcade/dice', { bet: 0, target: 50, over: true })).status, 400, 'bet must be at least 1');
 });
+
+test('Scoreboard Roll is provably fair: rolls recompute from the revealed seed, and the fingerprint matches', async () => {
+  const crypto = require('node:crypto'), api = await newUser('fairplayer');
+  const f0 = await api('GET', '/fair'); assert.match(f0.hash, /^[0-9a-f]{64}$/); assert.equal(f0.nonce, 0);
+  const rolls = [];
+  for (let i = 0; i < 5; i++) { const r = await api('POST', '/arcade/dice', { bet: 10, target: 50, over: i % 2 === 0 }); assert.equal(r.status, 200); assert.equal(r.nonce, i); assert.equal(r.hash, f0.hash); rolls.push(r); }
+  const rot = await api('POST', '/fair/rotate', { clientSeed: 'go hawks' });
+  assert.equal(crypto.createHash('sha256').update(rot.revealed.serverSeed).digest('hex'), f0.hash, 'revealed seed hashes to the earlier fingerprint');
+  assert.equal(rot.revealed.rolls, 5); assert.equal(rot.clientSeed, 'go hawks'); assert.equal(rot.nonce, 0); assert.notEqual(rot.hash, f0.hash);
+  for (const r of rolls) {
+    const v = Math.floor(crypto.createHmac('sha256', rot.revealed.serverSeed).update(`${r.clientSeed}:${r.nonce}`).digest().readUInt32BE(0) / 4294967296 * 10000) / 100;
+    assert.equal(v, r.roll, 'roll recomputes exactly');
+  }
+});

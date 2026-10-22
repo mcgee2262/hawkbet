@@ -370,7 +370,7 @@ const GAME_KEYS = {
   mines: { Space: ['#start', '#cash'], r: ['#rand'], hint: 'Space start / cash out · R random locker · hold and drag to open many' },
   cross: { Space: ['#start', '#go'], c: ['#cash'], hint: 'Space start / next lane · C cash out' },
   flip: { Space: ['#start', 'last:[data-call]'], h: ['[data-call="heads"]'], t: ['[data-call="tails"]'], c: ['#cash'], hint: 'Space start / repeat last call · H heads · T tails · C cash out' },
-  dice: { Space: ['#roll'], u: ['#ouflip'], a: ['#auto'], hint: 'Space roll · U over/under · A auto-roll ×10' },
+  dice: { Space: ['#roll'], u: ['#ouflip'], a: ['#auto'], hint: 'Space roll · U over/under · A auto-roll · ←/→ nudge target' },
   limbo: { Space: ['#throw'], hint: 'Space throw' },
   slots: { Space: ['#spin'], a: ['#auto'], hint: 'Space pulls the lever · A auto-spin ×10 · or drag the lever down' },
   roulette: { Space: ['#spin'], x: ['#clr'], hint: 'Space spin · X clear chips' },
@@ -832,60 +832,146 @@ async function flip(root, my) {
 
 /* Dice: Scoreboard Roll. Stake-style: drag the big slider, the green zone is where you win, the roll lands on the bar. */
 async function dice(root) {
-  let target = 50, over = true, autoRun = false, rolling = false, hist = [];
-  const L = CFG.luck, c2 = x => Math.round(Math.min(98, Math.max(2, x)) * 100) / 100;
+  let target = 50, over = true, autoRun = false, rolling = false, fast = false, streak = 0, bestStreak = 0, sel = null;
+  const L = CFG.luck, c2 = x => Math.round(Math.min(98, Math.max(2, x)) * 100) / 100, S = { rolls: [], profit: 0, best: 0 };
+  let fair = null;
   root.innerHTML = gameShell(`${betBox()}
     <button class="btn bjbig" id="roll">🎲 Roll dice <kbd>Space</kbd></button>
-    <div class="duo"><button class="btn alt" id="ouflip">⇄ Roll <b id="oulab">Over</b> <kbd>U</kbd></button><button class="btn alt" id="auto">⚡ Auto ×10 <kbd>A</kbd></button></div>
-    <div class="stats3"><div><small>Multiplier</small><b id="py">–</b></div><div><small>Roll <span id="oul2">over</span></small><input id="tgn" type="number" min="2" max="98" step="0.01" value="50"></div><div><small>Win chance</small><b id="wc">–</b></div></div>
-    <div class="note">Drag the slider (or type a number) to set your target. The <b>green zone</b> wins. Smaller zone = bigger payout.</div>${luckLine('your green win zone is resized, payouts adjust to match.')}`,
-    `<div class="dstage"><div class="dnum" id="dnum">50.00</div>
-      <div class="dbar" id="dbar"><div class="dz lose" id="dzl"></div><div class="dz win" id="dzw"></div><input type="range" id="tg" class="dslider" min="2" max="98" step="0.01" value="50" aria-label="Dice target"><div class="dmark hidden" id="dmark"><span id="dmv"></span></div></div>
-      <div class="dticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div><div class="dhist" id="dh" aria-label="Recent rolls"></div></div>`);
-  const pos = v => `calc(17px + (100% - 34px) * ${v / 100})`;
+    <div class="duo"><button class="btn alt" id="ouflip">⇄ Roll <b id="oulab">Over</b> <kbd>U</kbd></button><button class="btn alt" id="speed" aria-pressed="false">⚡ Instant</button></div>
+    <div class="dpre" id="dpre">${[1.5, 2, 5, 10, 50].map(m => `<button class="chip" data-m="${m}">${m}x</button>`).join('')}<button class="chip" data-w="98">98% safe</button></div>
+    <div class="stats3"><div><small>Multiplier</small><input id="mulin" type="number" min="1.01" step="0.01"></div><div><small>Roll <span id="oul2">over</span></small><input id="tgn" type="number" min="2" max="98" step="0.01" value="50"></div><div><small>Win chance %</small><input id="wcin" type="number" min="2" max="98" step="0.01"></div></div>
+    <div class="note">Type in any box and the others follow. The <b>green zone</b> wins. Smaller zone = bigger payout. <kbd>←</kbd><kbd>→</kbd> nudge the target.</div>
+    <details class="dauto"><summary>⚡ Auto-roll</summary>
+      <div class="arow"><label>Rolls<select id="acount"><option>10</option><option>25</option><option>50</option><option>100</option><option value="0">Until stopped</option></select></label><label>On a win<select id="awin"><option value="same">Keep bet</option><option value="reset">Reset bet</option></select></label></div>
+      <div class="arow"><label>Stop if up<input id="astopw" type="number" min="0" placeholder="off"></label><label>Stop if down<input id="astopl" type="number" min="0" placeholder="off"></label><label>Stop on win ≥ (x)<input id="astopx" type="number" min="0" placeholder="off"></label></div>
+      <button class="btn alt" id="auto">⚡ Start auto <kbd>A</kbd></button></details>
+    ${luckLine('your green win zone is resized, payouts adjust to match.')}`,
+    `<div class="dstage"><div class="board" id="board"><div class="bbulbs" aria-hidden="true">${Array.from({ length: 18 }, (_, k) => `<i style="--k:${k}"></i>`).join('')}</div>
+      <div class="bhead"><span>🦅 SEAHAWKS</span><span id="rollno">ROLL #1</span><span id="fire" class="fire hidden">🔥 HOT</span></div>
+      <div class="dnum" id="dnum" aria-live="polite">${[0, 1, '.', 2, 3].map(d => d === '.' ? '<i class="pt">.</i>' : `<i class="dd">5</i>`).join('')}</div></div>
+      <div class="dbar" id="dbar"><div class="turf"></div><div class="dz lose" id="dzl"></div><div class="dz win" id="dzw"></div><input type="range" id="tg" class="dslider" min="2" max="98" step="0.01" value="50" aria-label="Dice target"><div class="dmark hidden" id="dmark"><span id="dmv"></span></div></div>
+      <div class="dticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+      <div class="dhist" id="dh" aria-label="Recent rolls"></div><div class="ddet" id="ddet"></div>
+      <div class="dstats" id="dstats"></div><svg class="dgraph" id="dgraph" viewBox="0 0 300 70" preserveAspectRatio="none" aria-label="Session profit"></svg>
+      <details class="dfair" id="dfair"><summary>🔒 Provably fair</summary><div class="fbody">
+        <p class="note">Before each roll the server has locked in a secret seed. You see its fingerprint (SHA-256) now, and the seed itself when you rotate. Every roll = HMAC-SHA256(server seed, "your seed:roll number"). Rotate, then check any past roll below.</p>
+        <div class="frow"><small>Server seed fingerprint</small><code id="fhash">…</code></div>
+        <div class="frow"><small>Your seed</small><input id="fcs" maxlength="40" aria-label="Client seed"></div><div class="frow"><small>Next roll #</small><b id="fnonce">0</b></div>
+        <button class="btn alt" id="frot">🔄 Rotate seeds &amp; reveal old one</button>
+        <div class="fverify"><b>Verify a roll</b><input id="vss" placeholder="Server seed (revealed after rotating)"><div class="arow"><input id="vcs" placeholder="Your seed"><input id="vn" type="number" min="0" placeholder="Roll #"></div><button class="btn alt" id="vgo">Check</button><div id="vout" class="note"></div></div></div></details></div>`);
+  const $r = s => root.querySelector(s), pos = v => `calc(17px + (100% - 34px) * ${v / 100})`;
+  const z0of = t => over ? 100 - t : t;
   function geom() { // [win chance %, win zone edge, payout]
-    const z0 = over ? 100 - target : target, zone = c2(L.sup ? 100 - (100 - z0) / L.k : z0 * L.k), edge = over ? 100 - zone : zone, zonePay = c2(z0 * L.pk);
+    const z0 = z0of(target), zone = c2(L.sup ? 100 - (100 - z0) / L.k : z0 * L.k), edge = over ? 100 - zone : zone, zonePay = c2(z0 * L.pk);
     return { zone, edge, pays: 0.99 / (zonePay / 100) };
   }
-  function paint() {
-    const g = geom(); $('#py').textContent = g.pays.toFixed(g.pays >= 100 ? 0 : 2) + 'x'; $('#wc').textContent = g.zone.toFixed(2) + '%';
-    $('#oulab').textContent = over ? 'Over' : 'Under'; $('#oul2').textContent = over ? 'over' : 'under';
-    const lose = $('#dzl'), win = $('#dzw');
+  const tFromZ0 = z0 => over ? 100 - z0 : z0;
+  function paint(skip) {
+    const g = geom(), act = document.activeElement;
+    if (act !== $r('#mulin')) $r('#mulin').value = +g.pays.toFixed(g.pays >= 100 ? 0 : 2);
+    if (act !== $r('#wcin')) $r('#wcin').value = g.zone.toFixed(2);
+    if (act !== $r('#tgn')) $r('#tgn').value = target;
+    $r('#oulab').textContent = over ? 'Over' : 'Under'; $r('#oul2').textContent = over ? 'over' : 'under';
+    const lose = $r('#dzl'), win = $r('#dzw');
     if (over) { lose.style.cssText = `left:0;width:${pos(g.edge)}`; win.style.cssText = `left:${pos(g.edge)};right:0`; } else { win.style.cssText = `left:0;width:${pos(g.edge)}`; lose.style.cssText = `left:${pos(g.edge)};right:0`; }
-    $('#tg').value = target; if (document.activeElement !== $('#tgn')) $('#tgn').value = target;
-    $('#tg').style.setProperty('--fill', ((target - 2) / 96 * 100) + '%');
+    $r('#tg').value = target;
   }
   const setTarget = v => { target = Math.round(Math.min(98, Math.max(2, +v || 50)) * 100) / 100; paint(); };
-  $('#tg').oninput = e => setTarget(e.target.value); $('#tgn').oninput = e => { if (e.target.value !== '') setTarget(e.target.value); }; $('#tgn').onblur = () => paint();
-  const flipOU = () => { over = !over; paint(); sfx.play('tap'); }; $('#ouflip').onclick = flipOU;
-  function pill() { $('#dh').innerHTML = hist.slice(0, 14).map(h => `<span class="${h.win ? 'good' : 'bad'}">${h.roll.toFixed(2)}</span>`).join(''); }
+  const fromMult = m => { const zonePay = 99 / Math.max(1.01, m); setTarget(tFromZ0(Math.min(98, Math.max(2, zonePay / L.pk)))); };
+  const fromChance = w => { const z0 = L.sup ? 100 - (100 - w) * L.k : w / L.k; setTarget(tFromZ0(Math.min(98, Math.max(2, z0)))); };
+  $r('#tg').oninput = e => setTarget(e.target.value);
+  $r('#tgn').oninput = e => { if (e.target.value !== '') setTarget(e.target.value); }; $r('#tgn').onblur = () => paint();
+  $r('#mulin').oninput = e => { if (+e.target.value > 0) fromMult(+e.target.value); }; $r('#mulin').onblur = () => paint();
+  $r('#wcin').oninput = e => { if (+e.target.value > 0) fromChance(+e.target.value); }; $r('#wcin').onblur = () => paint();
+  $r('#dpre').onclick = e => { const b = e.target.closest('.chip'); if (!b) return; sfx.play('tap'); b.dataset.m ? fromMult(+b.dataset.m) : fromChance(+b.dataset.w); };
+  const flipOU = () => { over = !over; target = c2(100 - target); paint(); sfx.play('tap'); }; $r('#ouflip').onclick = flipOU;
+  $r('#speed').onclick = e => { fast = !fast; e.currentTarget.setAttribute('aria-pressed', fast); e.currentTarget.classList.toggle('on', fast); };
+  const keys = e => { if (!root.isConnected) return; if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.id !== 'tg') return; const d = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0; if (d) { e.preventDefault(); setTarget(target + d * (e.shiftKey ? 10 : 1)); } };
+  document.addEventListener('keydown', keys); stopFns.push(() => document.removeEventListener('keydown', keys));
+  /* scoreboard digits (odometer): 5 cells "dd.dd" */
+  const cells = () => [...root.querySelectorAll('#dnum .dd')], fmtRoll = v => v.toFixed(2).padStart(5, '0').replace('.', '');
+  const showRoll = v => { const s = fmtRoll(v); cells().forEach((c, i) => { c.textContent = s[i]; }); };
+  async function odometer(v) {
+    const s = fmtRoll(v), cs = cells(), t0 = performance.now(), locks = fast ? [60, 110, 160, 210] : [380, 520, 660, 820];
+    await new Promise(done => { const step = () => { const el = performance.now() - t0; let all = true;
+      cs.forEach((c, i) => { if (el >= locks[i]) { if (c.textContent !== s[i] || !c.classList.contains('lock')) { c.textContent = s[i]; c.classList.add('lock'); sfx.play('tap'); } } else { all = false; c.textContent = Math.floor(Math.random() * 10); } });
+      all ? done() : setTimeout(step, 45); }; step(); });
+    cs.forEach(c => c.classList.remove('lock'));
+  }
+  function pill() {
+    $r('#dh').innerHTML = S.rolls.slice(0, 25).map((h, i) => `<button data-i="${i}" class="${h.win ? 'good' : 'bad'}${sel === h ? ' sel' : ''}">${h.roll.toFixed(2)}</button>`).join('');
+  }
+  $r('#dh').onclick = e => { const b = e.target.closest('button'); if (!b) return; sel = S.rolls[+b.dataset.i]; pill(); const h = sel;
+    $r('#ddet').innerHTML = `Roll #${h.nonce + 1} · ${h.over ? 'Over' : 'Under'} ${h.target.toFixed(2)} · chance ${h.zone.toFixed(2)}% · rolled <b>${h.roll.toFixed(2)}</b> · bet ${fmt(h.bet)} → ${h.win ? '<b class="g">+' + fmt(h.payout - h.bet) + '</b>' : '<b class="r">−' + fmt(h.bet) + '</b>'} · <button class="chip" id="dverify">Verify</button>`;
+    $r('#dverify').onclick = () => { $r('#dfair').open = true; $r('#vcs').value = h.clientSeed; $r('#vn').value = h.nonce; $r('#vss').focus(); };
+  };
+  function stats() {
+    const R = S.rolls, w = R.filter(x => x.win).length;
+    $r('#dstats').innerHTML = [['Rolls', R.length], ['Win rate', R.length ? Math.round(w / R.length * 100) + '%' : '–'], ['Profit', (S.profit > 0 ? '+' : '') + fmt(S.profit)], ['Best hit', S.best ? S.best.toFixed(2) + 'x' : '–'], ['Best streak', bestStreak]].map(([k, v]) => `<div><small>${k}</small><b class="${k === 'Profit' ? (S.profit > 0 ? 'g' : S.profit < 0 ? 'r' : '') : ''}">${v}</b></div>`).join('');
+    const pts = [0]; [...R].reverse().forEach(x => pts.push(pts[pts.length - 1] + x.payout - x.bet));
+    const lo = Math.min(0, ...pts), hi = Math.max(0, ...pts), span = hi - lo || 1, X = i => pts.length < 2 ? 0 : i / (pts.length - 1) * 300, Y = v => 66 - (v - lo) / span * 62;
+    $r('#dgraph').innerHTML = `<line x1="0" x2="300" y1="${Y(0)}" y2="${Y(0)}" stroke="#ffffff33" stroke-dasharray="4 4"/>` + (pts.length > 1 ? `<polyline fill="none" stroke="${S.profit >= 0 ? '#19e58a' : '#ff5d6c'}" stroke-width="2.5" stroke-linejoin="round" points="${pts.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ')}"/>` : '');
+    $r('#rollno').textContent = 'ROLL #' + (R.length + 1);
+    const hot = streak >= 3; $r('#fire').classList.toggle('hidden', !hot); $r('#board').classList.toggle('onfire', hot);
+  }
+  function paintFair() { if (!fair) return; $r('#fhash').textContent = fair.hash; if (document.activeElement !== $r('#fcs')) $r('#fcs').value = fair.clientSeed; $r('#fnonce').textContent = fair.nonce; }
+  api('GET', '/fair').then(f => { fair = f; if (root.isConnected) paintFair(); }).catch(() => {});
+  async function hmacRoll(server, client, nonce) {
+    const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(server), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = new DataView(await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(`${client}:${nonce}`)));
+    return Math.floor(sig.getUint32(0) / 4294967296 * 10000) / 100;
+  }
+  $r('#frot').onclick = act(async () => {
+    const r = await api('POST', '/fair/rotate', { clientSeed: $r('#fcs').value }); fair = r; paintFair();
+    $r('#vss').value = r.revealed.serverSeed; $r('#vcs').value = r.revealed.clientSeed; $r('#vn').value = 0;
+    $r('#vout').innerHTML = `Old server seed revealed (${r.revealed.rolls} rolls). It hashes to <code>${r.revealed.hash.slice(0, 16)}…</code> – the fingerprint you saw. Pick a roll # and press Check.`;
+  });
+  $r('#vgo').onclick = async () => {
+    try { const s = $r('#vss').value.trim(), c = $r('#vcs').value, n = +$r('#vn').value; if (!s) return $r('#vout').textContent = 'Paste the revealed server seed first.';
+      const v = await hmacRoll(s, c, n), hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map(b => b.toString(16).padStart(2, '0')).join('');
+      $r('#vout').innerHTML = `Roll #${n + 1} was <b>${v.toFixed(2)}</b>. Server seed fingerprint <code>${hash.slice(0, 16)}…</code>`; } catch (e) { $r('#vout').textContent = 'Could not verify that.'; }
+  };
   async function doRoll() {
-    if (rolling) return false; rolling = true; $('#roll').disabled = true;
+    if (rolling) return false; rolling = true; $r('#roll').disabled = true;
     try {
-      const r = await api('POST', '/arcade/dice', { bet: readBet(), target, over }), num = $('#dnum'), mk = $('#dmark'), bar = $('#dbar');
-      $('#res').textContent = ''; num.className = 'dnum rolling'; mk.className = 'dmark scan'; bar.classList.remove('flash-g', 'flash-r');
-      const steps = calm ? 0 : 16;
-      for (let i = 0; i < steps; i++) { const v = Math.random() * 100; num.textContent = v.toFixed(2); mk.style.left = pos(v); $('#dmv').textContent = ''; if (i % 2) sfx.play('tap'); await wait(38 + i * 6); }
+      const r = await api('POST', '/arcade/dice', { bet: readBet(), target, over }), mk = $r('#dmark'), bar = $r('#dbar'), board = $r('#board');
+      $r('#res').textContent = ''; board.classList.remove('good', 'bad'); mk.className = 'dmark scan'; bar.classList.remove('flash-g', 'flash-r');
+      const scan = setInterval(() => { mk.style.left = pos(Math.random() * 100); }, 55);
+      if (!calm) await odometer(r.roll); else showRoll(r.roll);
+      clearInterval(scan);
       if (!root.isConnected) { setBal(r.balance); return false; }
-      num.textContent = r.roll.toFixed(2); num.className = 'dnum ' + (r.win ? 'good' : 'bad'); mk.style.left = pos(r.roll); mk.className = 'dmark land ' + (r.win ? 'good' : 'bad'); $('#dmv').textContent = r.roll.toFixed(2);
-      bar.classList.add(r.win ? 'flash-g' : 'flash-r'); hist.unshift(r); pill();
-      settleShot(r, r.mult >= 5); if (r.win) fx.bump(num);
-      return true;
-    } finally { rolling = false; if (root.isConnected) $('#roll').disabled = autoRun; }
+      mk.style.left = pos(r.roll); mk.className = 'dmark land ' + (r.win ? 'good' : 'bad'); $r('#dmv').textContent = r.roll.toFixed(2);
+      board.classList.add(r.win ? 'good' : 'bad'); bar.classList.add(r.win ? 'flash-g' : 'flash-r');
+      streak = r.win ? streak + 1 : 0; bestStreak = Math.max(bestStreak, streak); if (r.win && r.mult >= 3) fx.bump(board);
+      S.rolls.unshift(r); S.profit += r.payout - r.bet; if (r.win) S.best = Math.max(S.best, r.mult);
+      if (fair) { fair.nonce = r.nonce + 1; paintFair(); }
+      sel = null; $r('#ddet').innerHTML = ''; pill(); stats();
+      settleShot(r, r.mult >= 5);
+      if (r.win && streak === 3) toast('🔥 Hot streak – 3 in a row!');
+      return r;
+    } finally { rolling = false; if (root.isConnected) $r('#roll').disabled = autoRun; }
   }
-  $('#roll').onclick = act(doRoll);
+  $r('#roll').onclick = act(async () => { await doRoll(); });
+  const num = id => { const v = parseFloat($r(id).value); return v > 0 ? v : 0; };
   async function toggleAuto() {
-    if (autoRun) { autoRun = false; $('#auto').innerHTML = '⚡ Auto ×10 <kbd>A</kbd>'; $('#roll').disabled = rolling; return; }
-    autoRun = true; $('#roll').disabled = true;
-    for (let n = 10; n > 0 && autoRun && root.isConnected; n--) {
-      $('#auto').innerHTML = `⏹ Stop (${n} left) <kbd>A</kbd>`;
-      try { if (!(await doRoll())) break; } catch (e) { toast(e.message); sfx.play('error'); break; }
-      await wait(calm ? 100 : 380);
+    const btn = $r('#auto');
+    if (autoRun) { autoRun = false; return; }
+    autoRun = true; $r('#roll').disabled = true; $r('.dauto').open = true;
+    const total = +$r('#acount').value || Infinity, upT = num('#astopw'), dnT = num('#astopl'), xT = num('#astopx'), resetOnWin = $r('#awin').value === 'reset', bet0 = readBet(); let net = 0;
+    for (let n = total; n > 0 && autoRun && root.isConnected; n--) {
+      btn.innerHTML = `⏹ Stop (${n === Infinity ? '∞' : n} left) <kbd>A</kbd>`;
+      let r; try { r = await doRoll(); } catch (e) { toast(e.message); sfx.play('error'); break; }
+      if (!r) break; net += r.payout - r.bet;
+      if (resetOnWin && r.win) { $('#bet').value = bet0; $('#bet').dispatchEvent(new Event('input')); }
+      if (upT && net >= upT) { toast('Auto-roll stopped: profit target reached'); break; }
+      if (dnT && -net >= dnT) { toast('Auto-roll stopped: loss limit reached'); break; }
+      if (xT && r.win && r.mult >= xT) { toast(`Auto-roll stopped: ${r.mult.toFixed(2)}x hit`); break; }
+      await wait(calm || fast ? 120 : 420);
     }
-    autoRun = false; if (root.isConnected) { $('#auto').innerHTML = '⚡ Auto ×10 <kbd>A</kbd>'; $('#roll').disabled = false; }
+    autoRun = false; if (root.isConnected) { btn.innerHTML = '⚡ Start auto <kbd>A</kbd>'; $r('#roll').disabled = false; }
   }
-  $('#auto').onclick = toggleAuto; stopFns.push(() => { autoRun = false; });
-  paint(); pill();
+  $r('#auto').onclick = toggleAuto; stopFns.push(() => { autoRun = false; });
+  paint(); pill(); stats();
 }
 
 /* Limbo: Hail Mary */
