@@ -137,6 +137,7 @@ const fx = (() => {
     if (calm) return;
     const t = luckFx(); n = Math.round(n * t.m);
     for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = 4 + Math.random() * 9; parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 5, r: Math.random() * 6, vr: (Math.random() - .5) * .4, w: 6 + Math.random() * 6, h: 4 + Math.random() * 4, c: t.c[i % t.c.length], e: t.e.length && i % 5 === 0 ? t.e[i % t.e.length] : '', life: 80 + Math.random() * 50 }); }
+    if (parts.length > 420) parts.splice(0, parts.length - 420);
     if (!raf) raf = requestAnimationFrame(tick);
   }
   const pulse = (el, cls, ms = 800) => { if (!el || calm) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); setTimeout(() => el.classList.remove(cls), ms); };
@@ -329,7 +330,7 @@ const SKILL_IDS = new Set(['bell', 'memory', 'trivia']);
 let arcCat = 'all';
 async function renderArcade(my) {
   if (!CFG || CFG.user !== U.username) CFG = { ...(await api('GET', '/arcade/config')), user: U.username };
-  STATS = await api('GET', '/arcade/stats').catch(() => STATS); if (my !== nav) return;
+  if (Date.now() - (renderArcade.at || 0) > 30000) { STATS = await api('GET', '/arcade/stats').catch(() => STATS); renderArcade.at = Date.now(); } if (my !== nav) return;
   const list = gameList(), byId = Object.fromEntries(list.map(g => [g.id, g]));
   const week = Math.floor((Date.now() / 864e5 + 4) / 7), featured = [...new Set([0, 1, 2].map(k => list[(week * 3 + k * 5) % list.length]))]; // rotates every Monday
   const shown = { all: list, featured, recent: STATS.recent.map(id => byId[id]).filter(Boolean), classic: list.filter(g => !SKILL_IDS.has(g.id)), skill: list.filter(g => SKILL_IDS.has(g.id)) }[arcCat] || list;
@@ -340,8 +341,8 @@ async function renderArcade(my) {
     <div class="gamehead"><span class="ge">${esc(cur.emoji)}</span><div class="gt"><h2>${esc(cur.title)}</h2><small>${esc(cur.desc)}</small></div><div class="pbbar" id="pb"></div></div>
     <div id="gm"></div>
     <div class="arcfoot">🎟️ Hawk Bucks are pretend: no money, no prizes, nothing to cash out.</div>`;
-  document.querySelectorAll('[data-g]').forEach(b => b.onclick = () => { game = b.dataset.g; go(); });
-  document.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => { arcCat = b.dataset.cat; go(); });
+  document.querySelectorAll('[data-g]').forEach(b => b.onclick = async () => { const y = scrollY; game = b.dataset.g; await go(); scrollTo(0, y); }); // keep your place on the page when switching games
+  document.querySelectorAll('[data-cat]').forEach(b => b.onclick = async () => { const y = scrollY; arcCat = b.dataset.cat; await go(); scrollTo(0, y); });
   const on = $('.gtile.on'); if (on) on.scrollIntoView({ block: 'nearest', inline: 'center' });
   paintPB();
   await (GAME_FNS[game] || plinko)($('#gm'), my);
@@ -964,7 +965,7 @@ async function limbo(root) {
 const SLOT_COLORS = ['#ffe08a', '#19e58a', '#5b8cff', '#ff4fd8', '#ff9f1a']; // payline colors
 async function slots(root, my) {
   const keys = Object.keys(EMO), pays = CFG.slots.pays, LINES = CFG.slots.lines;
-  let spinning = false, autoRun = false, recent = [];
+  let spinning = false, autoRun = false, busy = false, recent = [], hitTimer = 0;
   const bulbs = Array.from({ length: 22 }, (_, k) => `<i style="--k:${k}"></i>`).join('');
   const symTile = k => `<div class="stile s-${k}" data-k="${k}"><span>${EMO[k]}</span>${k === 'hawk' ? '<em>WILD</em>' : ''}</div>`;
   const start = [['pass', 'volley', 'bus'], ['hawk', 'trophy', 'bball'], ['bus', 'football', 'pass']]; // column 0..2, top→bottom (no accidental wins)
@@ -979,20 +980,29 @@ async function slots(root, my) {
       <div class="scab"><div class="swin" id="swin"><div class="sreels" id="sreels">${[0, 1, 2].map(c => `<div class="sreel" data-c="${c}"><div class="sstrip">${start[c].map(symTile).join('')}</div></div>`).join('')}</div>
           <svg class="slines" viewBox="0 0 3 3" preserveAspectRatio="none" aria-hidden="true">${LINES.map((L, i) => `<polyline id="pl${i}" points="${L.map((r, c) => `${c + .5},${r + .5}`).join(' ')}" stroke="${SLOT_COLORS[i]}"/>`).join('')}</svg>
           <div class="swinfx" id="swinfx"><div class="sbanner" id="sbn"></div></div></div>
-        <div class="shandle" id="shandle"><div class="hbase"></div><div class="harm" id="harm"><div class="hrod"></div><button class="hball" id="hball" aria-label="Pull the lever to spin"></button></div><div class="hhint">PULL ↓</div></div></div>
+        <div class="shandle" id="shandle"><svg class="lsvg" viewBox="0 0 90 270" overflow="visible"><defs>
+            <linearGradient id="lpl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#5d6a7c"/><stop offset=".45" stop-color="#eef3f9"/><stop offset="1" stop-color="#76849a"/></linearGradient>
+            <radialGradient id="lbl" cx=".35" cy=".3" r=".85"><stop offset="0" stop-color="#ffc2c9"/><stop offset=".32" stop-color="#ff2d44"/><stop offset="1" stop-color="#6e0010"/></radialGradient>
+            <radialGradient id="lpv" cx=".4" cy=".35" r=".8"><stop offset="0" stop-color="#fff"/><stop offset=".5" stop-color="#9aa7b8"/><stop offset="1" stop-color="#434e5f"/></radialGradient></defs>
+          <rect x="-4" y="90" width="34" height="90" rx="10" fill="url(#lpl)" stroke="#2e3745" stroke-width="2"/><rect x="8" y="104" width="12" height="62" rx="6" fill="#121821" stroke="#2e3745" stroke-width="1.5"/>
+          <circle cx="4" cy="99" r="2.4" fill="#59667a"/><circle cx="23" cy="99" r="2.4" fill="#59667a"/><circle cx="4" cy="171" r="2.4" fill="#59667a"/><circle cx="23" cy="171" r="2.4" fill="#59667a"/>
+          <line id="lr0" x1="26" y1="135" x2="26" y2="35" stroke="#2a3340" stroke-width="13" stroke-linecap="round"/><line id="lr1" x1="26" y1="135" x2="26" y2="35" stroke="#b7c2d1" stroke-width="9" stroke-linecap="round"/><line id="lr2" x1="24" y1="135" x2="24" y2="35" stroke="#fff" stroke-width="2.4" stroke-linecap="round" opacity=".85"/>
+          <circle cx="26" cy="135" r="12" fill="url(#lpv)" stroke="#2e3745" stroke-width="2"/><circle cx="26" cy="135" r="4.5" fill="#2e3745"/>
+          <g id="hball" class="lball" tabindex="0" role="button" aria-label="Pull the lever to spin" transform="translate(26 35)"><circle r="19" fill="url(#lbl)" stroke="#5a0010" stroke-width="2"/><ellipse cx="-6" cy="-8" rx="7" ry="4.2" fill="#fff" opacity=".72" transform="rotate(-30 -6 -8)"/><circle class="lrim" r="21" fill="none" stroke="transparent" stroke-width="3"/></g></svg><div class="hhint">PULL ↓</div></div></div>
       <div class="slast" id="slast" aria-label="Recent spins"></div></div>`, 'wide2');
-  const reels = [...root.querySelectorAll('.sreel')], strips = reels.map(r => r.firstElementChild), slotm = $('#slotm'), harm = $('#harm'), lever = $('#shandle');
+  const reels = [...root.querySelectorAll('.sreel')], strips = reels.map(r => r.firstElementChild), slotm = $('#slotm'), lever = $('#shandle'), svg = $('.lsvg');
   const tileH = () => reels[0].clientHeight / 3, rnd = () => keys[Math.floor(Math.random() * keys.length)];
   const perLineTxt = () => { const v = readBet() / 5; return v % 1 ? v.toFixed(1) : String(v); };
   $('#bet').addEventListener('input', () => { $('#perline').textContent = perLineTxt(); }); $('#perline').textContent = perLineTxt();
   const pills = () => { $('#slast').innerHTML = recent.slice(0, 12).map(m => `<span class="${m >= 5 ? 'gold' : m >= 1 ? 'good' : m > 0 ? 'meh' : 'bad'}">${m ? m.toFixed(2) + 'x' : '0x'}</span>`).join(''); };
-  const setReel = (c, syms) => { strips[c].style.transition = 'none'; strips[c].style.transform = 'translateY(0)'; strips[c].innerHTML = syms.map(symTile).join(''); };
-  const curCol = c => [...strips[c].children].map(e => e.dataset.k).slice(0, 3);
+    const curCol = c => [...strips[c].children].map(e => e.dataset.k).slice(0, 3);
   async function spinReel(c, final3, dur) { // symbols scroll DOWN: new ones enter at the top and settle with a little overshoot
     const cur = curCol(c), filler = Array.from({ length: 12 + c * 5 + Math.round(dur / 320) }, rnd), seq = [...final3, ...filler, ...cur], t = tileH();
     strips[c].innerHTML = seq.map(symTile).join(''); strips[c].style.transition = 'none'; strips[c].style.transform = `translateY(${-(seq.length - 3) * t}px)`; void strips[c].offsetWidth;
     reels[c].classList.add('blur'); strips[c].style.transition = `transform ${dur}ms cubic-bezier(.15,.8,.22,1.07)`; strips[c].style.transform = 'translateY(0)';
-    await wait(dur); reels[c].classList.remove('blur'); setReel(c, final3); reels[c].classList.add('thud'); setTimeout(() => reels[c].classList.remove('thud'), 260);
+    await new Promise(res => { const done = () => { strips[c].removeEventListener('transitionend', done); res(); }; strips[c].addEventListener('transitionend', done); setTimeout(done, dur + 140); });
+    reels[c].classList.remove('blur'); while (strips[c].children.length > 3) strips[c].lastElementChild.remove(); // the final symbols are already in place at the top: just drop the filler, nothing is redrawn
+    reels[c].classList.add('thud'); setTimeout(() => reels[c].classList.remove('thud'), 260);
   }
   function coinRain(n) { if (calm) return; const fxl = $('#swinfx'); for (let i = 0; i < n; i++) { const e = document.createElement('i'); e.className = 'coinf'; e.textContent = '🪙'; e.style.cssText = `left:${Math.random() * 96}%;animation-delay:${Math.random() * .8}s;animation-duration:${1 + Math.random() * 1.1}s;font-size:${18 + Math.random() * 16}px`; fxl.appendChild(e); setTimeout(() => e.remove(), 2400); } }
   function clearHits() { root.querySelectorAll('.stile.hit,.stile.dim').forEach(e => e.classList.remove('hit', 'dim')); root.querySelectorAll('.slines polyline').forEach(p => p.classList.remove('on')); $('#sbn').className = 'sbanner'; $('#sbn').innerHTML = ''; slotm.classList.remove('frenzy', 'won'); }
@@ -1003,7 +1013,7 @@ async function slots(root, my) {
     const speed = $('#turbo').getAttribute('aria-pressed') === 'true' || autoRun ? 0.55 : 1, grid = r.grid, col = c => [0, 1, 2].map(row => grid[row][c]);
     const teasing = !calm && tease(grid) && speed === 1;
     slotm.classList.add('spinning'); if (teasing) slotm.classList.add('hot');
-    const tick = setInterval(() => sfx.play('flip'), 95);
+    const tick = setInterval(() => sfx.play('flip'), 140);
     const durs = [1000, 1450, teasing ? 3000 : 1900].map(d => calm ? 80 : d * speed);
     const jobs = [0, 1, 2].map(c => spinReel(c, col(c), durs[c]).then(() => { sfx.play('clunk'); if (c === 1 && teasing) { reels[2].classList.add('tease'); sfx.play('streak'); } }));
     await Promise.all(jobs); clearInterval(tick); reels[2].classList.remove('tease'); slotm.classList.remove('spinning', 'hot');
@@ -1014,19 +1024,21 @@ async function slots(root, my) {
     root.querySelectorAll('.stile:not(.hit)').forEach(e => e.classList.add('dim')); slotm.classList.add('won');
     const label = { jackpot: '🏆 STATE CHAMPS<br>JACKPOT 🏆', mega: 'MEGA WIN', big: 'BIG WIN', nice: 'NICE WIN', win: 'WIN' }[tier];
     if (label) { $('#sbn').className = 'sbanner show ' + tier; $('#sbn').innerHTML = `<small>${wins.length} line${wins.length > 1 ? 's' : ''}</small><b>${label}</b><strong id="sbamt">0</strong><span>🪙</span>`; countUp($('#sbamt'), r.payout, calm ? 0 : 1100); }
-    coinRain({ jackpot: 90, mega: 60, big: 40, nice: 24, win: 14, small: 6 }[tier]);
-    if (tier === 'jackpot') { slotm.classList.add('frenzy'); sfx.play('jackpot'); fx.burst(320); setTimeout(() => fx.burst(220), 700); }
+    coinRain({ jackpot: 40, mega: 30, big: 22, nice: 14, win: 9, small: 4 }[tier]);
+    if (tier === 'jackpot') { slotm.classList.add('frenzy'); sfx.play('jackpot'); fx.burst(170); setTimeout(() => fx.burst(110), 700); }
     else if (tier === 'mega' || tier === 'big') { slotm.classList.add('frenzy'); fx.win(true); sfx.play('big'); }
     else if (tier === 'nice') { fx.win(true); } else if (tier === 'win') { fx.win(false); } else sfx.play('coin');
     wins.forEach((w, i) => setTimeout(() => sfx.play('coin'), 120 + i * 140));
     return { tier, hold: { jackpot: 4200, mega: 3000, big: 2400, nice: 1800, win: 1400, small: 700 }[tier] };
   }
-  async function spin() { // called once the lever has been pulled
-    if (spinning) return false; spinning = true; lever.classList.add('locked'); $('#spin').disabled = true;
+  function begin() { // lock the machine and send the bet the moment the lever moves, so the result is back before it bottoms out
+    if (spinning) return null; spinning = true; clearTimeout(hitTimer); lever.classList.add('locked'); $('#spin').disabled = true; clearHits(); $('#res').textContent = '';
+    return api('POST', '/arcade/slots', { bet: readBet() }).then(r => ({ r }), e => ({ e }));
+  }
+  async function run(req) { // play the spin for a request that is already in flight
     let ok = false;
     try {
-      clearHits(); $('#res').textContent = '';
-      const r = await api('POST', '/arcade/slots', { bet: readBet() });
+      const got = await req; if (got.e) throw got.e; const r = got.r;
       U.balance = r.balance; pending += r.payout; showBal(); // the bet leaves now; winnings appear when the reels stop
       await playSpin(r); if (!root.isConnected) { pending = 0; return setBal(r.balance); }
       recent.unshift(r.mult); pills();
@@ -1034,32 +1046,44 @@ async function slots(root, my) {
       if (r.payout > 0) { const c = await celebrate(r); hold = c.hold; resMsg(r.payout >= r.bet, `${r.mult.toFixed(2)}x · ${r.payout >= r.bet ? '+' : '−'}${fmt(Math.abs(r.payout - r.bet))} 🪙`); }
       else { resMsg(false, `No win · −${fmt(r.bet)} 🪙`); fx.lose(); }
       pending = Math.max(0, pending - r.payout); showBal(); ok = true;
-      if (!autoRun) await wait(calm ? 0 : Math.min(hold, 800)); else await wait(calm ? 0 : hold);
-      if (!autoRun) setTimeout(() => { if (!spinning) clearHits(); }, 2500);
+      await wait(calm ? 0 : autoRun ? hold : Math.min(hold, 800));
+      if (!autoRun) hitTimer = setTimeout(() => { if (!spinning) clearHits(); }, 2500);
     } catch (e) { toast(e.message); sfx.play('error'); }
     finally { spinning = false; if (root.isConnected) { lever.classList.remove('locked'); $('#spin').disabled = autoRun; } }
     return ok;
   }
-  /* ---- the lever ---- */
-  const setArm = (deg, ms, ease) => { harm.style.transition = ms ? `transform ${ms}ms ${ease || 'ease-in'}` : 'none'; harm.style.transform = `rotate(${deg}deg)`; };
-  const REST = 0, CATCH = 130, FULL = 162;
-  async function pullAuto() { // what Space / the Spin button do: the lever pulls itself
-    if (spinning || lever.classList.contains('busy')) return false; lever.classList.add('busy');
-    sfx.play('lever'); setArm(FULL, calm ? 0 : 300, 'cubic-bezier(.4,0,.8,.6)'); await wait(calm ? 0 : 310); sfx.play('ratchet');
-    setArm(REST, calm ? 0 : 650, 'cubic-bezier(.3,1.6,.5,1)'); lever.classList.remove('busy'); return spin();
+  /* ---- the lever: a chrome arm on a bracket. Pulling it moves the ball down and toward you (it grows a little), then it springs back ---- */
+  const FULL = 162, CATCH = 0.82, P = { x: 26, y: 135 }, RX = 36, RY = 100, REST_Y = P.y - RY, FULL_Y = P.y + RY * 0.951;
+  const rods = ['lr0', 'lr1', 'lr2'].map(id => $('#' + id)), ballEl = $('#hball'), arm = { raf: 0, done: null, a: 0 };
+  function drawArm(a) { // a = degrees pulled (0 = resting up, 162 = all the way down)
+    const r = a * Math.PI / 180, bx = P.x + RX * Math.sin(r), by = P.y - RY * Math.cos(r), depth = (1 - Math.cos(r)) / 2, k = 1 + 0.3 * depth;
+    rods.forEach((l, i) => { l.setAttribute('x2', bx - (i === 2 ? 2 * k : 0)); l.setAttribute('y2', by); l.setAttribute('stroke-width', [13, 9, 2.4][i] * k); });
+    ballEl.setAttribute('transform', `translate(${bx.toFixed(2)} ${by.toFixed(2)}) scale(${(1 + 0.3 * depth).toFixed(3)})`); arm.a = a;
   }
-  const ball = $('#hball'); let drag = null;
-  ball.addEventListener('pointerdown', e => {
-    if (spinning || lever.classList.contains('busy')) return; const b = $('.hbase', lever).getBoundingClientRect();
-    drag = { cx: b.x + b.width / 2, cy: b.y + b.height / 2, max: 0, caught: false }; try { ball.setPointerCapture(e.pointerId); } catch (x) {} lever.classList.add('dragging'); e.preventDefault();
+  function animateArm(from, to, ms, ease) { // frame-by-frame so a new move can take over cleanly
+    cancelAnimationFrame(arm.raf); if (arm.done) arm.done();
+    if (calm || !ms) { drawArm(to); return Promise.resolve(); }
+    return new Promise(res => { arm.done = res; const t0 = performance.now(); (function step(now) { const k = Math.min(1, (now - t0) / ms); drawArm(from + (to - from) * ease(k)); if (k < 1) arm.raf = requestAnimationFrame(step); else { arm.done = null; res(); } })(t0); });
+  }
+  const accel = k => k * k, spring = k => 1 - Math.exp(-7 * k) * Math.cos(8 * k); // spring overshoots a touch, then settles
+  const kick = () => { slotm.classList.add('kick'); setTimeout(() => slotm.classList.remove('kick'), 140); };
+  async function pullAuto() { // what Space / the Spin button do: the lever pulls itself
+    if (spinning || busy) return false; busy = true; const req = begin(); if (!req) { busy = false; return false; }
+    sfx.play('lever'); await animateArm(arm.a, FULL, 300, accel); sfx.play('ratchet'); kick();
+    animateArm(FULL, 0, 620, spring); busy = false; return run(req);
+  }
+  let drag = null;
+  ballEl.addEventListener('pointerdown', e => {
+    if (spinning || busy) return; const sc = svg.getBoundingClientRect().height / 270;
+    drag = { y0: e.clientY, span: (FULL_Y - REST_Y) * sc, max: 0, caught: false }; try { ballEl.setPointerCapture(e.pointerId); } catch (x) {} lever.classList.add('dragging'); e.preventDefault();
   });
-  ball.addEventListener('pointermove', e => {
-    if (!drag || drag.caught) return; let a = Math.atan2(e.clientX - drag.cx, -(e.clientY - drag.cy)) * 180 / Math.PI; if (a < 0) a = a < -90 ? FULL : 0; a = Math.min(FULL, a); drag.max = Math.max(drag.max, a);
-    setArm(a, 0); if (a >= CATCH) { drag.caught = true; sfx.play('ratchet'); setArm(FULL, 70); setTimeout(() => { setArm(REST, calm ? 0 : 650, 'cubic-bezier(.3,1.6,.5,1)'); spin(); }, 90); }
+  ballEl.addEventListener('pointermove', e => {
+    if (!drag || drag.caught) return; const p = Math.max(0, Math.min(1, (e.clientY - drag.y0) / drag.span)), a = p * FULL; drag.max = Math.max(drag.max, a); cancelAnimationFrame(arm.raf); drawArm(a);
+    if (p >= CATCH) { drag.caught = true; const req = begin(); sfx.play('ratchet'); kick(); animateArm(a, FULL, 60, accel).then(() => animateArm(FULL, 0, 620, spring)); if (req) run(req); }
   });
-  const release = () => { if (!drag) return; const d = drag; drag = null; lever.classList.remove('dragging'); if (d.caught) return; if (d.max < 8) pullAuto(); else setArm(REST, 450, 'cubic-bezier(.3,1.6,.5,1)'); };
-  ball.addEventListener('pointerup', release); ball.addEventListener('pointercancel', release);
-  ball.addEventListener('click', e => { if (e.detail === 0) pullAuto(); }); // keyboard Enter on the focused lever
+  const release = () => { if (!drag) return; const d = drag; drag = null; lever.classList.remove('dragging'); if (d.caught) return; if (d.max < 8) pullAuto(); else animateArm(arm.a, 0, 480, spring); };
+  ballEl.addEventListener('pointerup', release); ballEl.addEventListener('pointercancel', release);
+  ballEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); pullAuto(); } }); // keyboard: focus the lever and press Enter
   $('#spin').onclick = () => { pullAuto(); };
   $('#turbo').onclick = () => { const on = $('#turbo').getAttribute('aria-pressed') !== 'true'; $('#turbo').setAttribute('aria-pressed', on); $('#turbo').classList.toggle('on', on); };
   async function toggleAuto() {
