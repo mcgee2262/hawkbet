@@ -36,6 +36,9 @@ const LUCK = [ // [level, emoji, name, what changes]
   [8, '🍀', 'Four-Leaf', 'Clover confetti joins the party.'],
   [9, '🌈', 'Rainbow', 'Full-rainbow confetti.'],
   [10, '✨', 'Lucky Vibes', 'Max confetti, clovers and sparkles, plus a lucky chime on wins.'],
+  ['x2', '🔥', 'Super Luck ×2', 'Your chance to LOSE is cut in half. Payouts stay normal. Orange fire confetti.'],
+  ['x5', '⚡', 'Super Luck ×5', 'Your chance to LOSE is divided by 5. Payouts stay normal. Electric gold and diamonds.'],
+  ['x10', '💎', 'Super Luck ×10', 'Your chance to LOSE is divided by 10. Payouts stay normal. Diamonds, crowns and a confetti storm.'],
 ];
 const LUCK_FX = {
   normal: { c: ['#12c26a', '#16e0c0', '#2f6bff', '#ffc542', '#ffffff', '#5b8cff'], e: [], m: 1 },
@@ -44,14 +47,17 @@ const LUCK_FX = {
   5: { c: ['#12c26a', '#2f6bff', '#16e0c0', '#5b8cff'], e: [] }, 6: { c: ['#ffe08a', '#12c26a', '#ffc542', '#9ff5c8'], e: ['☀️'] },
   7: { c: ['#ffc542', '#f5a623', '#ff9f1a', '#ffe08a'], e: ['🌟'] }, 8: { c: ['#12c26a', '#0a8f4e', '#ffc542', '#9ff5c8'], e: ['🍀'] },
   9: { c: ['#ff4d5e', '#ff9f1a', '#ffe08a', '#12c26a', '#2f6bff', '#7b3cff'], e: ['🌈'] }, 10: { c: ['#ffc542', '#12c26a', '#ffe08a', '#16e0c0', '#ffffff'], e: ['🍀', '✨'] },
+  x2: { c: ['#ff9f1a', '#ff4d5e', '#ffc542', '#ffe08a'], e: ['🔥'], m: 1.8 }, x5: { c: ['#ffe08a', '#16e0c0', '#5b8cff', '#ffffff'], e: ['⚡', '💎'], m: 2.4 },
+  x10: { c: ['#ffc542', '#ff4fd8', '#16e0c0', '#7b3cff', '#ffffff', '#ff4d5e'], e: ['💎', '👑', '✨'], m: 3.2 },
 };
 const luckLevel = () => (U && U.luck) || 'normal';
-const luckFx = () => { const l = luckLevel(), t = LUCK_FX[l] || LUCK_FX.normal; return { ...t, m: l === 'normal' ? 1 : 0.5 + l * 0.1 }; }; // confetti amount: 0.6x at 1 … 1.5x at 10
+const luckFx = () => { const l = luckLevel(), t = LUCK_FX[l] || LUCK_FX.normal; return { ...t, m: t.m || (l === 'normal' ? 1 : 0.5 + l * 0.1) }; }; // confetti amount: 0.6x at 1 … 1.5x at 10, 1.8x–3.2x for Super Luck
+const isSuper = () => String(luckLevel())[0] === 'x';
 const luckEntry = () => LUCK.find(x => String(x[0]) === String(luckLevel())) || LUCK[0];
-const luckK = () => { const l = luckLevel(); return l === 'normal' ? 1 : Math.round((0.5 + 0.1 * l) * 10) / 10; }; // mirrors the server; the server decides
-const luckBadge = () => { const [lv, e, name] = luckEntry(); return `${e} Luck: ${name}${lv === 'normal' ? ' · standard odds' : ` (${lv}) · win chance ×${luckK()}`}`; };
+const luckK = () => { const l = luckLevel(); return l === 'normal' ? 1 : isSuper() ? +String(l).slice(1) : Math.round((0.5 + 0.1 * l) * 10) / 10; }; // mirrors the server; the server decides
+const luckBadge = () => { const [lv, e, name] = luckEntry(); return lv === 'normal' ? `${e} Luck: Normal · standard odds` : isSuper() ? `${e} ${name} · lose chance ÷${luckK()}` : `${e} Luck: ${name} (${lv}) · win chance ×${luckK()}`; };
 const pct = p => Math.round(p * 100) + '%';
-const luckLine = what => CFG.luck.k === 1 ? '' : `<div class="lucknote">🍀 Luck ×${CFG.luck.k}: ${what}</div>`;
+const luckLine = what => CFG.luck.sup ? `<div class="lucknote super">🔥 Super Luck ×${CFG.luck.k}: your chance to lose is divided by ${CFG.luck.k}, payouts stay normal.</div>` : CFG.luck.k === 1 ? '' : `<div class="lucknote">🍀 Luck ×${CFG.luck.k}: ${what}</div>`;
 
 /* ---------- sound: tiny Web Audio synth, no files. Silent until the first tap or key press. ---------- */
 const sfx = (() => {
@@ -84,6 +90,11 @@ const sfx = (() => {
     pb: () => notes([392, 523, 659, 784, 1047], 0.09, 0.22, 'triangle', 0.06),
     error: () => { tone(220, 0, 0.1, 'square', 0.03); tone(185, 0.11, 0.14, 'square', 0.03); },
     bell: () => { tone(1568, 0, 0.7, 'sine', 0.08); tone(2349, 0, 0.5, 'sine', 0.03); tone(1568, 0.12, 0.5, 'sine', 0.05); },
+    clunk: () => { tone(160, 0, 0.14, 'sine', 0.13, 62); tone(95, 0.01, 0.12, 'triangle', 0.08); },
+    ratchet: () => [0, 0.05, 0.1, 0.15, 0.2].forEach((t, k) => tone(700 + k * 90, t, 0.035, 'square', 0.04)),
+    lever: () => tone(380, 0, 0.3, 'sawtooth', 0.04, 130),
+    coin: () => { tone(1568, 0, 0.06, 'square', 0.035); tone(2093, 0.06, 0.2, 'square', 0.035); },
+    jackpot: () => { notes([523, 659, 784, 1047, 1319, 1568, 2093, 2637], 0.07, 0.26, 'triangle', 0.075); tone(262, 0, 1.1, 'sawtooth', 0.035); tone(2093, 0.6, 0.8, 'sine', 0.05); },
   };
   return {
     play(name) { if (!on || !ac || ac.state !== 'running' || !S[name]) return; try { S[name](); } catch (e) {} },
@@ -156,7 +167,7 @@ const propById = id => PROPS.find(p => String(p.id) === String(id));
 const pick = {}; let mode = 'power', entry = 25, slipOpen = false;
 
 /* ---------- router ---------- */
-let view = 'board', sport = 'All', stat = 'All', lineTab = 'open', game = 'plinko', nav = 0;
+let view = 'home', sport = 'All', stat = 'All', lineTab = 'open', game = 'plinko', nav = 0;
 async function go() {
   const my = ++nav; stopGames();
   if (!U) { try { const m = await api('GET', '/me'); U = m.user; INVITE = m.inviteRequired; } catch (e) {} if (my !== nav) return; }
@@ -164,10 +175,10 @@ async function go() {
   $('#logout').classList.toggle('hidden', !U); $('#adminLink').classList.toggle('hidden', !(U && U.isAdmin));
   if (!U) return renderAuth();
   $('#logout').textContent = `${U.username} · Log out`; showBal();
-  view = location.hash.slice(1) || 'board';
+  view = location.hash.slice(1) || 'home';
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.v === view));
-  const R = { board: renderBoard, arcade: renderArcade, lineups: renderLineups, leaders: renderLeaders, admin: renderAdmin, bank: renderBank, luck: renderLuck };
-  try { await (R[view] || renderBoard)(my); } catch (e) { if (my === nav) $('#app').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  const R = { home: renderHome, board: renderBoard, arcade: renderArcade, lineups: renderLineups, leaders: renderLeaders, admin: renderAdmin, bank: renderBank, luck: renderLuck };
+  try { await (R[view] || renderHome)(my); } catch (e) { if (my === nav) $('#app').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   renderSlipBar();
 }
 window.addEventListener('hashchange', go);
@@ -188,7 +199,7 @@ function renderAuth(signup = false) {
   $('#sw').onclick = () => renderAuth(!signup);
   $('#af').onsubmit = async e => {
     e.preventDefault(); const f = e.target;
-    try { U = (await api('POST', signup ? '/register' : '/login', { username: f.u.value, password: f.p.value, invite: f.i ? f.i.value : undefined })).user; location.hash = '#board'; go(); }
+    try { U = (await api('POST', signup ? '/register' : '/login', { username: f.u.value, password: f.p.value, invite: f.i ? f.i.value : undefined })).user; location.hash = '#home'; go(); }
     catch (er) { $('#ae').textContent = er.message; }
   };
 }
@@ -201,7 +212,7 @@ async function renderBoard(my, keep) {
   const types = ['All', ...new Set(live.filter(p => sport === 'All' || p.sport === sport).map(p => p.type))];
   if (!types.includes(stat)) stat = 'All';
   const list = live.filter(p => (sport === 'All' || p.sport === sport) && (stat === 'All' || p.type === stat));
-  if (!keep || !$('#picksArea')) { $('#app').innerHTML = '<div id="showcase"></div><div id="picksArea"></div>'; mountShowcase($('#showcase')); }
+  if (!keep || !$('#picksArea')) $('#app').innerHTML = '<div id="picksArea"></div>';
   $('#picksArea').innerHTML = `<h1>Seahawk Picks</h1>
     <div class="sports">${SPORTS.map(([s, i]) => `<button class="sport ${s === sport ? 'on' : ''}" data-sport="${s}"><span>${i}</span>${s}</button>`).join('')}</div>
     <div class="pills">${types.map(t => `<button class="pill ${t === stat ? 'on' : ''}" data-stat="${t}">${t}</button>`).join('')}</div>
@@ -286,7 +297,7 @@ async function renderLeaders(my) {
 
 /* ---------- admin ---------- */
 async function renderAdmin(my) {
-  if (!U.isAdmin) { location.hash = '#board'; return; }
+  if (!U.isAdmin) { location.hash = '#home'; return; }
   await loadProps(); if (my !== nav) return;
   $('#app').innerHTML = `<h1>Admin</h1><div class="panel adm"><h2>Add a line</h2><form id="pf" class="addf">
       <select name="sport"><option>Football</option><option>Volleyball</option><option>Field Hockey</option><option>Flag Football</option></select>
@@ -311,7 +322,7 @@ async function renderAdmin(my) {
 /* ---------- arcade ---------- */
 let stopFns = [];
 function stopGames() { stopFns.forEach(f => f()); stopFns = []; if (pending) { pending = 0; showBal(); } }
-const GAMES = [['plinko', '🔵 Hawk Drop'], ['mines', '🔐 Locker Hunt'], ['cross', '🚌 Seahawk Crossing'], ['flip', '🪙 Seymour Flip'], ['dice', '🎲 Scoreboard Roll'], ['limbo', '🏈 Hail Mary'], ['slots', '🎰 Seahawk Slots'], ['roulette', '🎡 Lakes Roulette'], ['rps', '✊ Hallway RPS'], ['bj', '🃏 Hawk 21'], ['rocket', '🚀 Seahawk Launch'], ['bell', '🔔 Bell Rush'], ['memory', '🧠 Classroom Memory'], ['trivia', '❓ Seahawk Trivia']];
+const GAMES = [['plinko', '🔵 Hawk Drop'], ['mines', '🔐 Locker Hunt'], ['cross', '🚌 Seahawk Crossing'], ['flip', '🪙 Heads or Tails'], ['dice', '🎲 Scoreboard Roll'], ['limbo', '🏈 Hail Mary'], ['slots', '🎰 Seahawk Slots'], ['roulette', '🎡 Lakes Roulette'], ['rps', '✊ Hallway RPS'], ['bj', '🃏 Hawk 21'], ['rocket', '🚀 Seahawk Launch'], ['bell', '🔔 Bell Rush'], ['memory', '🧠 Classroom Memory'], ['trivia', '❓ Seahawk Trivia']];
 const GAME_FNS = { plinko, mines, cross, flip, dice, limbo, slots, roulette, rps, bj, rocket, bell, memory, trivia }; // every game that can launch
 const CATS = [['all', 'All'], ['featured', '⭐ Featured'], ['recent', '🕘 Recent'], ['classic', '🎰 Classic'], ['skill', '🧠 Skill']];
 const SKILL_IDS = new Set(['bell', 'memory', 'trivia']);
@@ -340,16 +351,16 @@ async function renderArcade(my) {
 const ANS = Object.fromEntries([...'1234'].map((k, i) => [k, [`.tbtn[data-c="${i}"]`]]).concat([...'abcd'].map((k, i) => [k, [`.tbtn[data-c="${i}"]`]])));
 const GAME_KEYS = {
   plinko: { Space: ['#drop'], hint: 'Space drop a ball' },
-  mines: { Space: ['#start', '#cash'], hint: 'Space start / cash out' },
+  mines: { Space: ['#start', '#cash'], r: ['#rand'], hint: 'Space start / cash out · R random locker · hold and drag to open many' },
   cross: { Space: ['#start', '#go'], c: ['#cash'], hint: 'Space start / next lane · C cash out' },
-  flip: { Space: ['#start', 'last:[data-call]'], h: ['[data-call="hawk"]'], s: ['[data-call="sl"]'], c: ['#cash'], hint: 'Space start / repeat last call · H Seymour · S SL · C cash out' },
-  dice: { Space: ['#roll'], hint: 'Space roll' },
+  flip: { Space: ['#start', 'last:[data-call]'], h: ['[data-call="heads"]'], t: ['[data-call="tails"]'], c: ['#cash'], hint: 'Space start / repeat last call · H heads · T tails · C cash out' },
+  dice: { Space: ['#roll'], u: ['#ouflip'], a: ['#auto'], hint: 'Space roll · U over/under · A auto-roll ×10' },
   limbo: { Space: ['#throw'], hint: 'Space throw' },
-  slots: { Space: ['#spin'], hint: 'Space spin' },
+  slots: { Space: ['#spin'], a: ['#auto'], hint: 'Space pulls the lever · A auto-spin ×10 · or drag the lever down' },
   roulette: { Space: ['#spin'], x: ['#clr'], hint: 'Space spin · X clear chips' },
   rps: { Space: ['#start', 'last:[data-t]'], r: ['[data-t="rock"]'], p: ['[data-t="paper"]'], s: ['[data-t="scissors"]'], c: ['#cash'], hint: 'Space start / repeat last throw · R rock · P paper · S scissors · C cash out' },
   bj: { Space: ['#deal', '#hit'], h: ['#hit'], s: ['#stand'], d: ['#dbl'], hint: 'Space deal / hit · H hit · S stand · D double' },
-  rocket: { Space: ['#launch', '#cash'], hint: 'Space launch / cash out' },
+  rocket: { Space: ['#launch', '#cash'], hint: 'Space launches · Space again while flying = CASH OUT' },
   bell: { Space: ['#pad', '#start'], hint: 'Space start / tap the bell' },
   memory: { Space: ['#start'], hint: 'Space start · Tab + Enter flips a card' },
   trivia: { Space: ['#start'], ...ANS, hint: 'Space start · 1–4 or A–D answer' },
@@ -390,15 +401,15 @@ const readBet = () => Math.floor(+$('#bet').value || 0);
 const GAME_INFO = {
   plinko: { tag: 'Instant', desc: "Drop the ball, pray to the pegs. Like dropping your phone off the bleachers, except sometimes it pays." },
   mines: { tag: 'Cash out anytime', desc: 'Open lockers, find Hawk Bucks, dodge the hall monitor. Greed is how you get a tardy slip.' },
-  cross: { tag: 'Cash out anytime', desc: 'Get Seymour across South Lakes Dr at dismissal. The buses do not stop. They have never stopped.' },
-  flip: { tag: 'Streak', desc: 'Seymour or SL? Call it right and double up. Ten in a row and they name a hallway after you.' },
+  cross: { tag: 'Cash out anytime', desc: 'Hop your Seahawk across South Lakes Dr at dismissal. The buses do not stop. They have never stopped.' },
+  flip: { tag: 'Streak', desc: 'Heads or tails on a South Lakes coin. Call it right and double up. Ten in a row and they name a hallway after you.' },
   dice: { tag: 'Instant', desc: 'Pick a number and beat the scoreboard. Basically a pop quiz, but you choose the odds.' },
   limbo: { tag: 'Instant', desc: 'Set a target and let the QB air it out. Pure 4th-and-long energy.' },
   slots: { tag: 'Jackpot', desc: 'Three trophies is the state champs jackpot. Three hall passes is still technically a win.' },
   roulette: { tag: 'Table game', desc: 'Green, blue or the golden zero. Spin it like it’s the last day of finals.' },
   rps: { tag: 'Streak', desc: 'Throw hands with a Concorde District rival. Westfield has been practicing in the mirror.' },
   bj: { tag: 'Table game', desc: 'Beat Coach to 21. Coach stands on 17 and refuses to explain why.' },
-  rocket: { tag: 'Crash', desc: 'Seymour’s science-fair rocket climbs and climbs. Cash out before it takes out the bleachers.' },
+  rocket: { tag: 'Crash', desc: 'The Seahawk’s science-fair rocket climbs and climbs. Cash out before it takes out the bleachers.' },
   bell: { tag: 'Reaction', desc: 'The bell rings, you move. Like 7th period, but now it’s a competition.' },
   memory: { tag: 'Memory', desc: 'Match the classroom cards fast. Easier than remembering your locker combo.' },
   trivia: { tag: 'Trivia', desc: 'Seven questions, twenty seconds each. Finally, a quiz where speed counts.' },
@@ -460,11 +471,15 @@ function cover(id, emoji) { // returns an inline SVG; u keeps gradient ids uniqu
       break;
     }
     case 'slots': {
-      a = bg('#4a2a00', '#06080b');
-      a += `<rect x="400" y="80" width="370" height="230" rx="26" fill="url(#${u}g)"/><rect x="420" y="100" width="330" height="190" rx="14" fill="#05080b"/>`;
-      [0, 1, 2].forEach(k => a += `<rect x="${432 + k * 106}" y="112" width="94" height="166" rx="10" fill="#f3f6fa"/>` + em(479 + k * 106, 195, 60, '🏆'));
-      a += `<text x="585" y="370" fill="#ffe08a" font-size="54" font-weight="900" letter-spacing="6" text-anchor="middle" filter="url(#${u}f)">JACKPOT</text><text x="585" y="370" fill="#ffe08a" font-size="54" font-weight="900" letter-spacing="6" text-anchor="middle">JACKPOT</text>`;
-      [[420, 60], [760, 70], [440, 410], [740, 400]].forEach(([x, y]) => a += em(x, y, 30, '🪙'));
+      a = bg('#3a1668', '#05070d', '66%');
+      a += `<rect x="404" y="40" width="350" height="76" rx="14" fill="#1a0d3a" stroke="url(#${u}g)" stroke-width="4"/><text x="579" y="92" fill="url(#${u}g)" font-size="42" font-weight="900" letter-spacing="3" text-anchor="middle">SEAHAWK SLOTS</text>`;
+      for (let k = 0; k < 14; k++) a += `<circle cx="${420 + k * 25}" cy="52" r="4" fill="${k % 2 ? '#ffe08a' : '#ff4fd8'}"/>`;
+      a += `<rect x="404" y="124" width="350" height="284" rx="22" fill="url(#${u}g)"/><rect x="420" y="140" width="318" height="252" rx="12" fill="#06070d"/>`;
+      const sy = [['🏈', '🦅', '🏆'], ['🚌', '🦅', '🏐'], ['🏀', '🦅', '📋']], tc = { '🏈': '#b2561a', '🦅': '#12a05c', '🏆': '#d4a017', '🚌': '#e0b400', '🏐': '#2f6bff', '🏀': '#e0701a', '📋': '#c2399e' };
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) { const x = 428 + c * 102, y = 148 + r * 80, e = sy[r][c]; a += `<rect x="${x}" y="${y}" width="96" height="74" rx="10" fill="${tc[e]}" ${c === 1 ? 'stroke="#fff" stroke-width="4"' : ''}/>` + em(x + 48, y + 38, 46, e); }
+      a += `<path d="M436 186 H730" stroke="#ffe08a" stroke-width="7" stroke-linecap="round" filter="url(#${u}f)"/><path d="M436 186 H730" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`;
+      a += `<line x1="776" y1="330" x2="782" y2="200" stroke="#cfd8e3" stroke-width="10" stroke-linecap="round"/><circle cx="782" cy="190" r="22" fill="#ff3b4e" stroke="#fff" stroke-width="3"/><circle cx="775" cy="182" r="6" fill="#ffffff99"/>`;
+      [[420, 70], [770, 150], [400, 420], [760, 430]].forEach(([x, y]) => a += em(x, y, 26, '🪙'));
       break;
     }
     case 'roulette': {
@@ -582,12 +597,38 @@ function carousel(root, items, { interval = 5000, label = 'Featured', onPlay } =
   arm();
   return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', vis); };
 }
+const NEW_GAMES = new Set(['rocket', 'bell', 'memory', 'trivia']);
+const gameLabel = id => (GAMES.find(([k]) => k === id) || [id, id])[1];
 function mountShowcase(el) {
   const list = gameList();
-  el.innerHTML = `<div id="carHost"></div><section class="allg" aria-labelledby="allgH"><h2 id="allgH">All Games</h2>
-    <div class="allgames">${list.map(g => `<button class="gcard" data-car-play="${g.id}" aria-label="Play ${esc(g.title)}"><div class="gthumb">${cover(g.id, g.emoji)}</div><b>${esc(g.title)}</b><small>${esc(g.tag)}</small></button>`).join('')}</div></section>`;
+  el.innerHTML = `<div id="carHost"></div><section class="allg" aria-labelledby="allgH"><h2 id="allgH">🎰 HawkBet Originals</h2>
+    <div class="allgames orig">${list.map(g => `<button class="gcard" data-car-play="${g.id}" aria-label="Play ${esc(g.title)}">${NEW_GAMES.has(g.id) ? '<i class="newb">NEW</i>' : ''}<div class="gthumb">${cover(g.id, g.emoji)}</div><b>${esc(g.title)}</b><small>${esc(g.tag)}</small></button>`).join('')}</div></section>`;
   el.querySelector('.allgames').addEventListener('click', e => { const b = e.target.closest('[data-car-play]'); if (b) openGame(b.dataset.carPlay); });
+  el.querySelectorAll('.gcard').forEach(c => { // tilt toward the pointer
+    c.addEventListener('pointermove', e => { if (calm || e.pointerType !== 'mouse') return; const r = c.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5; c.style.transform = `perspective(600px) rotateY(${x * 10}deg) rotateX(${-y * 10}deg) translateY(-4px)`; });
+    c.addEventListener('pointerleave', () => { c.style.transform = ''; });
+  });
   stopFns.push(carousel(el.querySelector('#carHost'), list.map(g => ({ ...g, art: cover(g.id, g.emoji) })), { label: 'Featured games', onPlay: openGame }));
+}
+
+/* ---------- Home: the casino lobby ---------- */
+async function renderHome(my) {
+  const feed = await api('GET', '/feed').catch(() => ({ bets: [], big: [], stats: { players: 0, rounds: 0, biggest: 0 } })); if (my !== nav) return;
+  const ago = t => { const m = Math.max(0, Math.round((Date.now() - t) / 60000)); return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : Math.round(m / 60) + 'h ago'; };
+  const betRow = b => `<div class="lbrow"><span class="g">${esc(gameLabel(b.game))}</span><span class="u">${esc(b.username)}</span><span class="b">${fmt(b.bet)} 🪙</span><span class="m ${b.payout > b.bet ? 'win' : 'lose'}">${b.payout ? b.mult.toFixed(2) + 'x' : '0.00x'}</span><span class="p ${b.payout > b.bet ? 'win' : 'lose'}">${b.payout > b.bet ? '+' : '−'}${fmt(Math.abs(b.payout - b.bet))}</span></div>`;
+  const ticker = feed.big.length ? feed.big.concat(feed.big).map(b => `<span>🔥 <b>${esc(b.username)}</b> hit <b class="win">${b.mult.toFixed(2)}x</b> on ${esc(gameLabel(b.game))} <b class="win">+${fmt(b.payout - b.bet)} 🪙</b></span>`).join('') : '';
+  $('#app').innerHTML = `<section class="hero"><div class="heroin"><div><small>Welcome back</small><h1>${esc(U.username)}</h1></div>
+      <div class="herobal"><small>Your balance</small><b>${fmt(U.balance)}</b><span>Hawk Bucks</span></div>
+      <div class="heroact"><a class="btn gold" href="#arcade">🎰 Play now</a><a class="btn alt" href="#bank">🏦 Bank</a><a class="btn alt" href="#luck">🍀 Luck Lab</a></div></div></section>
+    ${ticker ? `<div class="marq" aria-label="Recent big wins"><div class="marqin">${ticker}</div></div>` : ''}
+    <div class="statbar"><div><b>${fmt(feed.stats.players)}</b><small>Players</small></div><div><b>${fmt(feed.stats.rounds)}</b><small>Rounds played</small></div><div><b>${feed.stats.biggest ? feed.stats.biggest.toFixed(1) + 'x' : '–'}</b><small>Biggest multiplier</small></div></div>
+    <div id="showcase"></div>
+    <div class="lobby2"><section class="panel livepanel"><h2><span class="livedot"></span> Live bets</h2><div class="lbhead"><span>Game</span><span>Player</span><span>Bet</span><span>Payout</span><span>Profit</span></div><div id="lbrows">${feed.bets.map(betRow).join('') || '<div class="mutecell gempty">No bets yet – be the first!</div>'}</div></section>
+      <section class="panel livepanel"><h2>🏆 Big wins this week</h2>${feed.big.map(b => `<div class="bigwin"><div><b>${esc(b.username)}</b><small>${esc(gameLabel(b.game))} · ${fmt(b.bet)} 🪙 bet</small></div><div class="win"><b>${b.mult.toFixed(2)}x</b><small>+${fmt(b.payout - b.bet)} 🪙</small></div></div>`).join('') || '<div class="mutecell gempty">Win 5x or more to show up here.</div>'}</section></div>
+    <div class="arcfoot">🎟️ Hawk Bucks are pretend: no money, no prizes, nothing to cash out. Not affiliated with South Lakes HS or FCPS.</div>`;
+  mountShowcase($('#showcase'));
+  const t = setInterval(async () => { if (view !== 'home' || !$('#lbrows')) return clearInterval(t); try { const f = await api('GET', '/feed'); if ($('#lbrows') && f.bets.length) $('#lbrows').innerHTML = f.bets.map(betRow).join(''); } catch (e) {} }, 6000);
+  stopFns.push(() => clearInterval(t));
 }
 
 /* Plinko: Hawk Drop. The server drops the ball; we animate the path it sends back. */
@@ -647,44 +688,72 @@ async function plinko(root, my) {
   raf = requestAnimationFrame(draw); stopFns.push(() => cancelAnimationFrame(raf));
 }
 
-/* Mines: Locker Hunt. Mine positions never leave the server until the round ends. */
+/* Mines: Locker Hunt. Mine positions never leave the server until the round ends.
+   Press and drag across lockers to open a bunch at once; a queue sends them to the server one at a time, in order. */
 async function mines(root, my) {
-  let st = null, nm = 3;
+  let st = null, nm = 3, queue = [], running = false, dragging = false, seen = new Set();
   root.innerHTML = `<div class="game"><div class="panel ctrl">${betBox()}
     <label>Hall monitors hidden: <b id="mv">3</b></label><input id="mn" type="range" min="1" max="24" value="3" style="width:100%">
-    <div style="height:14px"></div><button class="btn" id="start">Start game</button>
-    <button class="btn gold hidden" id="cash" style="margin-top:8px"></button><div class="res" id="res"></div>
-    <div class="note">Open lockers to find Hawk Bucks. Hit a hall monitor and you lose the bet. Cash out any time.</div></div>
-    <div class="panel stage"><div class="mult" id="mult">—</div><div class="lockers" id="lk"></div></div></div>`;
+    <div style="height:14px"></div><button class="btn bjbig" id="start">🔐 Start game <kbd>Space</kbd></button>
+    <div class="duo hidden" id="mact"><button class="btn blue" id="rand">🎲 Random pick <kbd>R</kbd></button><button class="btn gold" id="cash"></button></div><div class="res" id="res"></div>
+    <div class="note">Open lockers to find Hawk Bucks. <b>Press and drag across several lockers</b> to open them all in one sweep. Hit a hall monitor and you lose the bet. Cash out any time.</div></div>
+    <div class="panel stage"><div class="mult" id="mult">—</div><div class="lockers" id="lk"></div><div class="dragtip">👆 Hold and drag across lockers</div></div></div>`;
   function paint(reveal) {
     $('#lk').innerHTML = Array.from({ length: 25 }, (_, i) => {
-      const open = st && st.opened.has(i), mine = st && st.mines && st.mines.has(i);
-      const cls = open ? 'open' : (reveal && mine) ? 'bad' + (st.hit === i ? '' : ' dim') : reveal ? 'dim' : '';
+      const open = st && st.opened.has(i), mine = st && st.mines && st.mines.has(i), pend = st && st.pending && st.pending.has(i);
+      const cls = open ? 'open' : (reveal && mine) ? 'bad' + (st.hit === i ? '' : ' dim') : reveal ? 'dim' : pend ? 'pend' : '';
       return `<button class="lk ${cls}" data-i="${i}" ${!st || !st.live || open ? 'disabled' : ''}>${open ? '🦅' : (reveal && mine) ? '📋' : ''}</button>`;
     }).join('');
     $('#mult').textContent = st ? st.mult.toFixed(2) + 'x' : '—';
-    const cash = $('#cash'); cash.classList.toggle('hidden', !(st && st.live && st.opened.size > 0)); if (st) cash.textContent = `Cash out ${fmt(st.bet * st.mult)} 🪙`;
-    $('#start').disabled = !!(st && st.live); $('#mn').disabled = !!(st && st.live);
+    const live = st && st.live;
+    $('#mact').classList.toggle('hidden', !live); $('#start').classList.toggle('hidden', !!live);
+    const cash = $('#cash'); cash.disabled = !(live && st.opened.size > 0); if (st) cash.textContent = `💰 Cash out ${fmt(st.bet * st.mult)} 🪙`;
+    $('#mn').disabled = !!live;
   }
   function finish(r, win) {
-    if (r.mines) st.mines = new Set(r.mines); st.live = false; setBal(r.balance); paint(true);
+    queue.length = 0; if (r.mines) st.mines = new Set(r.mines); st.live = false; st.pending = new Set(); setBal(r.balance); paint(true);
     $('#res').innerHTML = win ? `<span class="win">Cashed out +${fmt(r.payout - st.bet)} 🪙</span>` : `<span class="lose">Hall monitor! −${fmt(st.bet)} 🪙</span>`;
     win ? fx.win(st.mult >= 3) : fx.lose();
   }
+  async function pump() { // opens queued lockers one by one; stops the moment the round ends
+    if (running) return; running = true;
+    try {
+      while (queue.length && st && st.live && root.isConnected) {
+        const i = queue.shift(); st.pending.delete(i); if (st.opened.has(i)) continue;
+        const r = await api('POST', '/arcade/mines/reveal', { i }); if (!root.isConnected) return setBal(r.balance);
+        if (r.bust) { st.hit = i; return finish(r, false); }
+        st.opened = new Set(r.opened); st.mult = r.mult; if (r.cashed) return finish(r, true);
+        paint(); fx.bump($('#mult'));
+      }
+    } catch (e) { queue.length = 0; if (st) st.pending = new Set(); toast(e.message); sfx.play('error'); paint(); }
+    finally { running = false; }
+  }
+  const enqueue = i => { if (!st || !st.live || st.opened.has(i) || st.pending.has(i)) return; st.pending.add(i); queue.push(i); const el = $(`.lk[data-i="${i}"]`); if (el) el.classList.add('pend'); sfx.play('flip'); pump(); };
   const a = (await api('GET', '/arcade/active?game=mines')).round; if (my !== nav) return;
-  if (a) { st = { bet: a.bet, nm: a.m, opened: new Set(a.opened), mult: a.mult, live: true }; nm = a.m; $('#mn').value = nm; $('#mv').textContent = nm; $('#res').textContent = 'Round restored'; }
+  if (a) { st = { bet: a.bet, nm: a.m, opened: new Set(a.opened), mult: a.mult, live: true, pending: new Set() }; nm = a.m; $('#mn').value = nm; $('#mv').textContent = nm; $('#res').textContent = 'Round restored'; }
   $('#mn').oninput = e => { nm = +e.target.value; $('#mv').textContent = nm; };
   $('#start').onclick = act(async () => {
     const r = await api('POST', '/arcade/mines/start', { bet: readBet(), mines: nm }); setBal(r.balance);
-    st = { bet: r.bet, nm, opened: new Set(), mult: 0.99, live: true }; $('#res').textContent = ''; paint();
+    st = { bet: r.bet, nm, opened: new Set(), mult: 0.99, live: true, pending: new Set() }; queue.length = 0; $('#res').textContent = ''; paint();
   });
-  $('#lk').onclick = act(async e => {
-    const b = e.target.closest('.lk'); if (!b || !st || !st.live) return; const i = +b.dataset.i;
-    const r = await api('POST', '/arcade/mines/reveal', { i });
-    if (r.bust) { st.hit = i; return finish(r, false); }
-    st.opened = new Set(r.opened); st.mult = r.mult; if (r.cashed) return finish(r, true); paint(); fx.bump($('#mult'));
+  const lk = $('#lk');
+  lk.addEventListener('pointerdown', e => {
+    const b = e.target.closest('.lk'); if (!b || !st || !st.live) return;
+    dragging = true; seen = new Set([+b.dataset.i]); try { b.releasePointerCapture(e.pointerId); } catch (x) {}
+    enqueue(+b.dataset.i); e.preventDefault();
   });
-  $('#cash').onclick = act(async () => { if (st && st.live) { const r = await api('POST', '/arcade/mines/cashout'); st.mult = r.mult; finish(r, true); } });
+  lk.addEventListener('pointermove', e => {
+    if (!dragging) return; const b = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lk');
+    if (b && lk.contains(b) && !b.disabled && !seen.has(+b.dataset.i)) { seen.add(+b.dataset.i); enqueue(+b.dataset.i); }
+  });
+  const stop = () => { dragging = false; };
+  addEventListener('pointerup', stop); addEventListener('pointercancel', stop); stopFns.push(() => { removeEventListener('pointerup', stop); removeEventListener('pointercancel', stop); queue.length = 0; });
+  lk.addEventListener('click', e => { if (e.detail === 0) { const b = e.target.closest('.lk'); if (b) enqueue(+b.dataset.i); } }); // keyboard (Enter / Space on a focused locker)
+  $('#rand').onclick = () => { const free = [...Array(25).keys()].filter(i => st && !st.opened.has(i) && !st.pending.has(i)); if (free.length) enqueue(free[Math.floor(Math.random() * free.length)]); };
+  $('#cash').onclick = act(async () => {
+    if (!st || !st.live) return; queue.length = 0; st.pending = new Set(); while (running) await wait(25);
+    const r = await api('POST', '/arcade/mines/cashout'); st.mult = r.mult; finish(r, true);
+  });
   paint();
 }
 
@@ -693,45 +762,58 @@ async function cross(root, my) {
   let d = 'med', st = null;
   root.innerHTML = `<div class="game"><div class="panel ctrl">${betBox()}
     <label>Difficulty</label><div class="seg" id="df" style="grid-template-columns:1fr 1fr"><button data-d="easy">Easy</button><button data-d="med" class="on">Medium</button><button data-d="hard">Hard</button><button data-d="extreme">Extreme</button></div>
-    <div style="height:14px"></div><button class="btn" id="start">Start crossing</button>
-    <button class="btn hidden" id="go" style="margin-top:8px">Next lane</button>
-    <button class="btn gold hidden" id="cash" style="margin-top:8px"></button><div class="res" id="res"></div>
-    <div class="note">Each lane survived raises your multiplier. Get hit and you lose the bet.</div>${luckLine('fewer buses hit you, lane multipliers are smaller.')}</div>
-    <div class="panel stage"><div class="mult" id="mult">—</div><div class="road" id="road"></div><div class="curb">🏫 South Lakes Dr → get to the stadium 🏟️</div></div></div>`;
-  const mults = () => CFG.cross[d], at = () => st ? st.at : 0, multNow = () => at() ? mults()[at() - 1] : 0.99;
-  function paint() {
-    const a = at();
-    $('#road').innerHTML = `<div class="lane" style="background:none;border:0;min-width:50px"><span class="hawk">${a === 0 ? '🦅' : ''}</span></div>` + mults().map((m, i) => {
-      const n = i + 1, done = a >= n && !(st && st.hitLane === n), hit = st && st.hitLane === n;
-      const em = hit ? '💥' : (st && a === n && st.live ? '🦅' : done ? '✔' : n % 2 ? '🚌' : '🚗');
-      return `<div class="lane ${done ? 'done' : ''} ${hit ? 'hit' : ''}"><span class="m">${m.toFixed(2)}x</span><span class="em">${em}</span></div>`;
-    }).join('');
+    <div class="res" id="res"></div>
+    <div class="note">Hop your Seahawk across the road one lane at a time. Each lane survived raises your multiplier. Get hit and you lose the bet.</div>${luckLine('fewer buses hit you, lane multipliers are smaller.')}</div>
+    <div class="panel stage"><div class="mult" id="mult">—</div><div class="road" id="road"></div>
+      <div class="xacts"><button class="btn bjbig" id="start">🏫 Start crossing <kbd>Space</kbd></button>
+        <button class="btn xhop hidden" id="go"><span>🦅</span>HOP!<kbd>Space</kbd></button><button class="btn gold xcash hidden" id="cash"><span>💰</span><b id="cashtxt">Cash out</b><kbd>C</kbd></button></div>
+      <div class="curb">🏫 South Lakes Dr → get to the stadium 🏟️</div></div></div>`;
+  const mults = () => CFG.cross[d], at = () => st ? st.at : 0, multNow = () => at() ? mults()[at() - 1] : 0.99, road = $('#road');
+  function build() { // build the road once so the hawk can glide between lanes
+    road.innerHTML = `<div class="lane edge"><span class="em">🏫</span><span class="m">START</span></div>` + mults().map((m, i) => `<div class="lane" data-n="${i + 1}"><span class="m">${m.toFixed(2)}x</span><span class="veh ${i % 2 ? 'up' : 'down'}" style="animation-delay:${-(i * 0.7) % 3}s;animation-duration:${2.2 + (i % 4) * 0.5}s">${i % 3 === 0 ? '🚌' : i % 3 === 1 ? '🚗' : '🚕'}</span></div>`).join('') + `<div class="lane edge"><span class="em">🏟️</span><span class="m">WIN</span></div><img class="xhawk" id="xh" src="hawk.svg" alt="Seahawk">`;
+  }
+  function placeHawk(n, animate = true) {
+    const lane = road.children[Math.min(n, mults().length + 1)], h = $('#xh'); if (!lane || !h) return;
+    const x = lane.offsetLeft + lane.offsetWidth / 2 - h.offsetWidth / 2;
+    if (!animate) h.style.transition = 'none'; h.style.left = x + 'px'; if (!animate) { void h.offsetWidth; h.style.transition = ''; }
+    else { h.classList.remove('hop'); void h.offsetWidth; h.classList.add('hop'); }
+    if (road.scrollTo) road.scrollTo({ left: Math.max(0, x - road.clientWidth / 2 + 40), behavior: animate && !calm ? 'smooth' : 'auto' });
+  }
+  function paint(animate = true) {
+    const a = at(), hit = st && st.hitLane;
+    [...road.querySelectorAll('.lane[data-n]')].forEach(l => { const n = +l.dataset.n; l.classList.toggle('done', a >= n && hit !== n); l.classList.toggle('hit', hit === n); l.classList.toggle('next', !!(st && st.live && n === a + 1)); });
     $('#mult').textContent = st ? multNow().toFixed(2) + 'x' : '—';
     const live = st && st.live;
-    $('#go').classList.toggle('hidden', !live); $('#cash').classList.toggle('hidden', !(live && a > 0)); $('#start').disabled = !!live;
+    $('#start').classList.toggle('hidden', !!live); $('#go').classList.toggle('hidden', !live); $('#cash').classList.toggle('hidden', !live); $('#cash').disabled = !(live && a > 0);
+    $('#cashtxt').textContent = live && a > 0 ? `Cash out ${fmt(st.bet * multNow())} 🪙` : 'Cash out';
     document.querySelectorAll('#df button').forEach(b => b.disabled = !!live);
-    if (st) $('#cash').textContent = `Cash out ${fmt(st.bet * multNow())} 🪙`;
-    if (live) { const r = $('#road'), el = r.children[a + 1] || r.lastChild; el && el.scrollIntoView({ inline: 'center', block: 'nearest' }); }
+    placeHawk(hit || a, animate);
   }
   function finish(r, win) {
-    st.live = false; setBal(r.balance); paint();
+    st.live = false; setBal(r.balance); const xh = $('#xh');
+    if (!win) { road.classList.add('crash'); xh.classList.add('splat'); setTimeout(() => road.classList.remove('crash'), 700); }
+    else { xh.classList.add('cheer'); setTimeout(() => xh.classList.remove('cheer'), 900); }
+    paint(false);
     $('#res').innerHTML = win ? `<span class="win">Cashed out +${fmt(r.payout - st.bet)} 🪙</span>` : `<span class="lose">Splat! −${fmt(st.bet)} 🪙</span>`;
     win ? fx.win(r.payout >= st.bet * 3) : fx.lose();
   }
+  build();
   const a = (await api('GET', '/arcade/active?game=cross')).round; if (my !== nav) return;
-  if (a) { d = a.diff; st = { bet: a.bet, at: a.at, live: true }; document.querySelectorAll('#df button').forEach(b => b.classList.toggle('on', b.dataset.d === d)); $('#res').textContent = 'Round restored'; }
-  $('#df').onclick = e => { const x = e.target.dataset.d; if (!x || (st && st.live)) return; d = x; document.querySelectorAll('#df button').forEach(b => b.classList.toggle('on', b.dataset.d === x)); paint(); };
+  if (a) { d = a.diff; st = { bet: a.bet, at: a.at, live: true }; document.querySelectorAll('#df button').forEach(b => b.classList.toggle('on', b.dataset.d === d)); build(); $('#res').textContent = 'Round restored'; }
+  $('#df').onclick = e => { const x = e.target.dataset.d; if (!x || (st && st.live)) return; d = x; document.querySelectorAll('#df button').forEach(b => b.classList.toggle('on', b.dataset.d === x)); build(); paint(false); };
   $('#start').onclick = act(async () => {
     const r = await api('POST', '/arcade/cross/start', { bet: readBet(), diff: d }); setBal(r.balance);
-    st = { bet: r.bet, at: 0, live: true }; $('#res').textContent = ''; paint();
+    st = { bet: r.bet, at: 0, live: true }; $('#res').textContent = ''; $('#xh').classList.remove('splat'); build(); paint(false);
   });
   $('#go').onclick = act(async () => {
-    if (!st || !st.live) return; const r = await api('POST', '/arcade/cross/step');
-    if (r.hit) { st.at = r.lane; st.hitLane = r.lane; return finish(r, false); }
-    st.at = r.at; if (r.cashed) return finish(r, true); paint(); fx.bump($('#mult'));
+    if (!st || !st.live) return; const r = await api('POST', '/arcade/cross/step'); sfx.play('flip');
+    if (r.hit) { st.at = r.lane; st.hitLane = r.lane; placeHawk(r.lane); await wait(calm ? 0 : 420); if (!root.isConnected) return setBal(r.balance); return finish(r, false); }
+    st.at = r.at; if (r.cashed) { placeHawk(r.at); await wait(calm ? 0 : 420); if (!root.isConnected) return setBal(r.balance); return finish(r, true); }
+    paint(); fx.bump($('#mult'));
   });
-  $('#cash').onclick = act(async () => { if (st && st.live) finish(await api('POST', '/arcade/cross/cashout'), true); });
-  paint();
+  $('#cash').onclick = act(async () => { if (st && st.live && st.at > 0) finish(await api('POST', '/arcade/cross/cashout'), true); });
+  addEventListener('resize', () => placeHawk(st ? (st.hitLane || st.at) : 0, false)); setTimeout(() => placeHawk(st ? st.at : 0, false), 60);
+  paint(false);
 }
 
 /* ---------- more arcade games (server decides; we animate) ---------- */
@@ -745,21 +827,35 @@ function settleShot(r, big) { // one-shot games: reveal the balance only after t
   else { resMsg(false, `−${fmt(r.bet - r.payout)} 🪙`); fx.lose(); }
 }
 function streakFx(n) { sfx.play('streak'); if ([3, 5, 8].includes(n)) { toast(`🔥 ${n} in a row!`); fx.burst(40); } }
-const gameShell = (ctrl, stage) => `<div class="game"><div class="panel ctrl">${ctrl}<div class="res" id="res"></div></div><div class="panel stage">${stage}</div></div>`;
+const gameShell = (ctrl, stage, cls = '') => `<div class="game ${cls}"><div class="panel ctrl">${ctrl}<div class="res" id="res"></div></div><div class="panel stage">${stage}</div></div>`;
 
-/* Coin flip: Seymour Flip */
+/* Heads or Tails: a South Lakes coin (hawk portrait on heads, the school shield on tails). */
+const coinFace = kind => {
+  const id = 'cf' + kind, heads = kind === 'heads';
+  const top = heads ? 'IN SEAHAWKS WE TRUST' : 'SOUTH LAKES HIGH SCHOOL', bot = heads ? '★ LIBERTY ★ 2026 ★' : '★ RESTON · VIRGINIA ★';
+  return `<svg viewBox="0 0 200 200" aria-hidden="true"><defs><radialGradient id="${id}g" cx="35%" cy="28%"><stop offset="0" stop-color="#fff6c0"/><stop offset=".45" stop-color="#f6c744"/><stop offset="1" stop-color="#a86a00"/></radialGradient>
+    <path id="${id}t" d="M 24 100 A 76 76 0 0 1 176 100"/><path id="${id}b" d="M 16 100 A 84 84 0 0 0 184 100"/></defs>
+    <circle cx="100" cy="100" r="97" fill="url(#${id}g)" stroke="#7a4a00" stroke-width="4"/>
+    <circle cx="100" cy="100" r="92" fill="none" stroke="#7a4a0088" stroke-width="3" stroke-dasharray="1.6 3.2"/>
+    <circle cx="100" cy="100" r="62" fill="none" stroke="#fff6c099" stroke-width="2"/><circle cx="100" cy="100" r="60" fill="none" stroke="#7a4a0066" stroke-width="1.5"/>
+    <text font-size="14.5" font-weight="900" fill="#5b3600" letter-spacing="2.2" font-family="Georgia,serif" text-anchor="middle"><textPath href="#${id}t" startOffset="50%">${top}</textPath></text>
+    <text font-size="12" font-weight="900" fill="#5b3600" letter-spacing="2" font-family="Georgia,serif" text-anchor="middle"><textPath href="#${id}b" startOffset="50%" dominant-baseline="hanging">${bot}</textPath></text>
+    <image href="${heads ? 'hawk.svg' : 'logo.svg'}" x="${heads ? 56 : 62}" y="${heads ? 52 : 58}" width="${heads ? 92 : 76}" height="${heads ? 92 : 76}" style="filter:sepia(1) saturate(2.2) hue-rotate(-12deg) brightness(.52) contrast(1.35) drop-shadow(0 1px 0 #fff8)"/>
+    ${heads ? '' : '<text x="100" y="152" font-size="12" font-weight="900" fill="#5b3600" font-family="Georgia,serif" text-anchor="middle" letter-spacing="3">SEAHAWKS</text>'}
+    <ellipse cx="68" cy="40" rx="34" ry="14" fill="#ffffff55" transform="rotate(-28 68 40)"/></svg>`;
+};
 async function flip(root, my) {
   let st = null, rot = 0;
-  root.innerHTML = gameShell(`${betBox()}<div style="height:14px"></div><button class="btn" id="start">Start a streak</button>
-    <div class="duo hidden" id="calls"><button class="btn blue" data-call="hawk">🦅 Seymour</button><button class="btn blue" data-call="sl">SL</button></div>
+  root.innerHTML = gameShell(`${betBox()}<div style="height:14px"></div><button class="btn bjbig" id="start">🪙 Start a streak <kbd>Space</kbd></button>
+    <div class="duo hidden" id="calls"><button class="btn blue bjbig" data-call="heads">HEADS<kbd>H</kbd></button><button class="btn blue bjbig" data-call="tails">TAILS<kbd>T</kbd></button></div>
     <button class="btn gold hidden" id="cash" style="margin-top:8px"></button>
-    <div class="note">Call the flip. Win chance per call: <b>${pct(CFG.luck.flipP)}</b>. The first right call pays <b>${(0.99 / CFG.luck.flipP).toFixed(2)}x</b> and each one after multiplies it by ${(1 / CFG.luck.flipP).toFixed(2)}, up to ${CFG.flipMax} in a row. One miss and it's gone.</div>${luckLine('you win more calls, each pays less.')}`,
-    `<div class="mult" id="mult">—</div><div class="flipcoin" id="coin"><div class="face front"><img src="logo.svg" alt=""></div><div class="face back">SL</div></div><div class="pips" id="pips"></div>`);
+    <div class="note">Call the flip. Win chance per call: <b>${pct(CFG.luck.flipP)}</b>. The first right call pays <b>${(0.99 / CFG.luck.flipPay).toFixed(2)}x</b> and each one after multiplies it by ${(1 / CFG.luck.flipPay).toFixed(2)}, up to ${CFG.flipMax} in a row. One miss and it's gone.</div>${luckLine('you win more calls, each pays less.')}`,
+    `<div class="mult" id="mult">—</div><div class="flipcoin" id="coin"><div class="face front">${coinFace('heads')}</div><div class="face back">${coinFace('tails')}</div></div><div class="pips" id="pips"></div>`);
   function paint() {
     const live = st && st.live;
     $('#start').classList.toggle('hidden', !!live); $('#calls').classList.toggle('hidden', !live);
-    $('#cash').classList.toggle('hidden', !(live && st.streak)); if (st) $('#cash').textContent = `Cash out ${fmt(st.bet * st.mult)} 🪙`;
-    $('#mult').textContent = st && st.streak ? st.mult.toFixed(2) + 'x' : live ? 'Call it!' : '—';
+    $('#cash').classList.toggle('hidden', !(live && st.streak)); if (st) $('#cash').textContent = `💰 Cash out ${fmt(st.bet * st.mult)} 🪙`;
+    $('#mult').textContent = st && st.streak ? st.mult.toFixed(2) + 'x' : live ? 'Heads or tails?' : '—';
     $('#pips').innerHTML = Array.from({ length: CFG.flipMax }, (_, i) => `<i class="${st && i < st.streak ? 'on' : ''}"></i>`).join('');
   }
   const a = (await api('GET', '/arcade/active?game=flip')).round; if (my !== nav) return;
@@ -767,10 +863,11 @@ async function flip(root, my) {
   $('#start').onclick = act(async () => { const r = await api('POST', '/arcade/flip/start', { bet: readBet() }); setBal(r.balance); st = { bet: r.bet, streak: 0, mult: 0, live: true }; $('#res').textContent = ''; paint(); });
   root.querySelectorAll('[data-call]').forEach(b => b.onclick = act(async () => {
     const r = await api('POST', '/arcade/flip/call', { call: b.dataset.call });
-    rot = Math.ceil((rot + 1800) / 360) * 360 + (r.side === 'sl' ? 180 : 0); $('#coin').style.transform = `rotateY(${rot}deg)`;
-    await wait(calm ? 0 : 1100);
+    $('#coin').classList.add('tossing'); rot = Math.ceil((rot + 1800) / 360) * 360 + (r.side === 'tails' ? 180 : 0); $('#coin').style.transform = `rotateY(${rot}deg)`;
+    if (!calm) for (let i = 0; i < 6; i++) { sfx.play('flip'); await wait(170); }
+    $('#coin').classList.remove('tossing');
     if (!root.isConnected) return setBal(r.balance); // player switched games mid-animation
-    const name = r.side === 'hawk' ? 'Seymour' : 'SL';
+    const name = r.side === 'heads' ? 'Heads' : 'Tails';
     if (r.lost) { st.live = false; setBal(r.balance); resMsg(false, `It landed ${name} · −${fmt(st.bet)} 🪙`); fx.lose(); }
     else { st.streak = r.streak; st.mult = r.mult; fx.bump($('#mult'));
       if (r.cashed) { st.live = false; setBal(r.balance); resMsg(true, `Perfect ${r.streak}! +${fmt(r.payout - st.bet)} 🪙`); fx.win(true); } else { resMsg(true, `${name}! Streak ${r.streak}`); streakFx(r.streak); } }
@@ -780,32 +877,62 @@ async function flip(root, my) {
   paint();
 }
 
-/* Dice: Scoreboard Roll */
+/* Dice: Scoreboard Roll. Stake-style: drag the big slider, the green zone is where you win, the roll lands on the bar. */
 async function dice(root) {
-  let target = 50, over = true;
+  let target = 50, over = true, autoRun = false, rolling = false, hist = [];
+  const L = CFG.luck, c2 = x => Math.round(Math.min(98, Math.max(2, x)) * 100) / 100;
   root.innerHTML = gameShell(`${betBox()}
-    <label>Roll</label><div class="seg" id="ou"><button data-o="1" class="on">Over</button><button data-o="0">Under</button></div>
-    <label>Target: <b id="tv">50</b></label><input id="tg" type="range" min="2" max="98" step="1" value="50" style="width:100%">
-    <div class="stats"><div><small>Win chance</small><b id="wc"></b></div><div><small>Pays</small><b id="py"></b></div></div>
-    <button class="btn" id="roll">Roll</button><div class="note">Roll a number from 0 to 99.99 on the stadium scoreboard.</div>${luckLine('your green win zone is resized, payouts adjust to match.')}`,
-    `<div class="board"><small>SEAHAWKS · HOME</small><div class="led" id="led">00.00</div></div><div class="track" id="track"><div class="zone" id="zone"></div><div class="mark hidden" id="mark"></div></div><div class="ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>`);
-  function paint() {
-    const ch = Math.round(Math.min(98, Math.max(2, (over ? 100 - target : target) * CFG.luck.k)) * 100) / 100; // luck-sized win zone
-    $('#tv').textContent = target; $('#wc').textContent = ch + '%'; $('#py').textContent = (99 / ch).toFixed(2) + 'x';
-    const z = $('#zone'); z.style.left = over ? (100 - ch) + '%' : '0'; z.style.width = ch + '%';
+    <button class="btn bjbig" id="roll">🎲 Roll dice <kbd>Space</kbd></button>
+    <div class="duo"><button class="btn alt" id="ouflip">⇄ Roll <b id="oulab">Over</b> <kbd>U</kbd></button><button class="btn alt" id="auto">⚡ Auto ×10 <kbd>A</kbd></button></div>
+    <div class="stats3"><div><small>Multiplier</small><b id="py">–</b></div><div><small>Roll <span id="oul2">over</span></small><input id="tgn" type="number" min="2" max="98" step="0.01" value="50"></div><div><small>Win chance</small><b id="wc">–</b></div></div>
+    <div class="note">Drag the slider (or type a number) to set your target. The <b>green zone</b> wins. Smaller zone = bigger payout.</div>${luckLine('your green win zone is resized, payouts adjust to match.')}`,
+    `<div class="dstage"><div class="dnum" id="dnum">50.00</div>
+      <div class="dbar" id="dbar"><div class="dz lose" id="dzl"></div><div class="dz win" id="dzw"></div><input type="range" id="tg" class="dslider" min="2" max="98" step="0.01" value="50" aria-label="Dice target"><div class="dmark hidden" id="dmark"><span id="dmv"></span></div></div>
+      <div class="dticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div><div class="dhist" id="dh" aria-label="Recent rolls"></div></div>`);
+  const pos = v => `calc(17px + (100% - 34px) * ${v / 100})`;
+  function geom() { // [win chance %, win zone edge, payout]
+    const z0 = over ? 100 - target : target, zone = c2(L.sup ? 100 - (100 - z0) / L.k : z0 * L.k), edge = over ? 100 - zone : zone, zonePay = c2(z0 * L.pk);
+    return { zone, edge, pays: 0.99 / (zonePay / 100) };
   }
-  $('#tg').oninput = e => { target = +e.target.value; paint(); };
-  $('#ou').onclick = e => { const o = e.target.dataset.o; if (o == null) return; over = o === '1'; root.querySelectorAll('#ou button').forEach(b => b.classList.toggle('on', b.dataset.o === o)); paint(); };
-  $('#roll').onclick = act(async () => {
-    const r = await api('POST', '/arcade/dice', { bet: readBet(), target, over }), led = $('#led'), mk = $('#mark');
-    $('#res').textContent = ''; led.className = 'led';
-    if (!calm) for (let i = 0; i < 14; i++) { led.textContent = (Math.random() * 100).toFixed(2).padStart(5, '0'); await wait(45); }
-    if (!root.isConnected) return setBal(r.balance); // player switched games mid-animation
-    led.textContent = r.roll.toFixed(2).padStart(5, '0'); led.classList.add(r.win ? 'good' : 'bad');
-    mk.classList.remove('hidden'); mk.style.left = r.roll + '%'; mk.textContent = r.roll.toFixed(1);
-    settleShot(r, r.mult >= 5);
-  });
-  paint();
+  function paint() {
+    const g = geom(); $('#py').textContent = g.pays.toFixed(g.pays >= 100 ? 0 : 2) + 'x'; $('#wc').textContent = g.zone.toFixed(2) + '%';
+    $('#oulab').textContent = over ? 'Over' : 'Under'; $('#oul2').textContent = over ? 'over' : 'under';
+    const lose = $('#dzl'), win = $('#dzw');
+    if (over) { lose.style.cssText = `left:0;width:${pos(g.edge)}`; win.style.cssText = `left:${pos(g.edge)};right:0`; } else { win.style.cssText = `left:0;width:${pos(g.edge)}`; lose.style.cssText = `left:${pos(g.edge)};right:0`; }
+    $('#tg').value = target; if (document.activeElement !== $('#tgn')) $('#tgn').value = target;
+    $('#tg').style.setProperty('--fill', ((target - 2) / 96 * 100) + '%');
+  }
+  const setTarget = v => { target = Math.round(Math.min(98, Math.max(2, +v || 50)) * 100) / 100; paint(); };
+  $('#tg').oninput = e => setTarget(e.target.value); $('#tgn').oninput = e => { if (e.target.value !== '') setTarget(e.target.value); }; $('#tgn').onblur = () => paint();
+  const flipOU = () => { over = !over; paint(); sfx.play('tap'); }; $('#ouflip').onclick = flipOU;
+  function pill() { $('#dh').innerHTML = hist.slice(0, 14).map(h => `<span class="${h.win ? 'good' : 'bad'}">${h.roll.toFixed(2)}</span>`).join(''); }
+  async function doRoll() {
+    if (rolling) return false; rolling = true; $('#roll').disabled = true;
+    try {
+      const r = await api('POST', '/arcade/dice', { bet: readBet(), target, over }), num = $('#dnum'), mk = $('#dmark'), bar = $('#dbar');
+      $('#res').textContent = ''; num.className = 'dnum rolling'; mk.className = 'dmark scan'; bar.classList.remove('flash-g', 'flash-r');
+      const steps = calm ? 0 : 16;
+      for (let i = 0; i < steps; i++) { const v = Math.random() * 100; num.textContent = v.toFixed(2); mk.style.left = pos(v); $('#dmv').textContent = ''; if (i % 2) sfx.play('tap'); await wait(38 + i * 6); }
+      if (!root.isConnected) { setBal(r.balance); return false; }
+      num.textContent = r.roll.toFixed(2); num.className = 'dnum ' + (r.win ? 'good' : 'bad'); mk.style.left = pos(r.roll); mk.className = 'dmark land ' + (r.win ? 'good' : 'bad'); $('#dmv').textContent = r.roll.toFixed(2);
+      bar.classList.add(r.win ? 'flash-g' : 'flash-r'); hist.unshift(r); pill();
+      settleShot(r, r.mult >= 5); if (r.win) fx.bump(num);
+      return true;
+    } finally { rolling = false; if (root.isConnected) $('#roll').disabled = autoRun; }
+  }
+  $('#roll').onclick = act(doRoll);
+  async function toggleAuto() {
+    if (autoRun) { autoRun = false; $('#auto').innerHTML = '⚡ Auto ×10 <kbd>A</kbd>'; $('#roll').disabled = rolling; return; }
+    autoRun = true; $('#roll').disabled = true;
+    for (let n = 10; n > 0 && autoRun && root.isConnected; n--) {
+      $('#auto').innerHTML = `⏹ Stop (${n} left) <kbd>A</kbd>`;
+      try { if (!(await doRoll())) break; } catch (e) { toast(e.message); sfx.play('error'); break; }
+      await wait(calm ? 100 : 380);
+    }
+    autoRun = false; if (root.isConnected) { $('#auto').innerHTML = '⚡ Auto ×10 <kbd>A</kbd>'; $('#roll').disabled = false; }
+  }
+  $('#auto').onclick = toggleAuto; stopFns.push(() => { autoRun = false; });
+  paint(); pill();
 }
 
 /* Limbo: Hail Mary */
@@ -833,56 +960,161 @@ async function limbo(root) {
   paint();
 }
 
-/* Slots: Seahawk Slots */
-async function slots(root) {
-  const keys = Object.keys(EMO), pays = CFG.slots.pays;
-  root.innerHTML = gameShell(`${betBox()}<div style="height:14px"></div><button class="btn" id="spin">Spin</button>
-    <div class="paytable">${keys.map(k => `<div><span>${EMO[k].repeat(3)}</span><b>${pays[k]}x</b></div>`).join('')}
-      <div><span>🦅🦅 + any</span><b>5x</b></div><div><span>🏈🏐🏀 mixed</span><b>3x</b></div><div><span>🦅 + any two</span><b>1x</b></div></div>`,
-    `<div class="slotbox"><div class="reels">${[0, 1, 2].map(i => `<div class="reel" id="rl${i}">🦅</div>`).join('')}</div><div class="slotline"></div></div><div class="curb">🏆 Three trophies = state champs jackpot</div>`);
-  $('#spin').onclick = act(async () => {
-    const r = await api('POST', '/arcade/slots', { bet: readBet() }); $('#res').textContent = '';
-    const els = [0, 1, 2].map(i => $('#rl' + i)); els.forEach(e => e.classList.add('spinning'));
-    const iv = setInterval(() => els.forEach(e => { if (e.classList.contains('spinning')) e.textContent = EMO[keys[Math.floor(Math.random() * keys.length)]]; }), 60);
-    for (let i = 0; i < 3; i++) { await wait(calm ? 0 : 450 + i * 50); els[i].classList.remove('spinning'); els[i].textContent = EMO[r.reels[i]]; fx.bump(els[i]); }
-    clearInterval(iv); if (r.payout > r.bet) els.forEach(e => fx.bump(e));
-    if (!root.isConnected) return setBal(r.balance); // player switched games mid-animation
-    settleShot(r, r.mult >= 20);
+/* Slots: Seahawk Slots. 3x3 reels, 5 paylines, wild hawk, pull-down lever. The server deals the grid; we animate it. */
+const SLOT_COLORS = ['#ffe08a', '#19e58a', '#5b8cff', '#ff4fd8', '#ff9f1a']; // payline colors
+async function slots(root, my) {
+  const keys = Object.keys(EMO), pays = CFG.slots.pays, LINES = CFG.slots.lines;
+  let spinning = false, autoRun = false, recent = [];
+  const bulbs = Array.from({ length: 22 }, (_, k) => `<i style="--k:${k}"></i>`).join('');
+  const symTile = k => `<div class="stile s-${k}" data-k="${k}"><span>${EMO[k]}</span>${k === 'hawk' ? '<em>WILD</em>' : ''}</div>`;
+  const start = [['pass', 'volley', 'bus'], ['hawk', 'trophy', 'bball'], ['bus', 'football', 'pass']]; // column 0..2, top→bottom (no accidental wins)
+  root.innerHTML = gameShell(`${betBox()}
+    <div class="stats"><div><small>Bet per line</small><b id="perline">–</b></div><div><small>Paylines</small><b>5</b></div></div>
+    <button class="btn bjbig" id="spin">🎰 Pull the lever <kbd>Space</kbd></button>
+    <div class="duo"><button class="btn alt" id="auto">⚡ Auto ×10 <kbd>A</kbd></button><button class="btn alt" id="turbo" aria-pressed="false">🚀 Turbo</button></div>
+    <div class="paytable">${['trophy', 'hawk', 'football', 'volley', 'bball', 'bus', 'pass'].map(k => `<div><span>${EMO[k].repeat(3)}</span><b>${+(pays[k] / 5).toFixed(2)}x</b></div>`).join('')}
+      <div class="ptnote"><span>🦅 is <b>WILD</b></span><b>fills in for anything but 🏆</b></div></div>
+    <div class="note">Your bet is split across <b>5 paylines</b> (3 rows + 2 diagonals). Three matching symbols on a line win, and wins on several lines add up. Pays shown are for one line, as a multiple of your whole bet. Drag the lever down, press Space, or tap the lever.</div>`,
+    `<div class="slotm" id="slotm"><div class="smarq"><div class="sbulbs">${bulbs}</div><h3>SEAHAWK <b>SLOTS</b></h3><div class="sjack">🏆 JACKPOT ${pays.trophy / 5}x</div></div>
+      <div class="scab"><div class="swin" id="swin"><div class="sreels" id="sreels">${[0, 1, 2].map(c => `<div class="sreel" data-c="${c}"><div class="sstrip">${start[c].map(symTile).join('')}</div></div>`).join('')}</div>
+          <svg class="slines" viewBox="0 0 3 3" preserveAspectRatio="none" aria-hidden="true">${LINES.map((L, i) => `<polyline id="pl${i}" points="${L.map((r, c) => `${c + .5},${r + .5}`).join(' ')}" stroke="${SLOT_COLORS[i]}"/>`).join('')}</svg>
+          <div class="swinfx" id="swinfx"><div class="sbanner" id="sbn"></div></div></div>
+        <div class="shandle" id="shandle"><div class="hbase"></div><div class="harm" id="harm"><div class="hrod"></div><button class="hball" id="hball" aria-label="Pull the lever to spin"></button></div><div class="hhint">PULL ↓</div></div></div>
+      <div class="slast" id="slast" aria-label="Recent spins"></div></div>`, 'wide2');
+  const reels = [...root.querySelectorAll('.sreel')], strips = reels.map(r => r.firstElementChild), slotm = $('#slotm'), harm = $('#harm'), lever = $('#shandle');
+  const tileH = () => reels[0].clientHeight / 3, rnd = () => keys[Math.floor(Math.random() * keys.length)];
+  const perLineTxt = () => { const v = readBet() / 5; return v % 1 ? v.toFixed(1) : String(v); };
+  $('#bet').addEventListener('input', () => { $('#perline').textContent = perLineTxt(); }); $('#perline').textContent = perLineTxt();
+  const pills = () => { $('#slast').innerHTML = recent.slice(0, 12).map(m => `<span class="${m >= 5 ? 'gold' : m >= 1 ? 'good' : m > 0 ? 'meh' : 'bad'}">${m ? m.toFixed(2) + 'x' : '0x'}</span>`).join(''); };
+  const setReel = (c, syms) => { strips[c].style.transition = 'none'; strips[c].style.transform = 'translateY(0)'; strips[c].innerHTML = syms.map(symTile).join(''); };
+  const curCol = c => [...strips[c].children].map(e => e.dataset.k).slice(0, 3);
+  async function spinReel(c, final3, dur) { // symbols scroll DOWN: new ones enter at the top and settle with a little overshoot
+    const cur = curCol(c), filler = Array.from({ length: 12 + c * 5 + Math.round(dur / 320) }, rnd), seq = [...final3, ...filler, ...cur], t = tileH();
+    strips[c].innerHTML = seq.map(symTile).join(''); strips[c].style.transition = 'none'; strips[c].style.transform = `translateY(${-(seq.length - 3) * t}px)`; void strips[c].offsetWidth;
+    reels[c].classList.add('blur'); strips[c].style.transition = `transform ${dur}ms cubic-bezier(.15,.8,.22,1.07)`; strips[c].style.transform = 'translateY(0)';
+    await wait(dur); reels[c].classList.remove('blur'); setReel(c, final3); reels[c].classList.add('thud'); setTimeout(() => reels[c].classList.remove('thud'), 260);
+  }
+  function coinRain(n) { if (calm) return; const fxl = $('#swinfx'); for (let i = 0; i < n; i++) { const e = document.createElement('i'); e.className = 'coinf'; e.textContent = '🪙'; e.style.cssText = `left:${Math.random() * 96}%;animation-delay:${Math.random() * .8}s;animation-duration:${1 + Math.random() * 1.1}s;font-size:${18 + Math.random() * 16}px`; fxl.appendChild(e); setTimeout(() => e.remove(), 2400); } }
+  function clearHits() { root.querySelectorAll('.stile.hit,.stile.dim').forEach(e => e.classList.remove('hit', 'dim')); root.querySelectorAll('.slines polyline').forEach(p => p.classList.remove('on')); $('#sbn').className = 'sbanner'; $('#sbn').innerHTML = ''; slotm.classList.remove('frenzy', 'won'); }
+  function tease(grid) { // does any line look like it could still be completed by the last reel?
+    return LINES.some(L => { const a = grid[L[0]][0], b = grid[L[1]][1]; return (a === b && a !== 'trophy') || (a === 'hawk' && b !== 'trophy') || (b === 'hawk' && a !== 'trophy') || (a === 'trophy' && b === 'trophy'); });
+  }
+  async function playSpin(r) {
+    const speed = $('#turbo').getAttribute('aria-pressed') === 'true' || autoRun ? 0.55 : 1, grid = r.grid, col = c => [0, 1, 2].map(row => grid[row][c]);
+    const teasing = !calm && tease(grid) && speed === 1;
+    slotm.classList.add('spinning'); if (teasing) slotm.classList.add('hot');
+    const tick = setInterval(() => sfx.play('flip'), 95);
+    const durs = [1000, 1450, teasing ? 3000 : 1900].map(d => calm ? 80 : d * speed);
+    const jobs = [0, 1, 2].map(c => spinReel(c, col(c), durs[c]).then(() => { sfx.play('clunk'); if (c === 1 && teasing) { reels[2].classList.add('tease'); sfx.play('streak'); } }));
+    await Promise.all(jobs); clearInterval(tick); reels[2].classList.remove('tease'); slotm.classList.remove('spinning', 'hot');
+  }
+  async function celebrate(r) {
+    const wins = r.wins, m = r.mult, jack = wins.some(w => w.sym === 'trophy'), tier = jack ? 'jackpot' : m >= 80 ? 'mega' : m >= 20 ? 'big' : m >= 5 ? 'nice' : m >= 1 ? 'win' : 'small';
+    wins.forEach(w => { $('#pl' + w.line).classList.add('on'); w.cells.forEach(([row, c]) => { const t = reels[c].children[row]; if (t) t.classList.add('hit'); }); });
+    root.querySelectorAll('.stile:not(.hit)').forEach(e => e.classList.add('dim')); slotm.classList.add('won');
+    const label = { jackpot: '🏆 STATE CHAMPS<br>JACKPOT 🏆', mega: 'MEGA WIN', big: 'BIG WIN', nice: 'NICE WIN', win: 'WIN' }[tier];
+    if (label) { $('#sbn').className = 'sbanner show ' + tier; $('#sbn').innerHTML = `<small>${wins.length} line${wins.length > 1 ? 's' : ''}</small><b>${label}</b><strong id="sbamt">0</strong><span>🪙</span>`; countUp($('#sbamt'), r.payout, calm ? 0 : 1100); }
+    coinRain({ jackpot: 90, mega: 60, big: 40, nice: 24, win: 14, small: 6 }[tier]);
+    if (tier === 'jackpot') { slotm.classList.add('frenzy'); sfx.play('jackpot'); fx.burst(320); setTimeout(() => fx.burst(220), 700); }
+    else if (tier === 'mega' || tier === 'big') { slotm.classList.add('frenzy'); fx.win(true); sfx.play('big'); }
+    else if (tier === 'nice') { fx.win(true); } else if (tier === 'win') { fx.win(false); } else sfx.play('coin');
+    wins.forEach((w, i) => setTimeout(() => sfx.play('coin'), 120 + i * 140));
+    return { tier, hold: { jackpot: 4200, mega: 3000, big: 2400, nice: 1800, win: 1400, small: 700 }[tier] };
+  }
+  async function spin() { // called once the lever has been pulled
+    if (spinning) return false; spinning = true; lever.classList.add('locked'); $('#spin').disabled = true;
+    let ok = false;
+    try {
+      clearHits(); $('#res').textContent = '';
+      const r = await api('POST', '/arcade/slots', { bet: readBet() });
+      U.balance = r.balance; pending += r.payout; showBal(); // the bet leaves now; winnings appear when the reels stop
+      await playSpin(r); if (!root.isConnected) { pending = 0; return setBal(r.balance); }
+      recent.unshift(r.mult); pills();
+      let hold = 600;
+      if (r.payout > 0) { const c = await celebrate(r); hold = c.hold; resMsg(r.payout >= r.bet, `${r.mult.toFixed(2)}x · ${r.payout >= r.bet ? '+' : '−'}${fmt(Math.abs(r.payout - r.bet))} 🪙`); }
+      else { resMsg(false, `No win · −${fmt(r.bet)} 🪙`); fx.lose(); }
+      pending = Math.max(0, pending - r.payout); showBal(); ok = true;
+      if (!autoRun) await wait(calm ? 0 : Math.min(hold, 800)); else await wait(calm ? 0 : hold);
+      if (!autoRun) setTimeout(() => { if (!spinning) clearHits(); }, 2500);
+    } catch (e) { toast(e.message); sfx.play('error'); }
+    finally { spinning = false; if (root.isConnected) { lever.classList.remove('locked'); $('#spin').disabled = autoRun; } }
+    return ok;
+  }
+  /* ---- the lever ---- */
+  const setArm = (deg, ms, ease) => { harm.style.transition = ms ? `transform ${ms}ms ${ease || 'ease-in'}` : 'none'; harm.style.transform = `rotate(${deg}deg)`; };
+  const REST = 0, CATCH = 130, FULL = 162;
+  async function pullAuto() { // what Space / the Spin button do: the lever pulls itself
+    if (spinning || lever.classList.contains('busy')) return false; lever.classList.add('busy');
+    sfx.play('lever'); setArm(FULL, calm ? 0 : 300, 'cubic-bezier(.4,0,.8,.6)'); await wait(calm ? 0 : 310); sfx.play('ratchet');
+    setArm(REST, calm ? 0 : 650, 'cubic-bezier(.3,1.6,.5,1)'); lever.classList.remove('busy'); return spin();
+  }
+  const ball = $('#hball'); let drag = null;
+  ball.addEventListener('pointerdown', e => {
+    if (spinning || lever.classList.contains('busy')) return; const b = $('.hbase', lever).getBoundingClientRect();
+    drag = { cx: b.x + b.width / 2, cy: b.y + b.height / 2, max: 0, caught: false }; try { ball.setPointerCapture(e.pointerId); } catch (x) {} lever.classList.add('dragging'); e.preventDefault();
   });
+  ball.addEventListener('pointermove', e => {
+    if (!drag || drag.caught) return; let a = Math.atan2(e.clientX - drag.cx, -(e.clientY - drag.cy)) * 180 / Math.PI; if (a < 0) a = a < -90 ? FULL : 0; a = Math.min(FULL, a); drag.max = Math.max(drag.max, a);
+    setArm(a, 0); if (a >= CATCH) { drag.caught = true; sfx.play('ratchet'); setArm(FULL, 70); setTimeout(() => { setArm(REST, calm ? 0 : 650, 'cubic-bezier(.3,1.6,.5,1)'); spin(); }, 90); }
+  });
+  const release = () => { if (!drag) return; const d = drag; drag = null; lever.classList.remove('dragging'); if (d.caught) return; if (d.max < 8) pullAuto(); else setArm(REST, 450, 'cubic-bezier(.3,1.6,.5,1)'); };
+  ball.addEventListener('pointerup', release); ball.addEventListener('pointercancel', release);
+  ball.addEventListener('click', e => { if (e.detail === 0) pullAuto(); }); // keyboard Enter on the focused lever
+  $('#spin').onclick = () => { pullAuto(); };
+  $('#turbo').onclick = () => { const on = $('#turbo').getAttribute('aria-pressed') !== 'true'; $('#turbo').setAttribute('aria-pressed', on); $('#turbo').classList.toggle('on', on); };
+  async function toggleAuto() {
+    if (autoRun) { autoRun = false; $('#auto').innerHTML = '⚡ Auto ×10 <kbd>A</kbd>'; return; }
+    autoRun = true; $('#spin').disabled = true;
+    for (let n = 10; n > 0 && autoRun && root.isConnected; n--) {
+      $('#auto').innerHTML = `⏹ Stop (${n} left) <kbd>A</kbd>`;
+      if (!(await pullAuto())) break; await wait(calm ? 0 : 250);
+    }
+    autoRun = false; if (root.isConnected) { $('#auto').innerHTML = '⚡ Auto ×10 <kbd>A</kbd>'; if (!spinning) $('#spin').disabled = false; }
+  }
+  $('#auto').onclick = toggleAuto; stopFns.push(() => { autoRun = false; });
+  pills();
 }
 
 /* Roulette: Lakes Roulette */
 const RA = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]), rcol = n => n === 0 ? 'gold' : RA.has(n) ? 'green' : 'blue';
 const WHEEL = [0, 32, 15, 19, 4, 21, 2, 25, 17, 34, 6, 27, 13, 36, 11, 30, 8, 23, 10, 5, 24, 16, 33, 1, 20, 14, 31, 9, 22, 18, 29, 7, 28, 12, 35, 3, 26];
 async function roulette(root) {
-  let chip = 5, bets = {}, rot = 0; const seg = 360 / 37, C = { green: '#0f9d58', blue: '#1b4fd8', gold: '#f5a623' };
+  let chip = 5, bets = {}, rot = 0, ball = 0; const seg = 360 / 37, C = { green: '#0f9d58', blue: '#1b4fd8', gold: '#f5a623' };
   const OUT = [['color', 'green', 'Green'], ['color', 'blue', 'Blue'], ['parity', 'odd', 'Odd'], ['parity', 'even', 'Even'], ['half', 'low', '1–18'], ['half', 'high', '19–36'], ['dozen', 1, '1st 12'], ['dozen', 2, '2nd 12'], ['dozen', 3, '3rd 12']];
-  root.innerHTML = gameShell(`<label>Chip</label><div class="chips" id="chips">${[1, 5, 10, 25, 100].map(c => `<button class="chipb ${c === chip ? 'on' : ''}" data-c="${c}">${c}</button>`).join('')}</div>
+  root.innerHTML = gameShell(`<label>Chip</label><div class="chips" id="chips">${[1, 5, 10, 25, 100, 500].map(c => `<button class="chipb ${c === chip ? 'on' : ''}" data-c="${c}">${c}</button>`).join('')}</div>
     <div class="rtable"><button class="rc gold" data-b="num:0">0</button><div class="rgrid">${Array.from({ length: 36 }, (_, i) => `<button class="rc ${rcol(i + 1)}" data-b="num:${i + 1}">${i + 1}</button>`).join('')}</div>
     <div class="rout">${OUT.map(([t, v, l]) => `<button class="rc out ${t === 'color' ? v : ''}" data-b="${t}:${v}">${l}</button>`).join('')}</div></div>
     <div class="stats"><div><small>Total bet</small><b id="tot">0</b></div><div><small>Your balance</small><b>${fmt(U.balance)}</b></div></div>
-    <div class="duo"><button class="btn alt" id="clr">Clear</button><button class="btn" id="spin">Spin</button></div>`,
-    `<div class="wheelwrap"><div class="pointer">▼</div><div class="wheel" id="wh" style="background:conic-gradient(${WHEEL.map((n, i) => `${C[rcol(n)]} ${i * seg}deg ${(i + 1) * seg}deg`).join(',')})"></div><div class="hub" id="hub"><img src="logo.svg" alt=""></div></div>`);
-  const key = (t, v) => `${t}:${v}`, total = () => Object.values(bets).reduce((a, b) => a + b, 0);
+    <div class="duo"><button class="btn alt" id="clr">Clear <kbd>X</kbd></button><button class="btn bjbig" id="spin">🎡 Spin <kbd>Space</kbd></button></div>`,
+    `<div class="wheelwrap big"><div class="pointer">▼</div><div class="wheel" id="wh" style="background:conic-gradient(${WHEEL.map((n, i) => `${C[rcol(n)]} ${i * seg}deg ${(i + 1) * seg}deg`).join(',')})"><div class="wnums" id="wnums"></div><div class="wring"></div></div>
+      <div class="ballwrap" id="ballwrap"><i class="rball"></i></div><div class="hub" id="hub"><img src="logo.svg" alt=""></div></div>
+    <div class="rhist" id="rhist"></div>`, 'wide');
+  const total = () => Object.values(bets).reduce((a, b) => a + b, 0), hist = [];
+  function numbers() { // number labels around the rim, sized to the wheel
+    const w = $('#wh').clientWidth || 400, R = w * 0.42;
+    $('#wnums').innerHTML = WHEEL.map((n, i) => `<span class="${rcol(n)}" style="transform:rotate(${(i + 0.5) * seg}deg) translateY(${-R}px);font-size:${Math.max(9, w * 0.034)}px">${n}</span>`).join('');
+  }
   function paint() {
     root.querySelectorAll('[data-b]').forEach(b => { const v = bets[b.dataset.b]; b.dataset.amt = v || ''; b.classList.toggle('bet', !!v); });
     $('#tot').textContent = fmt(total());
   }
+  const pills = () => { $('#rhist').innerHTML = hist.slice(0, 14).map(n => `<span class="${rcol(n)}">${n}</span>`).join(''); };
   $('#chips').onclick = e => { const c = e.target.dataset.c; if (!c) return; chip = +c; root.querySelectorAll('.chipb').forEach(b => b.classList.toggle('on', b.dataset.c === c)); };
-  root.querySelector('.rtable').onclick = e => { const b = e.target.closest('[data-b]'); if (!b) return; if (total() + chip > U.balance) return toast('Not enough Hawk Bucks for that chip'); bets[b.dataset.b] = (bets[b.dataset.b] || 0) + chip; paint(); };
+  root.querySelector('.rtable').onclick = e => { const b = e.target.closest('[data-b]'); if (!b) return; if (total() + chip > U.balance) return toast('Not enough Hawk Bucks for that chip'); bets[b.dataset.b] = (bets[b.dataset.b] || 0) + chip; sfx.play('flip'); paint(); };
   $('#clr').onclick = () => { bets = {}; paint(); };
   $('#spin').onclick = act(async () => {
     if (!total()) return toast('Tap the table to place chips');
     const list = Object.entries(bets).map(([k, amount]) => { const [type, v] = k.split(':'); return { type, value: type === 'color' || type === 'parity' || type === 'half' ? v : +v, amount }; });
     const r = await api('POST', '/arcade/roulette', { bets: list }); $('#res').textContent = '';
-    const i = WHEEL.indexOf(r.n); rot = Math.ceil((rot + 1800) / 360) * 360 + (360 - (i + 0.5) * seg);
-    $('#hub').innerHTML = '<img src="logo.svg" alt="">'; $('#wh').style.transform = `rotate(${rot}deg)`;
-    await wait(calm ? 0 : 3200);
+    const i = WHEEL.indexOf(r.n); rot = Math.ceil((rot + 2160) / 360) * 360 + (360 - (i + 0.5) * seg); ball = Math.ceil((ball + 2880) / 360) * 360;
+    $('#hub').innerHTML = '<img src="logo.svg" alt="">'; $('#wh').style.transform = `rotate(${rot}deg)`; $('#ballwrap').style.transform = `rotate(${-ball}deg)`; $('#wh').classList.add('spinning');
+    if (!calm) for (let t = 0; t < 14; t++) { sfx.play('tap'); await wait(80 + t * 25); }
+    $('#wh').classList.remove('spinning');
     if (!root.isConnected) return setBal(r.balance); // player switched games mid-animation
-    $('#hub').innerHTML = `<b class="${r.color}">${r.n}</b>`; fx.bump($('#hub'));
+    $('#hub').innerHTML = `<b class="${r.color}">${r.n}</b>`; fx.bump($('#hub')); hist.unshift(r.n); pills();
     settleShot(r, r.mult >= 10);
   });
-  paint();
+  paint(); requestAnimationFrame(numbers); addEventListener('resize', numbers); stopFns.push(() => removeEventListener('resize', numbers));
 }
 
 /* Rock paper scissors: Hallway RPS */
@@ -1097,44 +1329,72 @@ async function trivia(root) {
 }
 
 /* Crash: Seahawk Launch. The browser animates the climb; the server's clock decides cash-outs and crashes. */
+const rocketImg = Object.assign(new Image(), { src: 'rocket.svg' });
 async function rocket(root, my) {
-  let fl = null, loop = 0;
+  let fl = null, raf = 0, parts = [], boom = [], lastEmit = 0;
   const hist = [];
   root.innerHTML = gameShell(`${betBox()}
     <label>Auto cash-out (optional)</label><input id="auto" type="number" min="1.01" step="0.01" placeholder="e.g. 2.00">
     <div style="height:14px"></div><button class="btn bjbig" id="launch">🚀 Launch <kbd>Space</kbd></button>
-    <button class="btn gold bjbig hidden" id="cash">💰 Cash out <kbd>Space</kbd></button>
-    <div class="note">The multiplier climbs as Seymour’s science-fair rocket rises. Cash out before it blows. Payback is 99%: about half of all flights pass 2x, 1 in 10 pass 10x, and 1 in 100 blows up right at 1.00x.</div>`,
+    <button class="btn gold bjbig cashbig hidden" id="cash" disabled>💰 CASH OUT <kbd>Space</kbd></button>
+    <div class="note"><b>Space launches. Once it's flying, Space cashes out.</b> The multiplier climbs as the Seahawk rocket rises, so cash out before it blows. Payback is 99%: about half of all flights pass 2x, 1 in 10 pass 10x, and 1 in 100 blows up right at 1.00x.</div>`,
     `<div class="rk" id="rk"><canvas id="rkc"></canvas><div class="rkm" id="rkm">1.00x</div><div class="rkst" id="rkst">Ready for launch</div></div><div class="rkhist" id="rkh"></div>`);
-  const cv = $('#rkc'), ctx = cv.getContext('2d'), W = 640, H = 360, stars = Array.from({ length: 60 }, () => [Math.random() * W, Math.random() * H, Math.random() * 1.6 + .3]);
+  const cv = $('#rkc'), ctx = cv.getContext('2d'), W = 800, H = 450, stars = Array.from({ length: 90 }, () => [Math.random() * W, Math.random() * H, Math.random() * 1.8 + .3]);
   const d = devicePixelRatio || 1; cv.width = W * d; cv.height = H * d; ctx.setTransform(d, 0, 0, d, 0, 0);
   const mAt = (f, t) => Math.floor(Math.exp(f.rate * Math.max(0, t - f.t0)) * 100) / 100;
-  function draw(m, t, state) { // state: fly | crash | idle
-    ctx.clearRect(0, 0, W, H);
-    for (const [x, y, r] of stars) { ctx.fillStyle = '#ffffff88'; ctx.beginPath(); ctx.arc(x, (y + t * 0.01 * r) % H, r, 0, 7); ctx.fill(); }
-    if (state === 'idle') return;
-    const span = Math.max(8000, t * 1.15), top = Math.max(2, m * 1.25), X = s => 30 + (s / span) * (W - 80), Y = v => H - 30 - (Math.log(v) / Math.log(top)) * (H - 80);
-    const g = ctx.createLinearGradient(0, H, W, 0); g.addColorStop(0, '#12c26a'); g.addColorStop(1, state === 'crash' ? '#ff4d5e' : '#ffc542');
-    ctx.strokeStyle = g; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.beginPath();
-    for (let s = 0; s <= t; s += Math.max(16, t / 120)) { const v = Math.min(m, Math.exp(fl.rate * s)); s ? ctx.lineTo(X(s), Y(v)) : ctx.moveTo(X(0), Y(1)); }
-    ctx.lineTo(X(t), Y(m)); ctx.stroke();
-    const tx = X(t), ty = Y(m);
-    ctx.save(); ctx.translate(tx, ty); ctx.font = '38px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    if (state === 'crash') ctx.fillText('💥', 0, 0); else { ctx.rotate(-0.6); ctx.fillText('🚀', 0, 0); }
+  const geo = (t, rate) => { // screen position for flight time t (ms): the camera zooms out as the multiplier grows
+    const m = Math.exp(rate * Math.max(0, t)), span = Math.max(8000, t * 1.12), top = Math.max(2, m * 1.3);
+    return { m, x: 70 + (Math.max(0, t) / span) * (W - 190), y: H - 70 - (Math.log(m) / Math.log(top)) * (H - 190), span, top };
+  };
+  function draw(now) {
+    const t = fl ? now - fl.t0 : -1, over = fl && fl.over, m = fl ? Math.exp(fl.rate * Math.max(0, over ? fl.crashT : t)) : 1;
+    ctx.save(); ctx.clearRect(0, 0, W, H);
+    const shake = fl && !over && t > 0 ? Math.min(5, Math.log(m + 1) * 1.6) : (over && now - fl.endAt < 500 ? 9 * (1 - (now - fl.endAt) / 500) : 0);
+    if (shake) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
+    const sky = ctx.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#0a0526'); sky.addColorStop(1, '#16316b'); ctx.fillStyle = sky; ctx.fillRect(-10, -10, W + 20, H + 20);
+    const drift = fl && t > 0 ? t * 0.02 : now * 0.004;
+    for (const [x, y, r] of stars) { ctx.fillStyle = `rgba(255,255,255,${.35 + r * .2})`; ctx.beginPath(); ctx.arc(x, (y + drift * r) % H, r, 0, 7); ctx.fill(); }
+    const glow = ctx.createRadialGradient(70, H, 10, 70, H, 320); glow.addColorStop(0, '#12c26a55'); glow.addColorStop(1, '#12c26a00'); ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#0c1a2e'; ctx.fillRect(0, H - 34, W, 34); ctx.fillStyle = '#12c26a'; ctx.fillRect(0, H - 36, W, 3);
+    let rx = 70, ry = H - 70, ang = 0, flying = false;
+    if (fl && t > 0) { // trail + rocket along the curve
+      const tt = over ? fl.crashT : t, g = geo(tt, fl.rate), before = geo(Math.max(0, tt - 60), fl.rate);
+      const grad = ctx.createLinearGradient(70, H, g.x, g.y); grad.addColorStop(0, '#12c26a00'); grad.addColorStop(.6, '#19e58a'); grad.addColorStop(1, over ? '#ff4d5e' : '#ffe08a');
+      ctx.strokeStyle = grad; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.shadowColor = '#19e58a'; ctx.shadowBlur = 14; ctx.beginPath();
+      for (let s = 0; s <= tt; s += Math.max(16, tt / 140)) { const q = { x: 70 + (s / g.span) * (W - 190), y: H - 70 - (Math.log(Math.exp(fl.rate * s)) / Math.log(g.top)) * (H - 190) }; s ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); }
+      ctx.lineTo(g.x, g.y); ctx.stroke(); ctx.shadowBlur = 0;
+      rx = g.x; ry = g.y; ang = Math.atan2(g.y - before.y, g.x - before.x) + Math.PI / 2; flying = !over;
+    }
+    if (flying && now - lastEmit > 26) { lastEmit = now; for (let i = 0; i < 2; i++) parts.push({ x: rx + Math.sin(ang) * -58 + (Math.random() - .5) * 10, y: ry + Math.cos(ang) * 58 + (Math.random() - .5) * 10, vx: Math.sin(ang) * -1.2 + (Math.random() - .5) * 1.4, vy: Math.cos(ang) * 1.2 + (Math.random() - .5), r: 5 + Math.random() * 6, life: 1 }); }
+    parts = parts.filter(p => p.life > 0);
+    for (const p of parts) { p.x += p.vx; p.y += p.vy; p.r += .35; p.life -= .022; ctx.fillStyle = `rgba(255,${Math.round(150 + p.life * 90)},${Math.round(60 + p.life * 40)},${p.life * .35})`; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill(); }
+    if (!over) {
+      ctx.save(); ctx.translate(rx, ry); ctx.rotate(ang);
+      const ih = 124, iw = ih * (80 / 150), launched = fl && t > 0, fl2 = launched ? 1 : (fl ? Math.max(0, 1 + t / 700) * .5 : 0);
+      if (fl2) { const fh = (46 + Math.sin(now * .06) * 10 + Math.random() * 8) * (launched ? 1 : .6), g = ctx.createLinearGradient(0, ih / 2 - 6, 0, ih / 2 + fh); g.addColorStop(0, '#fff'); g.addColorStop(.25, '#ffe08a'); g.addColorStop(.6, '#ff9f1a'); g.addColorStop(1, '#ff4d5e00'); ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-iw * .26, ih / 2 - 4); ctx.quadraticCurveTo(0, ih / 2 + fh * 1.3, iw * .26, ih / 2 - 4); ctx.fill(); }
+      if (rocketImg.complete) ctx.drawImage(rocketImg, -iw / 2, -ih / 2, iw, ih);
+      ctx.restore();
+    }
+    if (over) { // explosion
+      const e = (now - fl.endAt) / 1000; if (!boom.length && e < 0.05) for (let i = 0; i < 70; i++) { const a = Math.random() * 7, v = 1 + Math.random() * 6; boom.push({ x: rx, y: ry, vx: Math.cos(a) * v, vy: Math.sin(a) * v, r: 3 + Math.random() * 6, life: 1, c: ['#fff', '#ffe08a', '#ff9f1a', '#ff4d5e', '#12c26a'][i % 5] }); }
+      boom = boom.filter(b => b.life > 0); for (const b of boom) { b.x += b.vx; b.y += b.vy; b.vy += .06; b.life -= .016; ctx.globalAlpha = Math.max(0, b.life); ctx.fillStyle = b.c; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * b.life + 1, 0, 7); ctx.fill(); }
+      ctx.globalAlpha = 1; if (e < .35) { ctx.fillStyle = `rgba(255,240,200,${.7 * (1 - e / .35)})`; ctx.beginPath(); ctx.arc(rx, ry, 30 + e * 260, 0, 7); ctx.fill(); }
+    }
     ctx.restore();
+    if (fl && !over) {
+      const mm = mAt(fl, now); $('#rkm').textContent = mm.toFixed(2) + 'x'; $('#rkm').className = 'rkm ' + (fl.cashed ? 'cashed' : '');
+      if (t < 0) $('#rkst').textContent = `Liftoff in ${Math.max(0.1, Math.ceil(-t / 100) / 10).toFixed(1)}s…`; else if (!fl.cashed) { $('#rkst').textContent = 'Climbing… press Space to cash out!'; $('#rkst').className = 'rkst'; }
+      const cash = $('#cash'); if (cash && !fl.cashed) { cash.disabled = t < 150; cash.innerHTML = `💰 CASH OUT ${fmt(fl.bet * mm)} 🪙 <kbd>Space</kbd>`; }
+    }
   }
+  function frame(now) {
+    raf = 0; if (!root.isConnected) return; draw(now);
+    if ((fl && !fl.over) || parts.length || boom.length || (fl && fl.over && now - fl.endAt < 1400)) raf = requestAnimationFrame(frame);
+  }
+  const kick = () => { if (!raf) raf = requestAnimationFrame(frame); };
   const status = (t, cls = '') => { const el = $('#rkst'); el.textContent = t; el.className = 'rkst ' + cls; };
   const paintHist = () => { $('#rkh').innerHTML = hist.slice(0, 12).map(c => `<span class="${c >= 10 ? 'gold' : c >= 2 ? 'good' : 'bad'}">${c.toFixed(2)}x</span>`).join(''); };
   const buttons = () => { const flying = fl && !fl.over; $('#launch').classList.toggle('hidden', !!flying); $('#cash').classList.toggle('hidden', !(flying && !fl.cashed)); };
-  function tick() {
-    if (!fl || fl.over || !root.isConnected) return;
-    const now = performance.now(), t = now - fl.t0, m = mAt(fl, now);
-    draw(m, Math.max(0, t), 'fly');
-    if (t < 0) status(`Liftoff in ${Math.ceil(-t / 100) / 10}s…`); else if (!fl.cashed) status('Climbing… cash out before it blows!');
-    $('#rkm').textContent = m.toFixed(2) + 'x'; $('#rkm').className = 'rkm ' + (fl.cashed ? 'cashed' : '');
-    if (!fl.cashed) $('#cash').innerHTML = `💰 Cash out ${fmt(fl.bet * m)} 🪙 <kbd>Space</kbd>`;
-    loop = setTimeout(tick, 33);
-  }
   function cashed(e) {
     if (!fl || fl.cashed) return; fl.cashed = e.mult; setBal(e.balance); buttons(); sfx.play('cash');
     status(`${e.auto ? 'Auto-' : ''}Cashed out at ${e.mult.toFixed(2)}x – watch where it would have crashed`, 'good');
@@ -1142,13 +1402,12 @@ async function rocket(root, my) {
     if (e.payout > fl.bet) fx.win(e.mult >= 5);
   }
   function crashed(e) {
-    if (!fl || fl.over) return; fl.over = true; clearTimeout(loop);
-    const t = Math.log(e.crash) / fl.rate; draw(e.crash, t, 'crash');
+    if (!fl || fl.over) return; fl.over = true; fl.crashT = Math.log(e.crash) / fl.rate; fl.endAt = performance.now(); boom = [];
     $('#rkm').textContent = `${e.crash.toFixed(2)}x`; $('#rkm').className = 'rkm boom';
     if (e.balance != null) setBal(e.balance);
     if (!fl.cashed) { status(`💥 Blew up at ${e.crash.toFixed(2)}x`, 'bad'); resMsg(false, `Crashed at ${e.crash.toFixed(2)}x · −${fmt(fl.bet)} 🪙`); fx.lose(); }
     else status(`Cashed at ${fl.cashed.toFixed(2)}x · it blew up at ${e.crash.toFixed(2)}x`, 'good');
-    hist.unshift(e.crash); paintHist(); buttons();
+    hist.unshift(e.crash); paintHist(); buttons(); kick();
   }
   async function watch(id) {
     try {
@@ -1158,34 +1417,38 @@ async function rocket(root, my) {
       crashed(e);
     } catch (er) { toast(er.message); }
   }
-  function fly(f) { fl = { ...f, cashed: 0, over: false }; $('#res').textContent = ''; buttons(); clearTimeout(loop); tick(); watch(f.id); }
-  stopFns.push(() => { clearTimeout(loop); fl = null; });
+  function fly(f) { fl = { ...f, cashed: 0, over: false, launchedAt: performance.now() }; parts = []; boom = []; $('#res').textContent = ''; buttons(); kick(); watch(f.id); }
+  stopFns.push(() => { cancelAnimationFrame(raf); fl = null; });
   $('#launch').onclick = act(async () => {
     const a = $('#auto').value, r = await api('POST', '/arcade/rocket/start', { bet: readBet(), auto: a ? +a : null });
-    setBal(r.balance); fly({ id: r.id, bet: r.bet, rate: r.rate, t0: performance.now() + r.liftoff });
+    setBal(r.balance); sfx.play('start'); fly({ id: r.id, bet: r.bet, rate: r.rate, t0: performance.now() + r.liftoff });
   });
   $('#cash').onclick = act(async () => {
-    if (!fl || fl.cashed || fl.over) return;
+    if (!fl || fl.cashed || fl.over || performance.now() - fl.launchedAt < 700 || performance.now() < fl.t0 + 150) return; // a double-tap on launch must not instantly cash out
     const e = await api('POST', '/arcade/rocket/cashout'); e.event === 'cashed' ? cashed(e) : crashed(e);
   });
   const [a, h] = await Promise.all([api('GET', '/arcade/active?game=rocket'), api('GET', '/arcade/rocket/history')]); if (my !== nav) return;
-  hist.push(...h.crashes); paintHist(); draw(1, 0, 'idle');
+  hist.push(...h.crashes); paintHist(); draw(performance.now());
   if (a.round) { fly({ id: a.round.id, bet: a.round.bet, rate: a.round.rate, t0: performance.now() - a.round.flying }); $('#res').textContent = 'Flight restored'; }
+  rocketImg.onload = () => draw(performance.now());
 }
 
 /* ---------- Luck Lab ---------- */
 async function renderLuck() {
-  const cur = String(luckLevel());
+  const cur = String(luckLevel()), reg = LUCK.filter(x => String(x[0])[0] !== 'x'), sup = LUCK.filter(x => String(x[0])[0] === 'x');
+  const card = ([lv, e, name, desc]) => `<button class="luckcard ${String(lv)[0] === 'x' ? 'super' : ''} ${String(lv) === cur ? 'on' : ''}" data-luck="${lv}" aria-pressed="${String(lv) === cur}"><span class="le">${e}</span><b>${lv === 'normal' ? 'Normal' : String(lv)[0] === 'x' ? name : `${lv} · ${name}`}</b><small>${desc}</small><i class="lm">${lv === 'normal' ? 'Standard odds' : String(lv)[0] === 'x' ? `Lose chance ÷${String(lv).slice(1)}` : `Win chance ×${(0.5 + lv * 0.1).toFixed(1)}`}</i></button>`;
   $('#app').innerHTML = `<h1>🍀 Luck Lab</h1>
-    <div class="panel luckinfo"><b>Luck really changes your odds</b> in 5 arcade games: 🪙 Seymour Flip, ✊ Hallway RPS, 🚌 Seahawk Crossing, 🎲 Scoreboard Roll and 🏈 Hail Mary.
-      Higher luck = you <b>win more often</b>, but each win pays less. Lower luck = fewer wins, bigger payouts. The <b>average payback stays the same</b> at every level, so the leaderboard stays fair.
-      <br><br>Each level multiplies your win chance: level 1 ×0.6 … level 5 ×1.0 … level 10 ×1.5. Example: Seymour Flip is 50/50 on Normal, 75% at level 10 (pays 1.32x a call), 30% at level 1 (pays 3.30x).
-      Your luck is locked in when a round starts. It doesn't touch Hawk Drop, Locker Hunt, Slots, Roulette, Hawk 21, skill games or sports picks. It also changes the confetti and win sounds. Hawk Bucks are pretend: no real money, ever.</div>
-    <div class="luckgrid">${LUCK.map(([lv, e, name, desc]) => `<button class="luckcard ${String(lv) === cur ? 'on' : ''}" data-luck="${lv}" aria-pressed="${String(lv) === cur}"><span class="le">${e}</span><b>${lv === 'normal' ? 'Normal' : `${lv} · ${name}`}</b><small>${desc}</small><i class="lm">${lv === 'normal' ? 'Standard odds' : `Win chance ×${(0.5 + lv * 0.1).toFixed(1)}`}</i></button>`).join('')}</div>
+    <div class="panel luckinfo"><b>Luck really changes your odds</b> in 5 arcade games: 🪙 Heads or Tails, ✊ Hallway RPS, 🚌 Seahawk Crossing, 🎲 Scoreboard Roll and 🏈 Hail Mary.
+      <br><br><b>Levels 1–10:</b> higher luck = you <b>win more often</b>, but each win pays less. Lower luck = fewer wins, bigger payouts. The <b>average payback stays the same</b> at every level. Level 1 ×0.6 … level 5 ×1.0 … level 10 ×1.5 win chance. Example: Heads or Tails is 50/50 on Normal, 75% at level 10 (pays 1.32x a call), 30% at level 1 (pays 3.30x).
+      <br><br>Your luck is locked in when a round starts. It doesn't touch Hawk Drop, Locker Hunt, Slots, Roulette, Hawk 21, Seahawk Launch, skill games or sports picks. It also changes your confetti and win sounds. Hawk Bucks are pretend: no real money, ever.</div>
+    <div class="luckgrid">${reg.map(card).join('')}</div>
+    <div class="superhead"><h2>🔥 Super Luck</h2><p>Your chance to <b>lose</b> is divided by 2, 5 or 10 and payouts stay at <b>normal</b> prices, so you win a lot more money. Heads or Tails at <b>×2</b> wins 75% of calls, <b>×5</b> wins 90%, <b>×10</b> wins 95% (Hail Mary gives you the best of 2, 5 or 10 throws).</p>
+      <p class="supnote">⚠️ Because this is so strong, <b>anything you win or lose while Super Luck is on does not count toward your Leaderboard net winnings.</b> You can still use the Hawk Bucks. Switch back to Normal or a level to climb the ranks.</p></div>
+    <div class="luckgrid supergrid">${sup.map(card).join('')}</div>
     <div class="panel lucktest"><button class="btn" id="preview">✨ Preview a win</button><div class="note">Saved to your account, so it follows you to any device.</div></div>`;
   document.querySelectorAll('[data-luck]').forEach(b => b.onclick = act(async () => {
-    const v = b.dataset.luck === 'normal' ? 'normal' : +b.dataset.luck, r = await api('POST', '/luck', { luck: v });
-    U.luck = r.luck; CFG = null; renderLuck(); fx.burst(110); sfx.play('big'); toast(`Luck set to ${luckEntry()[2]}`);
+    const raw = b.dataset.luck, v = raw === 'normal' || raw[0] === 'x' ? raw : +raw, r = await api('POST', '/luck', { luck: v });
+    U.luck = r.luck; CFG = null; renderLuck(); fx.burst(String(raw)[0] === 'x' ? 220 : 110); sfx.play('big'); toast(`${luckEntry()[2]} is on`);
   }));
   $('#preview').onclick = () => { fx.burst(160); sfx.play('big'); };
 }

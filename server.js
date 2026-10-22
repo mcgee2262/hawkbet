@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS txns(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL
 CREATE INDEX IF NOT EXISTS idx_slips_user ON slips(user_id); CREATE INDEX IF NOT EXISTS idx_rounds_user ON rounds(user_id, game, status);
 `);
 if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='added'").get()) db.exec('ALTER TABLE users ADD COLUMN added INTEGER NOT NULL DEFAULT 0'); // free top-ups so far
+if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='super_net'").get()) db.exec('ALTER TABLE users ADD COLUMN super_net INTEGER NOT NULL DEFAULT 0'); // net result of Super Luck play, excluded from the leaderboard
 if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='luck'").get()) db.exec("ALTER TABLE users ADD COLUMN luck TEXT NOT NULL DEFAULT 'normal'"); // Luck Lab (cosmetic)
 db.exec(`CREATE TABLE IF NOT EXISTS scores(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), game TEXT NOT NULL, score INTEGER NOT NULL, detail TEXT, created INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_scores_game ON scores(game, score DESC); CREATE INDEX IF NOT EXISTS idx_scores_user ON scores(user_id, game);`);
@@ -190,25 +191,33 @@ function setProp(ctx, kind) {
 }
 
 /* ---------- arcade ---------- */
-const PLINKO_RISK = { low: [1.2, 1.3], med: [0.55, 2.4], high: [0.12, 4.2] }; // [floor, curve]
+const PLINKO_RISK = { low: [3.698, 1.0], med: [6.182, 1.0], high: [9.588, 1.2] }; // [steepness a, curve q]: slot payout is proportional to e^(a·d^q), d = distance from centre (0..1)
 const plinkoCache = {};
 function plinkoMults(n, risk) {
   const key = n + risk; if (plinkoCache[key]) return plinkoCache[key];
   const [fl, pw] = PLINKO_RISK[risk], probs = [], raw = []; let c = 1;
   for (let k = 0; k <= n; k++) { probs.push(c / 2 ** n); c = c * (n - k) / (k + 1); }
-  for (let k = 0; k <= n; k++) raw.push(fl + Math.pow(Math.abs(k - n / 2) / (n / 2), pw) * 12);
+  for (let k = 0; k <= n; k++) raw.push(Math.exp(fl * Math.pow(Math.abs(k - n / 2) / (n / 2), pw)));
   const rtp = raw.reduce((a, r, k) => a + r * probs[k], 0);
   return (plinkoCache[key] = raw.map(r => r * 0.99 / rtp));
 }
 const MINES_N = 25, minesMult = (k, m) => { let r = 0.99; for (let i = 0; i < k; i++) r *= (MINES_N - i) / (MINES_N - m - i); return r; };
 /* Luck: k = 0.6 (level 1) … 1.0 (level 5 / Normal) … 1.5 (level 10). In the five luck games it multiplies your chance to win,
    and payouts shrink to match, so the average payback (RTP) is identical at every level. Locked in when a round starts. */
-const luckK = u => !u || u.luck == null || u.luck === 'normal' ? 1 : 0.5 + 0.1 * Number(u.luck);
+const luckInfo = u => { // k = how strongly odds move; pk = how strongly payouts move
+  const l = u && u.luck; if (l == null || l === 'normal') return { k: 1, pk: 1, sup: 0 };
+  if (l[0] === 'x') return { k: Number(l.slice(1)), pk: 1, sup: 1 }; // Super Luck: odds improve, payouts do NOT shrink
+  const k = 0.5 + 0.1 * Number(l); return { k, pk: k, sup: 0 };
+};
+const luckK = u => luckInfo(u).k;
+// Chance of winning when the normal chance is p0. Regular luck multiplies it; Super Luck divides your chance to LOSE by k.
+const winP = (p0, L) => L.sup ? Math.min(0.97, 1 - (1 - p0) / L.k) : clampP(p0 * L.k);
+const payP = (p0, L) => clampP(p0 * L.pk); // the chance the payout table is priced at
 const clampP = (p, lo = 0.05, hi = 0.9) => Math.min(hi, Math.max(lo, p));
 const LANES = 10, CROSS_P = { easy: 0.92, med: 0.82, hard: 0.68, extreme: 0.5 };
-const crossP = (d, k) => clampP(1 - (1 - CROSS_P[d]) / k, 0.05, 0.98); // luck shrinks the chance of getting hit
+const crossP = (d, k) => clampP(1 - (1 - CROSS_P[d]) / k, 0.05, 0.98); // luck divides the chance of getting hit
 const crossMult = (n, p) => 0.99 / Math.pow(p, n);
-const stCrossP = st => st.p ?? CROSS_P[st.diff]; // rounds started before luck existed
+const stCrossP = st => st.pp ?? st.p ?? CROSS_P[st.diff]; // payout pricing (st.p is the chance used to roll the lanes)
 
 function activeRound(uid, game) { return db.prepare("SELECT * FROM rounds WHERE user_id=? AND game=? AND status='active'").get(uid, game); }
 function startRound(ctx, game, state) {
@@ -217,8 +226,10 @@ function startRound(ctx, game, state) {
   const id = Number(db.prepare('INSERT INTO rounds(user_id,game,bet,state,created) VALUES(?,?,?,?,?)').run(ctx.user.id, game, bet, JSON.stringify(state), now()).lastInsertRowid);
   return { id, bet, balance: adjust(ctx.user.id, -bet, game + '_bet', id) };
 }
+function superNet(uid, delta) { db.prepare('UPDATE users SET super_net=super_net+? WHERE id=?').run(delta, uid); }
 function finishRound(r, status, mult) {
   const payout = status === 'cashed' ? Math.round(r.bet * mult) : 0;
+  try { if (JSON.parse(r.state).sup) superNet(r.user_id, payout - r.bet); } catch (e) {}
   db.prepare('UPDATE rounds SET status=?, mult=?, payout=? WHERE id=?').run(status, mult, payout, r.id);
   return { payout, balance: payout ? adjust(r.user_id, payout, r.game + '_win', r.id) : balanceOf(r.user_id) };
 }
@@ -226,7 +237,7 @@ const live = (ctx, game) => { const r = activeRound(ctx.user.id, game); if (!r) 
 const save = (r, st) => db.prepare('UPDATE rounds SET state=? WHERE id=?').run(JSON.stringify(st), r.id);
 
 const arcade = {
-  config: ctx => ({ maxBet: null, cross: Object.fromEntries(Object.keys(CROSS_P).map(d => [d, Array.from({ length: LANES }, (_, i) => crossMult(i + 1, crossP(d, luckK(ctx.user))))])) }),
+  config: ctx => ({ maxBet: null, cross: Object.fromEntries(Object.keys(CROSS_P).map(d => [d, Array.from({ length: LANES }, (_, i) => crossMult(i + 1, crossP(d, luckInfo(ctx.user).pk)))])) }),
   plinkoTable: ctx => { const rows = int(+ctx.url.searchParams.get('rows'), 8, 16, 'rows'), risk = ctx.url.searchParams.get('risk'); if (!PLINKO_RISK[risk]) bad('Bad risk'); return { mults: plinkoMults(rows, risk) }; },
   plinko: ctx => tx(() => {
     const rows = int(ctx.body.rows, 8, 16, 'Rows'), risk = ctx.body.risk; if (!PLINKO_RISK[risk]) bad('Bad risk');
@@ -259,8 +270,8 @@ const arcade = {
   }),
   crossStart: ctx => tx(() => {
     const diff = ctx.body.diff; if (!CROSS_P[diff]) bad('Bad difficulty');
-    const p = crossP(diff, luckK(ctx.user)); let crash = LANES + 1; for (let n = 1; n <= LANES; n++) if (rnd() > p) { crash = n; break; }
-    return { ...startRound(ctx, 'cross', { diff, p, crash, at: 0 }), diff };
+    const L = luckInfo(ctx.user), p = crossP(diff, L.k); let crash = LANES + 1; for (let n = 1; n <= LANES; n++) if (rnd() > p) { crash = n; break; }
+    return { ...startRound(ctx, 'cross', { diff, p, pp: crossP(diff, L.pk), crash, at: 0, sup: L.sup }), diff };
   }),
   crossStep: ctx => tx(() => {
     const { r, st } = live(ctx, 'cross'), n = st.at + 1;
@@ -279,12 +290,13 @@ const arcade = {
 function oneShot(ctx, game, state, mult, bet = stake(ctx.body.bet)) { // bet, decide and pay in one transaction
   adjust(ctx.user.id, -bet, game + '_bet');
   const payout = Math.round(bet * mult);
+  if (state && state.sup) superNet(ctx.user.id, payout - bet);
   const id = Number(db.prepare("INSERT INTO rounds(user_id,game,bet,state,status,mult,payout,created) VALUES(?,?,?,?,'done',?,?,?)").run(ctx.user.id, game, bet, JSON.stringify(state), mult, payout, now()).lastInsertRowid);
   return { bet, mult, payout, balance: payout ? adjust(ctx.user.id, payout, game + '_win', id) : balanceOf(ctx.user.id) };
 }
 const FLIP_MAX = 10, flipMult = (n, p = 0.5) => 0.99 / p ** n; // at Normal p = 0.5, so each right call doubles (one 1% edge on the streak)
 const RPS_MAX = 10, rpsMult = (n, p = 0.5) => 0.98 / p ** n;    // ties replay; p is the chance of winning a decisive throw
-const streakP = ctx => clampP(0.5 * luckK(ctx.user)); // 30% at luck 1 … 50% Normal … 75% at luck 10
+const streakP = ctx => winP(0.5, luckInfo(ctx.user)), streakPay = ctx => payP(0.5, luckInfo(ctx.user)); // win chance: 30% at luck 1 … 50% Normal … 75% at luck 10 … 75/90/95% at Super x2/x5/x10
 const RIVALS = ['Westfield', 'Chantilly', 'Oakton', 'Centreville', 'Madison', 'Herndon'];
 const ROULETTE_A = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]); // the "red" numbers, shown green here
 const rColor = n => n === 0 ? 'gold' : ROULETTE_A.has(n) ? 'green' : 'blue';
@@ -298,14 +310,26 @@ function rouletteMult(b, n) {
   return 0;
 }
 const ROULETTE_OK = { num: v => Number.isInteger(v) && v >= 0 && v <= 36, color: v => v === 'green' || v === 'blue', parity: v => v === 'odd' || v === 'even', half: v => v === 'low' || v === 'high', dozen: v => [1, 2, 3].includes(v) };
-const SLOT = { trophy: [1, 250], hawk: [2, 80], football: [3, 30], volley: [4, 20], bball: [4, 20], bus: [5, 14], pass: [6, 5] }; // [stops per reel, 3-of-a-kind pay]
-const SLOT_STRIP = Object.entries(SLOT).flatMap(([k, [w]]) => Array(w).fill(k)), BALLS = new Set(['football', 'volley', 'bball']);
-function slotPay(a, b, c) {
-  if (a === b && b === c) return SLOT[a][1];
-  const h = [a, b, c].filter(x => x === 'hawk').length;
-  if (h === 2) return 5; if ([a, b, c].every(x => BALLS.has(x))) return 3; if (h === 1) return 1; return 0;
+/* Seahawk Slots: 3 reels x 3 rows, 5 paylines, your bet is split across the lines.
+   The hawk is WILD for everything except the trophy; three real trophies on a line is the 250x jackpot.
+   Each reel is a fixed 25-stop strip and shows the stop plus the symbols above and below it. */
+const SLOT_STRIP = ['hawk', 'pass', 'bus', 'pass', 'volley', 'bball', 'football', 'volley', 'football', 'bus', 'trophy', 'bus', 'hawk', 'pass', 'bball', 'pass', 'bball', 'bus', 'volley', 'pass', 'bus', 'football', 'pass', 'volley', 'bball'];
+const SLOT_PAYS = { trophy: 1250, hawk: 120, football: 20, volley: 11, bball: 11, bus: 9, pass: 6 }; // multiples of the LINE bet (bet / 5)
+const SLOT_LINES = [[0, 0, 0], [1, 1, 1], [2, 2, 2], [0, 1, 2], [2, 1, 0]]; // row index used on each of the 3 reels
+function slotLine(a, b, c) { // the symbol that pays on this line, or null
+  if (a === b && b === c) return a;
+  if (a === 'trophy' || b === 'trophy' || c === 'trophy') return null;
+  const non = [a, b, c].filter(x => x !== 'hawk');
+  return non.length && non.every(x => x === non[0]) ? non[0] : null;
 }
-const SLOT_RTP = (() => { let r = 0; for (const a of SLOT_STRIP) for (const b of SLOT_STRIP) for (const c of SLOT_STRIP) r += slotPay(a, b, c); return r / SLOT_STRIP.length ** 3; })();
+function slotGrid(stops) { return [0, 1, 2].map(r => stops.map(p => SLOT_STRIP[(p + r - 1 + SLOT_STRIP.length) % SLOT_STRIP.length])); } // grid[row][reel]
+function slotWins(grid) {
+  const wins = [];
+  SLOT_LINES.forEach((L, line) => { const sym = slotLine(grid[L[0]][0], grid[L[1]][1], grid[L[2]][2]); if (sym) wins.push({ line, sym, pay: SLOT_PAYS[sym], cells: L.map((r, c) => [r, c]) }); });
+  return wins;
+}
+const slotMult = wins => wins.reduce((a, w) => a + w.pay, 0) / SLOT_LINES.length; // payout as a multiple of the whole bet
+const SLOT_RTP = (() => { const n = SLOT_STRIP.length; let r = 0; for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) for (let c = 0; c < n; c++) r += slotMult(slotWins(slotGrid([a, b, c]))); return r / n ** 3; })();
 
 /* blackjack: infinite deck, dealer stands on all 17s, blackjack pays 3:2, double on first two cards */
 const card = () => ({ r: crypto.randomInt(13) + 1, s: crypto.randomInt(4) });
@@ -325,9 +349,9 @@ function bjSettle(r, st) {
   return { ...bjView(r, st, true), result: res, ...finishRound(r, mult > 0 ? 'cashed' : 'lost', mult) };
 }
 const streakGame = (game, max, multFn) => ({
-  start: ctx => tx(() => ({ ...startRound(ctx, game, { streak: 0, p: streakP(ctx) }), p: streakP(ctx) })),
-  cash: ctx => tx(() => { const { r, st } = live(ctx, game); if (st.streak < 1) bad('Win one first'); return { streak: st.streak, mult: multFn(st.streak, st.p), ...finishRound(r, 'cashed', multFn(st.streak, st.p)) }; }),
-  win: (ctx, r, st, extra) => { st.streak++; const mult = multFn(st.streak, st.p); if (st.streak >= max) return { ...extra, streak: st.streak, mult, cashed: true, ...finishRound(r, 'cashed', mult) }; save(r, st); return { ...extra, streak: st.streak, mult, balance: balanceOf(ctx.user.id) }; },
+  start: ctx => tx(() => ({ ...startRound(ctx, game, { streak: 0, p: streakP(ctx), pp: streakPay(ctx), sup: luckInfo(ctx.user).sup }), p: streakP(ctx), pp: streakPay(ctx) })),
+  cash: ctx => tx(() => { const { r, st } = live(ctx, game); if (st.streak < 1) bad('Win one first'); return { streak: st.streak, mult: multFn(st.streak, st.pp ?? st.p), ...finishRound(r, 'cashed', multFn(st.streak, st.pp ?? st.p)) }; }),
+  win: (ctx, r, st, extra) => { st.streak++; const mult = multFn(st.streak, st.pp ?? st.p); if (st.streak >= max) return { ...extra, streak: st.streak, mult, cashed: true, ...finishRound(r, 'cashed', mult) }; save(r, st); return { ...extra, streak: st.streak, mult, balance: balanceOf(ctx.user.id) }; },
 });
 const flipG = streakGame('flip', FLIP_MAX, flipMult), rpsG = streakGame('rps', RPS_MAX, rpsMult);
 const BEATS = { rock: 'scissors', paper: 'rock', scissors: 'paper' };
@@ -336,21 +360,24 @@ Object.assign(arcade, {
   dice: ctx => tx(() => {
     const t = Math.round(Number(ctx.body.target) * 100) / 100, over = ctx.body.over === true;
     if (!Number.isFinite(t) || t < 2 || t > 98) bad('Target must be between 2 and 98');
-    const zone = Math.round(Math.min(98, Math.max(2, (over ? 100 - t : t) * luckK(ctx.user))) * 100) / 100, edge = over ? 100 - zone : zone; // luck resizes the win zone
-    const roll = crypto.randomInt(10000) / 100, win = over ? roll > edge : roll < edge, pays = 0.99 / (zone / 100);
-    return { roll, target: t, edge, zone, over, pays, win, ...oneShot(ctx, 'dice', { roll, t, edge, over }, win ? pays : 0) };
+    const L = luckInfo(ctx.user), z0 = over ? 100 - t : t, c2 = x => Math.round(Math.min(98, Math.max(2, x)) * 100) / 100;
+    const zone = c2(L.sup ? 100 - (100 - z0) / L.k : z0 * L.k), edge = over ? 100 - zone : zone, zonePay = c2(z0 * L.pk); // luck resizes the win zone
+    const roll = crypto.randomInt(10000) / 100, win = over ? roll > edge : roll < edge, pays = 0.99 / (zonePay / 100);
+    return { roll, target: t, edge, zone, over, pays, win, ...oneShot(ctx, 'dice', { roll, t, edge, over, sup: L.sup }, win ? pays : 0) };
   }),
   limbo: ctx => tx(() => {
     const target = Math.round(Number(ctx.body.target) * 100) / 100;
-    const k = luckK(ctx.user), min = Math.ceil(1.01 * k * 100) / 100;
+    const L = luckInfo(ctx.user), min = Math.ceil(1.01 * L.pk * 100) / 100;
     if (!Number.isFinite(target) || target < min || target > 1000) bad(`Target must be ${min}x to 1000x`);
-    // P(crash >= x) = 0.99k / x and a win pays target / k, so RTP stays 0.99 at any luck
-    const crash = Math.min(1e6, Math.max(1, Math.floor(0.99 * k / (1 - rnd()) * 100) / 100)), win = crash >= target, pays = target / k;
-    return { crash, target, pays, win, ...oneShot(ctx, 'limbo', { crash, target, k }, win ? pays : 0) };
+    // Regular luck: P(crash >= x) = 0.99k / x and a win pays target / k (RTP stays 99%). Super Luck: you get the best of k throws at normal payouts.
+    const one = () => Math.min(1e6, Math.max(1, Math.floor(0.99 * (L.sup ? 1 : L.k) / (1 - rnd()) * 100) / 100));
+    let crash = one(); if (L.sup) for (let i = 1; i < L.k; i++) crash = Math.max(crash, one());
+    const win = crash >= target, pays = target / L.pk;
+    return { crash, target, pays, win, ...oneShot(ctx, 'limbo', { crash, target, k: L.k, sup: L.sup }, win ? pays : 0) };
   }),
   slots: ctx => tx(() => {
-    const reels = [0, 1, 2].map(() => SLOT_STRIP[crypto.randomInt(SLOT_STRIP.length)]);
-    return { reels, ...oneShot(ctx, 'slots', { reels }, slotPay(...reels)) };
+    const stops = [0, 1, 2].map(() => crypto.randomInt(SLOT_STRIP.length)), grid = slotGrid(stops), wins = slotWins(grid), mult = slotMult(wins);
+    return { grid, wins, stops, ...oneShot(ctx, 'slots', { stops }, mult) };
   }),
   roulette: ctx => tx(() => {
     const bets = ctx.body.bets; if (!Array.isArray(bets) || !bets.length || bets.length > 40) bad('Place 1 to 40 bets');
@@ -361,8 +388,8 @@ Object.assign(arcade, {
   }),
   flipStart: flipG.start, flipCash: flipG.cash,
   flip: ctx => tx(() => {
-    const { r, st } = live(ctx, 'flip'), call = ctx.body.call; if (call !== 'hawk' && call !== 'sl') bad('Call Seymour or SL');
-    const won = rnd() < (st.p ?? 0.5), side = won ? call : call === 'hawk' ? 'sl' : 'hawk';
+    const { r, st } = live(ctx, 'flip'), call = ctx.body.call; if (call !== 'heads' && call !== 'tails') bad('Call heads or tails');
+    const won = rnd() < (st.p ?? 0.5), side = won ? call : call === 'heads' ? 'tails' : 'heads';
     if (side !== call) return { side, lost: true, streak: st.streak, ...finishRound(r, 'lost', 0) };
     return flipG.win(ctx, r, st, { side });
   }),
@@ -371,7 +398,7 @@ Object.assign(arcade, {
     const { r, st } = live(ctx, 'rps'), me = ctx.body.throw; if (!BEATS[me]) bad('Pick rock, paper or scissors');
     const rival = RIVALS[crypto.randomInt(RIVALS.length)], tie = crypto.randomInt(3) === 0; // ties stay 1 in 3; luck only changes who wins the rest
     const them = tie ? me : rnd() < (st.p ?? 0.5) ? BEATS[me] : Object.keys(BEATS).find(t => BEATS[t] === me);
-    if (me === them) { save(r, st); return { me, them, rival, tie: true, streak: st.streak, mult: st.streak ? rpsMult(st.streak, st.p) : 0, balance: balanceOf(ctx.user.id) }; }
+    if (me === them) { save(r, st); return { me, them, rival, tie: true, streak: st.streak, mult: st.streak ? rpsMult(st.streak, st.pp ?? st.p) : 0, balance: balanceOf(ctx.user.id) }; }
     if (BEATS[me] !== them) return { me, them, rival, lost: true, streak: st.streak, ...finishRound(r, 'lost', 0) };
     return rpsG.win(ctx, r, st, { me, them, rival });
   }),
@@ -396,8 +423,8 @@ const VIEWS = {
   rocket: (r, st) => ({ id: r.id, bet: r.bet, auto: st.auto, flying: now() - st.t0, rate: ROCKET_RATE }),
   mines: (r, st) => ({ id: r.id, bet: r.bet, m: st.m, opened: st.opened, mult: minesMult(st.opened.length, st.m) }),
   cross: (r, st) => ({ id: r.id, bet: r.bet, diff: st.diff, at: st.at, mult: crossMult(st.at, stCrossP(st)) }),
-  flip: (r, st) => ({ id: r.id, bet: r.bet, streak: st.streak, mult: st.streak ? flipMult(st.streak, st.p) : 0 }),
-  rps: (r, st) => ({ id: r.id, bet: r.bet, streak: st.streak, mult: st.streak ? rpsMult(st.streak, st.p) : 0 }),
+  flip: (r, st) => ({ id: r.id, bet: r.bet, streak: st.streak, mult: st.streak ? flipMult(st.streak, st.pp ?? st.p) : 0 }),
+  rps: (r, st) => ({ id: r.id, bet: r.bet, streak: st.streak, mult: st.streak ? rpsMult(st.streak, st.pp ?? st.p) : 0 }),
   bj: (r, st) => bjView(r, st, false),
   memory: (r, st) => ({ id: r.id, bet: r.bet, moves: st.moves, matched: st.matched.map(i => ({ i, sym: st.deck[i] })), cards: st.deck.length }),
 };
@@ -406,7 +433,7 @@ arcade.active = ctx => {
   return { round: r ? VIEWS[game](r, JSON.parse(r.state)) : null };
 };
 const baseConfig = arcade.config;
-arcade.config = ctx => ({ ...baseConfig(ctx), luck: { k: luckK(ctx.user), flipP: streakP(ctx), rpsP: streakP(ctx) }, skillTiers: SKILL_TIERS, slots: { pays: Object.fromEntries(Object.entries(SLOT).map(([k, [, p]]) => [k, p])), rtp: SLOT_RTP }, flipMax: FLIP_MAX, rpsMax: RPS_MAX });
+arcade.config = ctx => ({ ...baseConfig(ctx), luck: { ...luckInfo(ctx.user), flipP: streakP(ctx), flipPay: streakPay(ctx), rpsP: streakP(ctx), rpsPay: streakPay(ctx) }, skillTiers: SKILL_TIERS, slots: { pays: SLOT_PAYS, lines: SLOT_LINES, rtp: SLOT_RTP }, flipMax: FLIP_MAX, rpsMax: RPS_MAX });
 
 /* ---------- Seahawk Launch (crash): cash out before the rocket blows ----------
    The server picks the crash point and keeps the clock. The browser never learns the crash point early:
@@ -565,10 +592,10 @@ Object.assign(arcade, {
 });
 
 /* ---------- Luck Lab setting (see luckK): changes odds in five arcade games with RTP held constant; never touches picks or skill scores ---------- */
-const parseLuck = v => v === 'normal' ? 'normal' : Number.isInteger(v) && v >= 1 && v <= 10 ? String(v) : null;
-const luckOut = s => s === 'normal' || s == null ? 'normal' : Number(s);
+const parseLuck = v => v === 'normal' || v === 'x2' || v === 'x5' || v === 'x10' ? v : Number.isInteger(v) && v >= 1 && v <= 10 ? String(v) : null;
+const luckOut = s => s === 'normal' || s == null ? 'normal' : s[0] === 'x' ? s : Number(s);
 function setLuck(ctx) {
-  const v = parseLuck(ctx.body.luck); if (v === null) bad('Luck must be "normal" or a whole number from 1 to 10');
+  const v = parseLuck(ctx.body.luck); if (v === null) bad('Luck must be "normal", a whole number from 1 to 10, or x2 / x5 / x10');
   db.prepare('UPDATE users SET luck=? WHERE id=?').run(v, ctx.user.id); return { luck: luckOut(v) };
 }
 
@@ -602,9 +629,9 @@ const routes = {
   'GET /api/slips': need(mySlips),
   'GET /api/leaderboard': need(ctx => {
     // ranked by net winnings (balance minus the starting 1,000 and any free top-ups), so adding Hawk Bucks can't buy a top spot
-    const top = db.prepare(`SELECT username, balance, balance-${START_BAL}-added AS net FROM users ORDER BY net DESC, id LIMIT 20`).all();
-    const me = db.prepare(`SELECT username, balance, balance-${START_BAL}-added AS net FROM users WHERE id=?`).get(ctx.user.id);
-    me.rank = db.prepare(`SELECT COUNT(*)+1 AS r FROM users WHERE balance-${START_BAL}-added>?`).get(me.net).r;
+    const top = db.prepare(`SELECT username, balance, balance-${START_BAL}-added-super_net AS net FROM users ORDER BY net DESC, id LIMIT 20`).all();
+    const me = db.prepare(`SELECT username, balance, balance-${START_BAL}-added-super_net AS net FROM users WHERE id=?`).get(ctx.user.id);
+    me.rank = db.prepare(`SELECT COUNT(*)+1 AS r FROM users WHERE balance-${START_BAL}-added-super_net>?`).get(me.net).r;
     return { top, me };
   }),
   'POST /api/admin/props': need(admin(addProp)),
@@ -637,6 +664,11 @@ const routes = {
   'POST /api/arcade/bj/double': need(arcade.bjDouble),
   'POST /api/bank': need(bank),
   'POST /api/luck': need(setLuck),
+  'GET /api/feed': need(() => ({
+    bets: db.prepare("SELECT u.username, r.game, r.bet, r.mult, r.payout, r.created FROM rounds r JOIN users u ON u.id=r.user_id WHERE r.status IN ('done','cashed','lost') AND r.bet>0 ORDER BY r.id DESC LIMIT 14").all(),
+    big: db.prepare("SELECT u.username, r.game, r.bet, r.mult, r.payout FROM rounds r JOIN users u ON u.id=r.user_id WHERE r.payout>r.bet AND r.mult>=5 AND r.created>? ORDER BY r.payout-r.bet DESC LIMIT 6").all(now() - 7 * 864e5),
+    stats: { players: db.prepare('SELECT COUNT(*) AS n FROM users').get().n, rounds: db.prepare("SELECT COUNT(*) AS n FROM rounds WHERE status!='active'").get().n, biggest: db.prepare('SELECT COALESCE(MAX(mult),0) AS m FROM rounds WHERE payout>bet').get().m },
+  })),
   'GET /api/arcade/stats': need(arcade.stats),
   'GET /api/arcade/highscores': need(arcade.highscores),
   'POST /api/arcade/bell/start': need(arcade.bellStart),
@@ -652,7 +684,7 @@ const routes = {
   'GET /api/arcade/rocket/history': need(arcade.rocketHistory),
 };
 
-const FILES = { '/': 'index.html', '/index.html': 'index.html', '/style.css': 'style.css', '/app.js': 'app.js', '/logo.svg': 'logo.svg' };
+const FILES = { '/': 'index.html', '/index.html': 'index.html', '/style.css': 'style.css', '/app.js': 'app.js', '/logo.svg': 'logo.svg', '/hawk.svg': 'hawk.svg', '/rocket.svg': 'rocket.svg' };
 const TYPES = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', svg: 'image/svg+xml' };
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 const send = (res, status, body, type = 'application/json') => {

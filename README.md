@@ -24,7 +24,10 @@ Zero-dependency Node server (needs Node 22.5+ for built-in SQLite). No `npm inst
 - Hawk Bucks have no cash value: no buying, no cash-out, no prizes for credits.
 
 ## Arcade
+- 🎰 Seahawk Slots is a 3×3 machine with 5 paylines, a wild hawk (not for trophies) and a 250x jackpot (97.06% payback). Pull the lever with the mouse, tap it, or press Space.
 - 14 games: 11 classic Hawk Bucks games (including 🚀 Seahawk Launch, a crash game) plus 3 score-only skill games (Bell Rush, Classroom Memory, Seahawk Trivia) with personal bests and top-10 lists.
+- 🔥 Super Luck (×2 / ×5 / ×10) divides your chance to lose and keeps normal payouts. Anything won or lost under Super Luck is excluded from leaderboard net winnings.
+- 🏠 Home is a casino lobby: game carousel, Originals grid, live bets and big wins from real rounds.
 - 🍀 Luck Lab (Normal or 1–10) changes win chances in Seymour Flip, Hallway RPS, Seahawk Crossing, Scoreboard Roll and Hail Mary (×0.6 at 1 up to ×1.5 at 10). Payouts shrink to match, so average payback is the same at every level. Skill games can be played free or for Hawk Bucks, paid by score tier.
 - Sound effects are generated with the Web Audio API (no files). Toggle with the 🔊 button; the choice is saved in the browser.
 
