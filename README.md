@@ -23,6 +23,11 @@ Zero-dependency Node server (needs Node 22.5+ for built-in SQLite). No `npm inst
 - The server decides all outcomes (Plinko drops, Mines positions, Crossing hits, slip grading) and is the only thing that changes balances. Mines/Crossing rounds survive a page refresh.
 - Hawk Bucks have no cash value: no buying, no cash-out, no prizes for credits.
 
+## Look and navigation
+- Desktop has a collapsible left sidebar (Casino, HawkBet Originals, Rewards, Sports); phones get a bottom tab bar and a slide-in menu.
+- 🃏 Hawk 21 has a cartoon dealer, Coach, who reacts to every hand.
+- 🎁 Rewards: levels and XP (Freshman → Hall of Fame), a daily wheel, 3 daily challenges and 18 achievements. All progress is computed on the server from the rounds table, and free rewards never count toward leaderboard net winnings.
+
 ## Arcade
 - 🎰 Seahawk Slots is a 3×3 machine with 5 paylines, a wild hawk (not for trophies) and a 250x jackpot (97.06% payback). Pull the lever with the mouse, tap it, or press Space.
 - 14 games: 11 classic Hawk Bucks games (including 🚀 Seahawk Launch, a crash game) plus 3 score-only skill games (Bell Rush, Classroom Memory, Seahawk Trivia) with personal bests and top-10 lists.

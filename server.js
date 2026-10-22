@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS txns(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL
 CREATE INDEX IF NOT EXISTS idx_slips_user ON slips(user_id); CREATE INDEX IF NOT EXISTS idx_rounds_user ON rounds(user_id, game, status);
 `);
 if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='added'").get()) db.exec('ALTER TABLE users ADD COLUMN added INTEGER NOT NULL DEFAULT 0'); // free top-ups so far
+for (const [col, def] of [['xp', 'INTEGER NOT NULL DEFAULT 0'], ['level', 'INTEGER NOT NULL DEFAULT 1'], ['last_wheel', "TEXT NOT NULL DEFAULT ''"]]) if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name=?").get(col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} ${def}`); // rewards
+db.exec(`CREATE TABLE IF NOT EXISTS challenge_claims(user_id INTEGER NOT NULL, day TEXT NOT NULL, cid TEXT NOT NULL, PRIMARY KEY(user_id, day, cid));
+CREATE TABLE IF NOT EXISTS achievements(user_id INTEGER NOT NULL, key TEXT NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY(user_id, key));`);
 if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='super_net'").get()) db.exec('ALTER TABLE users ADD COLUMN super_net INTEGER NOT NULL DEFAULT 0'); // net result of Super Luck play, excluded from the leaderboard
 if (!db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name='luck'").get()) db.exec("ALTER TABLE users ADD COLUMN luck TEXT NOT NULL DEFAULT 'normal'"); // Luck Lab (cosmetic)
 db.exec(`CREATE TABLE IF NOT EXISTS scores(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), game TEXT NOT NULL, score INTEGER NOT NULL, detail TEXT, created INTEGER NOT NULL);
@@ -88,7 +91,7 @@ function userFrom(req) {
   const row = db.prepare('SELECT u.*, s.expires FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?').get(sha(m[1]));
   if (!row || row.expires < now()) return null; return row;
 }
-const publicUser = u => ({ username: u.username, balance: u.balance, added: u.added || 0, luck: luckOut(u.luck), isAdmin: !!u.is_admin, canClaim: u.balance < CLAIM_BELOW && now() - u.last_claim >= CLAIM_EVERY_MS });
+const publicUser = u => ({ username: u.username, balance: u.balance, added: u.added || 0, lvl: levelInfo(u.xp), luck: luckOut(u.luck), isAdmin: !!u.is_admin, canClaim: u.balance < CLAIM_BELOW && now() - u.last_claim >= CLAIM_EVERY_MS });
 const hits = new Map(); // crude per-IP limiter for auth routes
 function limit(ip) { const t = now(), a = (hits.get(ip) || []).filter(x => t - x < 600e3); a.push(t); hits.set(ip, a); if (a.length > 30) bad('Too many attempts, try again in a few minutes', 429); }
 
@@ -230,6 +233,7 @@ function superNet(uid, delta) { db.prepare('UPDATE users SET super_net=super_net
 function finishRound(r, status, mult) {
   const payout = status === 'cashed' ? Math.round(r.bet * mult) : 0;
   try { if (JSON.parse(r.state).sup) superNet(r.user_id, payout - r.bet); } catch (e) {}
+  addXp(r.user_id, 10 + (payout > r.bet ? 5 : 0));
   db.prepare('UPDATE rounds SET status=?, mult=?, payout=? WHERE id=?').run(status, mult, payout, r.id);
   return { payout, balance: payout ? adjust(r.user_id, payout, r.game + '_win', r.id) : balanceOf(r.user_id) };
 }
@@ -243,6 +247,7 @@ const arcade = {
     const rows = int(ctx.body.rows, 8, 16, 'Rows'), risk = ctx.body.risk; if (!PLINKO_RISK[risk]) bad('Bad risk');
     const bet = stake(ctx.body.bet); adjust(ctx.user.id, -bet, 'plinko_bet');
     const path = Array.from({ length: rows }, () => crypto.randomInt(2)), k = path.reduce((a, b) => a + b, 0), mult = plinkoMults(rows, risk)[k], payout = Math.round(bet * mult);
+    addXp(ctx.user.id, 10 + (payout > bet ? 5 : 0));
     const id = Number(db.prepare("INSERT INTO rounds(user_id,game,bet,state,status,mult,payout,created) VALUES(?,?,?,?,?,?,?,?)").run(ctx.user.id, 'plinko', bet, JSON.stringify({ rows, risk, path }), 'done', mult, payout, now()).lastInsertRowid);
     const balance = payout ? adjust(ctx.user.id, payout, 'plinko_win', id) : balanceOf(ctx.user.id);
     return { path, k, mult, payout, bet, balance };
@@ -291,6 +296,7 @@ function oneShot(ctx, game, state, mult, bet = stake(ctx.body.bet)) { // bet, de
   adjust(ctx.user.id, -bet, game + '_bet');
   const payout = Math.round(bet * mult);
   if (state && state.sup) superNet(ctx.user.id, payout - bet);
+  addXp(ctx.user.id, 10 + (payout > bet ? 5 : 0));
   const id = Number(db.prepare("INSERT INTO rounds(user_id,game,bet,state,status,mult,payout,created) VALUES(?,?,?,?,'done',?,?,?)").run(ctx.user.id, game, bet, JSON.stringify(state), mult, payout, now()).lastInsertRowid);
   return { bet, mult, payout, balance: payout ? adjust(ctx.user.id, payout, game + '_win', id) : balanceOf(ctx.user.id) };
 }
@@ -493,6 +499,7 @@ function skillFinish(ctx, r, st, score, detail = {}) {
   const mult = r.bet ? skillMult(r.game, score) : 0, payout = Math.round(r.bet * mult);
   save(r, st); db.prepare("UPDATE rounds SET status='done', mult=?, payout=? WHERE id=?").run(mult, payout, r.id);
   db.prepare('INSERT INTO scores(user_id,game,score,detail,created) VALUES(?,?,?,?,?)').run(ctx.user.id, r.game, score, JSON.stringify(detail), now());
+  addXp(ctx.user.id, 25 + Math.min(25, Math.round(score / 200))); // skill games earn the most XP
   const balance = payout ? adjust(ctx.user.id, payout, r.game + '_win', r.id) : balanceOf(ctx.user.id);
   return { done: true, score, best: Math.max(score, prev ?? 0), newBest: prev == null || score > prev, bet: r.bet, mult, payout, balance, ...detail };
 }
@@ -599,6 +606,113 @@ function setLuck(ctx) {
   db.prepare('UPDATE users SET luck=? WHERE id=?').run(v, ctx.user.id); return { luck: luckOut(v) };
 }
 
+/* ---------- rewards: XP and levels, daily challenges, the daily wheel, achievements, weekly tournament ----------
+   All progress is computed on the server from the rounds and scores tables. Free Hawk Bucks from rewards go through grant(),
+   which also counts them as `added`, so they never count toward leaderboard net winnings. */
+const LEVELS = [[1, 'Freshman', 0], [2, 'Sophomore', 500], [3, 'Junior', 1500], [4, 'Senior', 3500], [5, 'Varsity', 7000], [6, 'Captain', 12000], [7, 'Hall of Fame', 20000]]; // [level, name, XP needed]
+function levelInfo(xp = 0) {
+  let i = 0; while (i + 1 < LEVELS.length && xp >= LEVELS[i + 1][2]) i++;
+  const [level, name, floor] = LEVELS[i], nxt = LEVELS[i + 1];
+  return { level, name, xp, floor, next: nxt ? nxt[2] : null, nextName: nxt ? nxt[1] : null, pct: nxt ? Math.round((xp - floor) / (nxt[2] - floor) * 100) : 100 };
+}
+const addXp = (uid, n) => db.prepare('UPDATE users SET xp=xp+? WHERE id=?').run(n, uid);
+function grant(uid, n, kind) { db.prepare('UPDATE users SET added=added+? WHERE id=?').run(n, uid); return adjust(uid, n, kind); }
+const ET = { timeZone: 'America/New_York' };
+const dayKey = (t = now()) => new Intl.DateTimeFormat('en-CA', ET).format(new Date(t)); // YYYY-MM-DD in school time
+function etMidnight(day) { // ms timestamp of 00:00 America/New_York on that day
+  const guess = Date.parse(day + 'T00:00:00Z'), h = Number(new Intl.DateTimeFormat('en-US', { ...ET, hour12: false, hour: 'numeric' }).format(new Date(guess))) % 24;
+  return guess + (24 - h) % 24 * 3600e3;
+}
+function weekStart() { const d = new Date(dayKey() + 'T12:00:00Z'), back = (d.getUTCDay() + 6) % 7; return etMidnight(new Date(d - back * 864e5).toISOString().slice(0, 10)); } // Monday 00:00 ET
+
+const q1 = (sql, ...a) => db.prepare(sql).get(...a);
+const done = "status IN ('done','cashed','lost')";
+const CHALLENGES = [
+  { id: 'play10', title: 'Play 10 rounds', desc: 'Any arcade game counts', goal: 10, reward: 100, icon: '🎮', p: (u, t) => q1(`SELECT COUNT(*) n FROM rounds WHERE user_id=? AND ${done} AND created>=?`, u, t).n },
+  { id: 'games3', title: 'Try 3 different games', desc: 'Variety pack', goal: 3, reward: 100, icon: '🧭', p: (u, t) => q1(`SELECT COUNT(DISTINCT game) n FROM rounds WHERE user_id=? AND ${done} AND created>=?`, u, t).n },
+  { id: 'win5', title: 'Win 5 rounds', desc: 'Come out ahead 5 times', goal: 5, reward: 125, icon: '✅', p: (u, t) => q1(`SELECT COUNT(*) n FROM rounds WHERE user_id=? AND ${done} AND payout>bet AND created>=?`, u, t).n },
+  { id: 'big5x', title: 'Hit a 5x or bigger win', desc: 'Any game, any bet', goal: 1, reward: 150, icon: '💥', p: (u, t) => q1(`SELECT COUNT(*) n FROM rounds WHERE user_id=? AND ${done} AND payout>bet AND mult>=5 AND created>=?`, u, t).n },
+  { id: 'bell3000', title: 'Score 3,000+ in Bell Rush', desc: 'Fast reflexes', goal: 1, reward: 150, icon: '🔔', p: (u, t) => q1("SELECT COUNT(*) n FROM scores WHERE user_id=? AND game='bell' AND score>=3000 AND created>=?", u, t).n },
+  { id: 'memory2000', title: 'Score 2,000+ in Classroom Memory', desc: 'Sharp memory', goal: 1, reward: 150, icon: '🧠', p: (u, t) => q1("SELECT COUNT(*) n FROM scores WHERE user_id=? AND game='memory' AND score>=2000 AND created>=?", u, t).n },
+  { id: 'trivia5', title: 'Get 5+ right in Seahawk Trivia', desc: 'Study up', goal: 1, reward: 150, icon: '❓', p: (u, t) => q1("SELECT COUNT(*) n FROM scores WHERE user_id=? AND game='trivia' AND json_extract(detail,'$.correct')>=5 AND created>=?", u, t).n },
+  { id: 'rocket2', title: 'Cash out Seahawk Launch at 2x+', desc: 'Nerves of steel', goal: 1, reward: 125, icon: '🚀', p: (u, t) => q1("SELECT COUNT(*) n FROM rounds WHERE user_id=? AND game='rocket' AND status='cashed' AND mult>=2 AND created>=?", u, t).n },
+  { id: 'bjwin', title: 'Win a hand of Hawk 21', desc: 'Beat Coach', goal: 1, reward: 100, icon: '🃏', p: (u, t) => q1("SELECT COUNT(*) n FROM rounds WHERE user_id=? AND game='bj' AND payout>bet AND created>=?", u, t).n },
+  { id: 'flip3', title: 'Call 3 heads or tails in a row', desc: 'A streak of 3 in one run', goal: 3, reward: 125, icon: '🪙', p: (u, t) => q1("SELECT COALESCE(MAX(json_extract(state,'$.streak')),0) n FROM rounds WHERE user_id=? AND game='flip' AND created>=?", u, t).n },
+  { id: 'rps3', title: 'Win 3 Hallway RPS throws in a row', desc: 'Beat the rival', goal: 3, reward: 125, icon: '✊', p: (u, t) => q1("SELECT COALESCE(MAX(json_extract(state,'$.streak')),0) n FROM rounds WHERE user_id=? AND game='rps' AND created>=?", u, t).n },
+  { id: 'cross5', title: 'Hop 5 lanes in one crossing', desc: 'Dodge the buses', goal: 5, reward: 125, icon: '🚌', p: (u, t) => q1("SELECT COALESCE(MAX(json_extract(state,'$.at')),0) n FROM rounds WHERE user_id=? AND game='cross' AND created>=?", u, t).n },
+  { id: 'mines5', title: 'Open 5 lockers in one Locker Hunt', desc: 'Avoid the hall monitor', goal: 5, reward: 125, icon: '🔐', p: (u, t) => q1("SELECT COALESCE(MAX(json_array_length(json_extract(state,'$.opened'))),0) n FROM rounds WHERE user_id=? AND game='mines' AND created>=?", u, t).n },
+];
+function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function todaysChallenges(day = dayKey()) { // the same 3 for everyone on a given day
+  if (process.env.NODE_ENV === 'test' && process.env.HB_TEST_CHALLENGES) return process.env.HB_TEST_CHALLENGES.split(',').map(id => CHALLENGES.find(c => c.id === id));
+  const rnd = mulberry([...day].reduce((a, c) => a * 31 + c.charCodeAt(0) | 0, 7)), pool = [...CHALLENGES], out = [];
+  while (out.length < 3) out.push(pool.splice(Math.floor(rnd() * pool.length), 1)[0]);
+  return out;
+}
+const WHEEL = [[25, 30], [50, 25], [75, 18], [100, 12], [150, 8], [250, 4], [500, 2.5], [1000, 0.5]]; // [prize, weight %]: about 85 Hawk Bucks on average
+const ACH = [ // [key, icon, title, description, xp, check(uid)]
+  ['first_win', '🎉', 'First Win', 'Win any round', 50, u => !!q1(`SELECT 1 FROM rounds WHERE user_id=? AND ${done} AND payout>bet LIMIT 1`, u)],
+  ['rounds10', '🎲', 'Warming Up', 'Play 10 rounds', 50, u => q1(`SELECT COUNT(*) n FROM rounds WHERE user_id=? AND ${done}`, u).n >= 10],
+  ['rounds100', '🏟️', 'Regular', 'Play 100 rounds', 150, u => q1(`SELECT COUNT(*) n FROM rounds WHERE user_id=? AND ${done}`, u).n >= 100],
+  ['rounds1000', '🏅', 'Lifer', 'Play 1,000 rounds', 400, u => q1(`SELECT COUNT(*) n FROM rounds WHERE user_id=? AND ${done}`, u).n >= 1000],
+  ['mult5', '💥', 'Big Hit', 'Win at 5x or more', 75, u => !!q1(`SELECT 1 FROM rounds WHERE user_id=? AND payout>bet AND mult>=5 AND game NOT IN ('bell','memory','trivia') LIMIT 1`, u)],
+  ['mult20', '🔥', 'On Fire', 'Win at 20x or more', 150, u => !!q1(`SELECT 1 FROM rounds WHERE user_id=? AND payout>bet AND mult>=20 AND game NOT IN ('bell','memory','trivia') LIMIT 1`, u)],
+  ['mult100', '🌙', 'Moonshot', 'Win at 100x or more', 400, u => !!q1(`SELECT 1 FROM rounds WHERE user_id=? AND payout>bet AND mult>=100 AND game NOT IN ('bell','memory','trivia') LIMIT 1`, u)],
+  ['jackpot', '🏆', 'State Champs', 'Hit the Seahawk Slots jackpot', 500, u => !!q1("SELECT 1 FROM rounds WHERE user_id=? AND game='slots' AND mult>=250 LIMIT 1", u)],
+  ['rocket10', '🚀', 'To the Moon', 'Cash out Seahawk Launch at 10x+', 200, u => !!q1("SELECT 1 FROM rounds WHERE user_id=? AND game='rocket' AND status='cashed' AND mult>=10 LIMIT 1", u)],
+  ['natural', '🃏', 'Natural', 'Get a blackjack in Hawk 21', 100, u => !!q1("SELECT 1 FROM rounds WHERE user_id=? AND game='bj' AND mult=2.5 LIMIT 1", u)],
+  ['streak5', '🧲', 'Hot Streak', 'Win 5 in a row in Heads or Tails or Hallway RPS', 150, u => !!q1("SELECT 1 FROM rounds WHERE user_id=? AND game IN ('flip','rps') AND json_extract(state,'$.streak')>=5 LIMIT 1", u)],
+  ['streak10', '👑', 'Perfect 10', 'Win 10 in a row in Heads or Tails or Hallway RPS', 400, u => !!q1("SELECT 1 FROM rounds WHERE user_id=? AND game IN ('flip','rps') AND status='cashed' AND json_extract(state,'$.streak')>=10 LIMIT 1", u)],
+  ['bell4000', '🔔', 'Lightning', 'Score 4,000+ in Bell Rush', 200, u => !!q1("SELECT 1 FROM scores WHERE user_id=? AND game='bell' AND score>=4000 LIMIT 1", u)],
+  ['memory2800', '🧠', 'Photographic', 'Score 2,800+ in Classroom Memory', 200, u => !!q1("SELECT 1 FROM scores WHERE user_id=? AND game='memory' AND score>=2800 LIMIT 1", u)],
+  ['trivia7', '❓', 'Honor Roll', 'Get all 7 right in Seahawk Trivia', 250, u => !!q1("SELECT 1 FROM scores WHERE user_id=? AND game='trivia' AND json_extract(detail,'$.correct')=7 LIMIT 1", u)],
+  ['wheel', '🎡', 'Spin Doctor', 'Spin the daily wheel', 50, u => !!q1("SELECT 1 FROM users WHERE id=? AND last_wheel!=''", u)],
+  ['claims10', '📋', 'Overachiever', 'Finish 10 daily challenges', 200, u => q1('SELECT COUNT(*) n FROM challenge_claims WHERE user_id=?', u).n >= 10],
+  ['varsity', '🎓', 'Varsity', 'Reach level 5', 300, u => q1('SELECT level FROM users WHERE id=?', u).level >= 5],
+];
+function progress(uid) { // awards any newly earned achievements and level-ups; safe to call as often as you like
+  return tx(() => {
+    const got = new Set(db.prepare('SELECT key FROM achievements WHERE user_id=?').all(uid).map(r => r.key)), fresh = [];
+    for (const [key, icon, title, desc, xp, check] of ACH) if (!got.has(key) && check(uid)) { db.prepare('INSERT INTO achievements(user_id,key,ts) VALUES(?,?,?)').run(uid, key, now()); addXp(uid, xp); fresh.push({ key, icon, title, desc, xp }); }
+    const u = db.prepare('SELECT xp, level FROM users WHERE id=?').get(uid), info = levelInfo(u.xp); let levelUp = null;
+    if (info.level > u.level) { const reward = (info.level - u.level) * 100 * info.level; db.prepare('UPDATE users SET level=? WHERE id=?').run(info.level, uid); grant(uid, reward, 'level_up'); levelUp = { from: u.level, to: info.level, name: info.name, reward }; }
+    return { achievements: fresh, levelUp, level: info, balance: balanceOf(uid) };
+  });
+}
+function rewardsState(ctx) {
+  const uid = ctx.user.id, day = dayKey(), t0 = etMidnight(day), claimed = new Set(db.prepare('SELECT cid FROM challenge_claims WHERE user_id=? AND day=?').all(uid, day).map(r => r.cid));
+  const u = db.prepare('SELECT xp, last_wheel FROM users WHERE id=?').get(uid), have = new Map(db.prepare('SELECT key, ts FROM achievements WHERE user_id=?').all(uid).map(r => [r.key, r.ts]));
+  return {
+    day, level: levelInfo(u.xp), wheelReady: u.last_wheel !== day, wheel: WHEEL.map(w => w[0]),
+    challenges: todaysChallenges(day).map(c => ({ id: c.id, title: c.title, desc: c.desc, icon: c.icon, goal: c.goal, reward: c.reward, progress: Math.min(c.goal, c.p(uid, t0)), claimed: claimed.has(c.id) })),
+    achievements: ACH.map(([key, icon, title, desc, xp]) => ({ key, icon, title, desc, xp, unlocked: have.has(key), ts: have.get(key) || null })),
+  };
+}
+function claimChallenge(ctx) {
+  const id = String(ctx.body.id || ''), day = dayKey(), c = todaysChallenges(day).find(x => x.id === id); if (!c) bad('That challenge is not active today');
+  return tx(() => {
+    if (db.prepare('SELECT 1 FROM challenge_claims WHERE user_id=? AND day=? AND cid=?').get(ctx.user.id, day, id)) bad('Already claimed');
+    if (c.p(ctx.user.id, etMidnight(day)) < c.goal) bad('Not finished yet');
+    db.prepare('INSERT INTO challenge_claims(user_id,day,cid) VALUES(?,?,?)').run(ctx.user.id, day, id); addXp(ctx.user.id, 50);
+    return { balance: grant(ctx.user.id, c.reward, 'challenge'), reward: c.reward };
+  });
+}
+function spinWheel(ctx) {
+  const day = dayKey();
+  return tx(() => {
+    const u = db.prepare('SELECT last_wheel FROM users WHERE id=?').get(ctx.user.id); if (u.last_wheel === day) bad('Come back tomorrow for another spin');
+    let r = rnd() * 100, i = 0; for (; i < WHEEL.length - 1; i++) { r -= WHEEL[i][1]; if (r < 0) break; }
+    db.prepare('UPDATE users SET last_wheel=? WHERE id=?').run(day, ctx.user.id); addXp(ctx.user.id, 10);
+    return { index: i, prize: WHEEL[i][0], balance: grant(ctx.user.id, WHEEL[i][0], 'wheel') };
+  });
+}
+function tournament(ctx) { // best multiplier of the week (Super Luck rounds and skill games excluded)
+  const t = weekStart(), base = `FROM rounds r JOIN users u ON u.id=r.user_id WHERE r.created>=? AND r.payout>r.bet AND r.game NOT IN ('bell','memory','trivia') AND r.state NOT LIKE '%"sup":1%'`;
+  const top = db.prepare(`SELECT u.username, r.game, MAX(r.mult) AS mult, r.bet, r.payout ${base} GROUP BY r.user_id ORDER BY mult DESC, r.id LIMIT 10`).all(t);
+  const mine = db.prepare(`SELECT MAX(r.mult) AS mult ${base} AND r.user_id=?`).get(t, ctx.user.id).mult;
+  return { top, mine, since: t };
+}
+
 /* ---------- bank: free Hawk Bucks top-ups (tracked so the leaderboard ranks real winnings) ---------- */
 const BANK_AMOUNTS = [100, 500, 1000], BANK_MAX_BAL = 1e6, bankHits = new Map();
 function bank(ctx) {
@@ -664,6 +778,11 @@ const routes = {
   'POST /api/arcade/bj/double': need(arcade.bjDouble),
   'POST /api/bank': need(bank),
   'POST /api/luck': need(setLuck),
+  'POST /api/progress': need(ctx => progress(ctx.user.id)),
+  'GET /api/rewards': need(rewardsState),
+  'POST /api/challenges/claim': need(claimChallenge),
+  'POST /api/wheel': need(spinWheel),
+  'GET /api/tournament': need(tournament),
   'GET /api/feed': need(() => ({
     bets: db.prepare("SELECT u.username, r.game, r.bet, r.mult, r.payout, r.created FROM rounds r JOIN users u ON u.id=r.user_id WHERE r.status IN ('done','cashed','lost') AND r.bet>0 ORDER BY r.id DESC LIMIT 14").all(),
     big: db.prepare("SELECT u.username, r.game, r.bet, r.mult, r.payout FROM rounds r JOIN users u ON u.id=r.user_id WHERE r.payout>r.bet AND r.mult>=5 AND r.created>? ORDER BY r.payout-r.bet DESC LIMIT 6").all(now() - 7 * 864e5),

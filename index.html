@@ -2,39 +2,63 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>HawkBet – South Lakes Pick'em</title>
 <link rel="icon" href="logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header class="top">
+  <button class="menubtn" id="menubtn" aria-label="Open menu">☰</button>
   <a class="brand" href="#home">
     <img class="logo-img" src="logo.svg" width="40" height="40" alt="">
     <span class="wordmark">Hawk<b>Bet</b></span>
   </a>
-  <nav class="tabs" id="nav">
-    <a href="#home" data-v="home">🏠 Home</a>
-    <a href="#arcade" data-v="arcade">🎰 Arcade</a>
-    <a href="#bank" data-v="bank">🏦 Bank</a>
-    <a href="#leaders" data-v="leaders">🏆 Leaderboard</a>
-    <a href="#luck" data-v="luck">🍀 Luck Lab</a>
-    <a href="#board" data-v="board">Picks</a>
-    <a href="#lineups" data-v="lineups">My Lineups</a>
-    <a href="#admin" data-v="admin" id="adminLink" class="hidden">Admin</a>
-  </nav>
-  <div class="bal" id="balbox" title="Fake credits only"><span class="coin">🪙</span><b id="bal">0</b><small>Hawk Bucks</small></div>
+  <div class="topmid"><div class="bal" id="balbox" title="Fake credits only"><span class="coin">🪙</span><b id="bal">0</b><small>Hawk Bucks</small></div></div>
+  <a class="lvlchip hidden" id="lvlchip" href="#rewards" title="Your level"><b id="lvlnum">1</b><span><em id="lvlname">Freshman</em><i class="xpbar"><u id="xpfill"></u></i></span></a>
   <button class="pill sndbtn" id="sound" aria-pressed="true" aria-label="Sound on" title="Sound on/off">🔊</button>
   <button class="pill hidden" id="logout"></button>
 </header>
 
 <div class="banner">Fake credits only · no real money · not affiliated with South Lakes HS or FCPS · lines are demo data</div>
 
-<main id="app"></main>
+<div class="shell">
+  <aside class="side" id="side" aria-label="Main menu">
+    <button class="sidecol" id="sidecol" aria-label="Collapse menu" title="Collapse menu">«</button>
+    <div class="sg"><small>Casino</small>
+      <a href="#home" data-v="home"><i>🏠</i><span>Home</span></a>
+      <a href="#arcade" data-v="arcade"><i>🎰</i><span>Arcade</span></a>
+    </div>
+    <div class="sg"><small>HawkBet Originals</small><div id="origlist"></div></div>
+    <div class="sg"><small>Rewards</small>
+      <a href="#rewards" data-v="rewards"><i>🎁</i><span>Rewards</span><b class="dot hidden" id="rwdot"></b></a>
+      <a href="#bank" data-v="bank"><i>🏦</i><span>Bank</span></a>
+      <a href="#luck" data-v="luck"><i>🍀</i><span>Luck Lab</span></a>
+      <a href="#leaders" data-v="leaders"><i>🏆</i><span>Leaderboard</span></a>
+    </div>
+    <div class="sg"><small>Sports</small>
+      <a href="#board" data-v="board"><i>🏈</i><span>Picks</span></a>
+      <a href="#lineups" data-v="lineups"><i>📋</i><span>My Lineups</span></a>
+    </div>
+    <div class="sg hidden" id="adminLink"><small>Admin</small><a href="#admin" data-v="admin"><i>🛠️</i><span>Admin</span></a></div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+  <main id="app"></main>
+</div>
+
+<nav class="tabbar" id="tabbar" aria-label="Quick menu">
+  <a href="#home" data-v="home"><i>🏠</i><span>Home</span></a>
+  <a href="#arcade" data-v="arcade"><i>🎰</i><span>Arcade</span></a>
+  <a href="#rewards" data-v="rewards"><i>🎁</i><span>Rewards</span></a>
+  <a href="#bank" data-v="bank"><i>🏦</i><span>Bank</span></a>
+  <button id="tabmore"><i>☰</i><span>Menu</span></button>
+</nav>
 
 <div id="slipbar" class="slipbar hidden"><button id="slipbtn"></button></div>
 <aside id="slip" class="slip hidden"></aside>
 <div id="toast" class="toast"></div>
+<div id="achstack" class="achstack" aria-live="polite"></div>
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true"></div>
 <canvas id="fx" aria-hidden="true"></canvas>
 <div class="bgfx" aria-hidden="true"><i></i><i></i><i></i></div>
 

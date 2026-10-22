@@ -13,7 +13,7 @@ let srv;
 
 before(async () => {
   srv = spawn(process.execPath, ['--no-warnings', path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT: String(PORT), DB_PATH: path.join(DIR, 'test.db'), BELL_DELAY_SCALE: '0.05', ROCKET_RATE: '0.002', NODE_ENV: 'test' }, stdio: 'ignore',
+    env: { ...process.env, PORT: String(PORT), DB_PATH: path.join(DIR, 'test.db'), BELL_DELAY_SCALE: '0.05', ROCKET_RATE: '0.002', HB_TEST_CHALLENGES: 'play10,games3,win5', NODE_ENV: 'test' }, stdio: 'ignore',
   });
   for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/healthz')).ok) return; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
   throw new Error('server did not start');
@@ -111,6 +111,35 @@ test('Seahawk Slots: 3x3 grid, 5 paylines, wild hawk, payout matches the grid, ~
     staked += 10; paid += r.payout; wins += r.payout > 0;
   }
   assert.ok(paid / staked > 0.6 && paid / staked < 1.5, `sampled payback ${paid / staked}`); assert.ok(wins > 40, `hit rate ${wins / 400}`);
+});
+
+test('rewards: level, daily challenges, wheel and achievements are server-side and never touch net winnings', async () => {
+  const api = await newUser('rewardkid');
+  let rw = await api('GET', '/rewards');
+  assert.equal(rw.level.name, 'Freshman'); assert.equal(rw.level.level, 1); assert.equal(rw.wheelReady, true);
+  assert.deepEqual(rw.challenges.map(c => c.id), ['play10', 'games3', 'win5']); assert.ok(rw.achievements.length >= 15 && rw.achievements.every(a => !a.unlocked));
+  assert.equal((await api('POST', '/challenges/claim', { id: 'games3' })).status, 400, 'cannot claim before finishing');
+  assert.equal((await api('POST', '/challenges/claim', { id: 'bell3000' })).status, 400, 'cannot claim a challenge that is not active today');
+  // the wheel: once a day, prize comes from the table, free credits are not "winnings"
+  const w0 = (await api('GET', '/me')).user, w = await api('POST', '/wheel');
+  assert.ok(rw.wheel.includes(w.prize)); assert.equal(w.balance, w0.balance + w.prize);
+  assert.equal((await api('POST', '/wheel')).status, 400, 'one spin per day');
+  const me = (await api('GET', '/me')).user; assert.equal(me.added, w.prize);
+  assert.equal((await api('GET', '/leaderboard')).me.net, 0, 'free rewards are not net winnings');
+  // play 3 different games: challenge becomes claimable exactly once
+  await api('POST', '/arcade/dice', { bet: 1, target: 50, over: true }); await api('POST', '/arcade/limbo', { bet: 1, target: 2 }); await api('POST', '/arcade/slots', { bet: 5 });
+  rw = await api('GET', '/rewards'); const g3 = rw.challenges.find(c => c.id === 'games3'); assert.equal(g3.progress, 3);
+  const before = (await api('GET', '/me')).user, cl = await api('POST', '/challenges/claim', { id: 'games3' });
+  assert.equal(cl.reward, 100); assert.equal(cl.balance, before.balance + 100); assert.equal((await api('POST', '/challenges/claim', { id: 'games3' })).status, 400, 'no double claims');
+  assert.equal((await api('GET', '/me')).user.added, w.prize + 100);
+  // XP: every round earns it; 50 rounds crosses 500 XP = Sophomore, with a one-time level-up reward
+  for (let i = 0; i < 50; i++) await api('POST', '/arcade/dice', { bet: 1, target: 50, over: true });
+  const pr = await api('POST', '/progress');
+  assert.ok(pr.achievements.some(a => a.key === 'rounds10'), 'Warming Up unlocked'); assert.ok(pr.achievements.some(a => a.key === 'wheel'));
+  assert.ok(pr.levelUp && pr.levelUp.to === 2 && pr.levelUp.name === 'Sophomore' && pr.levelUp.reward === 200, JSON.stringify(pr.levelUp));
+  const pr2 = await api('POST', '/progress'); assert.equal(pr2.levelUp, null); assert.equal(pr2.achievements.length, 0, 'achievements unlock once');
+  assert.equal((await api('GET', '/me')).user.lvl.name, 'Sophomore');
+  assert.ok((await api('GET', '/tournament')).top);
 });
 
 test('live feed shows recent rounds and site stats', async () => {

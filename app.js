@@ -13,6 +13,7 @@ async function api(method, path, body) {
   if (r.status === 401 && !/login|register|\/me/.test(path)) { U = null; renderAuth(); }
   if (!r.ok) throw new Error(j.error || 'Something went wrong');
   if (method === 'POST' && path.startsWith('/arcade/')) {
+    if (typeof j.payout === 'number' || j.done) queueProgress();
     if (typeof j.payout === 'number') lastRes = { game: path.split('/')[2], mult: j.mult, payout: j.payout, bet: j.bet ?? j.total ?? (j.mult ? j.payout / j.mult : 0) };
     if (/\/start$|^\/arcade\/(plinko|dice|limbo|slots|roulette)$/.test(path)) sfx.play('start');
     else if (/cashout$/.test(path)) sfx.play('cash');
@@ -173,13 +174,16 @@ async function go() {
   const my = ++nav; stopGames();
   if (!U) { try { const m = await api('GET', '/me'); U = m.user; INVITE = m.inviteRequired; } catch (e) {} if (my !== nav) return; }
   document.body.classList.toggle('out', !U);
-  $('#logout').classList.toggle('hidden', !U); $('#adminLink').classList.toggle('hidden', !(U && U.isAdmin));
+  $('#logout').classList.toggle('hidden', !U); $('#adminLink').classList.toggle('hidden', !(U && U.isAdmin)); $('#lvlchip').classList.toggle('hidden', !U);
   if (!U) return renderAuth();
   $('#logout').textContent = `${U.username} · Log out`; showBal();
   view = location.hash.slice(1) || 'home';
-  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.v === view));
-  const R = { home: renderHome, board: renderBoard, arcade: renderArcade, lineups: renderLineups, leaders: renderLeaders, admin: renderAdmin, bank: renderBank, luck: renderLuck };
-  try { await (R[view] || renderHome)(my); } catch (e) { if (my === nav) $('#app').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  document.querySelectorAll('[data-v]').forEach(a => a.classList.toggle('on', a.dataset.v === view));
+  document.querySelectorAll('#origlist a').forEach(a => a.classList.toggle('on', view === 'arcade' && a.dataset.og === game));
+  if (view !== 'arcade') document.documentElement.style.removeProperty('--ga');
+  paintLevel(); document.body.classList.remove('drawer');
+  const R = { rewards: renderRewards, home: renderHome, board: renderBoard, arcade: renderArcade, lineups: renderLineups, leaders: renderLeaders, admin: renderAdmin, bank: renderBank, luck: renderLuck };
+  try { await (R[view] || renderHome)(my); const ap = $('#app'); ap.classList.remove('pagein'); void ap.offsetWidth; ap.classList.add('pagein'); } catch (e) { if (my === nav) $('#app').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   renderSlipBar();
 }
 window.addEventListener('hashchange', go);
@@ -189,7 +193,7 @@ $('#logout').onclick = async () => { await api('POST', '/logout').catch(() => {}
 
 /* ---------- auth ---------- */
 function renderAuth(signup = false) {
-  $('#slipbar').classList.add('hidden'); $('#slip').classList.add('hidden'); document.body.classList.add('out'); $('#logout').classList.add('hidden'); $('#adminLink').classList.add('hidden');
+  $('#slipbar').classList.add('hidden'); $('#slip').classList.add('hidden'); document.body.classList.add('out'); $('#logout').classList.add('hidden'); $('#adminLink').classList.add('hidden'); $('#lvlchip').classList.add('hidden');
   $('#app').innerHTML = `<form class="panel auth" id="af"><h1 style="margin-top:0">${signup ? 'Create account' : 'Log in'}</h1>
     <input name="u" placeholder="Username" autocomplete="username" autocapitalize="none" required>
     <input name="p" type="password" placeholder="Password${signup ? ' (6+ characters)' : ''}" autocomplete="${signup ? 'new-password' : 'current-password'}" required>
@@ -286,14 +290,24 @@ async function renderLineups(my) {
 }
 
 /* ---------- leaderboard ---------- */
+let lbTab = 'net';
 async function renderLeaders(my) {
-  const r = await api('GET', '/leaderboard'); if (my !== nav) return;
-  const inTop = r.top.some(x => x.username === r.me.username);
-  const net = n => `<span class="${n > 0 ? 'win' : n < 0 ? 'lose' : ''}">${n > 0 ? '+' : ''}${fmt(n)}</span>`;
-  const row = (x, rank) => `<tr class="${x.username === r.me.username ? 'me' : ''}"><td>${rank}</td><td>${esc(x.username)}</td><td class="mutecell">${fmt(x.balance)}</td><td>${net(x.net)} 🪙</td></tr>`;
-  $('#app').innerHTML = `<h1>Leaderboard</h1><div class="panel"><table class="lb"><tr><th>#</th><th>Player</th><th>Balance</th><th>Net winnings</th></tr>
-    ${r.top.map((x, i) => row(x, i + 1)).join('')}${inTop ? '' : row(r.me, r.me.rank)}</table>
-    <div class="note">Ranked by net winnings: balance minus the starting 1,000 and anything added at the Bank.</div></div>`;
+  const tabs = `<div class="sub"><button class="pill ${lbTab === 'net' ? 'on' : ''}" data-lbt="net">💰 Net winnings</button><button class="pill ${lbTab === 'week' ? 'on' : ''}" data-lbt="week">⚡ Best win this week</button></div>`;
+  if (lbTab === 'week') {
+    const t = await api('GET', '/tournament'); if (my !== nav) return;
+    $('#app').innerHTML = `<h1>Leaderboard</h1>${tabs}<div class="panel"><table class="lb"><tr><th>#</th><th>Player</th><th>Game</th><th>Multiplier</th></tr>
+      ${t.top.map((x, i) => `<tr class="${x.username === U.username ? 'me' : ''}"><td>${i + 1}</td><td>${esc(x.username)}</td><td class="mutecell">${esc(gameLabel(x.game))}</td><td><span class="win">${x.mult.toFixed(2)}x</span> · +${fmt(x.payout - x.bet)} 🪙</td></tr>`).join('') || '<tr><td colspan="4" class="mutecell gempty">No big wins yet this week. Be the first!</td></tr>'}</table>
+      <div class="note">Your best this week: <b>${t.mine ? t.mine.toFixed(2) + 'x' : '–'}</b>. Resets every Monday. Skill games and Super Luck rounds don't count.</div></div>`;
+  } else {
+    const r = await api('GET', '/leaderboard'); if (my !== nav) return;
+    const inTop = r.top.some(x => x.username === r.me.username);
+    const net = n => `<span class="${n > 0 ? 'win' : n < 0 ? 'lose' : ''}">${n > 0 ? '+' : ''}${fmt(n)}</span>`;
+    const row = (x, rank) => `<tr class="${x.username === r.me.username ? 'me' : ''}"><td>${rank}</td><td>${esc(x.username)}</td><td class="mutecell">${fmt(x.balance)}</td><td>${net(x.net)} 🪙</td></tr>`;
+    $('#app').innerHTML = `<h1>Leaderboard</h1>${tabs}<div class="panel"><table class="lb"><tr><th>#</th><th>Player</th><th>Balance</th><th>Net winnings</th></tr>
+      ${r.top.map((x, i) => row(x, i + 1)).join('')}${inTop ? '' : row(r.me, r.me.rank)}</table>
+      <div class="note">Ranked by net winnings: balance minus the starting 1,000 and anything added at the Bank or earned from rewards.</div></div>`;
+  }
+  document.querySelectorAll('[data-lbt]').forEach(b => b.onclick = () => { lbTab = b.dataset.lbt; renderLeaders(nav); });
 }
 
 /* ---------- admin ---------- */
@@ -323,6 +337,7 @@ async function renderAdmin(my) {
 /* ---------- arcade ---------- */
 let stopFns = [];
 function stopGames() { stopFns.forEach(f => f()); stopFns = []; if (pending) { pending = 0; showBal(); } }
+const GAME_COLOR = { plinko: '#ff4fd8', mines: '#3d8bff', cross: '#ffc542', flip: '#f5a623', dice: '#a855ff', limbo: '#19e58a', slots: '#ff4d5e', roulette: '#12c26a', rps: '#ff7a3c', bj: '#e0284a', rocket: '#ffb21a', bell: '#ffd24a', memory: '#9b5cff', trivia: '#16e0c0' };
 const GAMES = [['plinko', '🔵 Hawk Drop'], ['mines', '🔐 Locker Hunt'], ['cross', '🚌 Seahawk Crossing'], ['flip', '🪙 Heads or Tails'], ['dice', '🎲 Scoreboard Roll'], ['limbo', '🏈 Hail Mary'], ['slots', '🎰 Seahawk Slots'], ['roulette', '🎡 Lakes Roulette'], ['rps', '✊ Hallway RPS'], ['bj', '🃏 Hawk 21'], ['rocket', '🚀 Seahawk Launch'], ['bell', '🔔 Bell Rush'], ['memory', '🧠 Classroom Memory'], ['trivia', '❓ Seahawk Trivia']];
 const GAME_FNS = { plinko, mines, cross, flip, dice, limbo, slots, roulette, rps, bj, rocket, bell, memory, trivia }; // every game that can launch
 const CATS = [['all', 'All'], ['featured', '⭐ Featured'], ['recent', '🕘 Recent'], ['classic', '🎰 Classic'], ['skill', '🧠 Skill']];
@@ -334,7 +349,7 @@ async function renderArcade(my) {
   const list = gameList(), byId = Object.fromEntries(list.map(g => [g.id, g]));
   const week = Math.floor((Date.now() / 864e5 + 4) / 7), featured = [...new Set([0, 1, 2].map(k => list[(week * 3 + k * 5) % list.length]))]; // rotates every Monday
   const shown = { all: list, featured, recent: STATS.recent.map(id => byId[id]).filter(Boolean), classic: list.filter(g => !SKILL_IDS.has(g.id)), skill: list.filter(g => SKILL_IDS.has(g.id)) }[arcCat] || list;
-  const cur = byId[game] || list[0];
+  const cur = byId[game] || list[0]; document.documentElement.style.setProperty('--ga', GAME_COLOR[cur.id] || '#3d6bff');
   $('#app').innerHTML = `<div class="archead"><h1>Seahawk Arcade</h1><a class="luckchip" href="#luck">${luckBadge()}</a></div>
     <div class="pills cats" role="group" aria-label="Filter games">${CATS.map(([k, l]) => `<button class="pill ${k === arcCat ? 'on' : ''}" data-cat="${k}" aria-pressed="${k === arcCat}">${l}</button>`).join('')}</div>
     <div class="gstrip">${shown.map(g => `<button class="gtile ${g.id === game ? 'on' : ''}" data-g="${g.id}" aria-label="${esc(g.title)}"><span>${esc(g.emoji)}</span><b>${esc(g.title)}</b><small>${esc(bestText(g.id) ? '🏆 ' + bestText(g.id) : g.tag)}</small></button>`).join('') || '<div class="mutecell gempty">Nothing here yet – play a game first!</div>'}</div>
@@ -415,135 +430,72 @@ const GAME_INFO = {
   memory: { tag: 'Memory', desc: 'Match the classroom cards fast. Easier than remembering your locker combo.' },
   trivia: { tag: 'Trivia', desc: 'Seven questions, twenty seconds each. Finally, a quiz where speed counts.' },
 };
+/* ---------- cover art: one glossy vector object per game, reused for the carousel (landscape) and the Originals grid (portrait) ---------- */
+const ART = { // [gradient start, gradient end]
+  plinko: ['#ff4fd8', '#5b2bd0'], mines: ['#2fb0ff', '#2a3fd8'], cross: ['#ffc542', '#ff5a3c'], flip: ['#ffb53a', '#b83a1c'], dice: ['#b06aff', '#3a2fe0'],
+  limbo: ['#22e08a', '#06705a'], slots: ['#ff4d6e', '#6a1fd8'], roulette: ['#14c98a', '#0a4f8a'], rps: ['#ff8a3c', '#d8204a'], bj: ['#e0284a', '#2e0a2a'],
+  rocket: ['#ffb21a', '#ff2d6e'], bell: ['#ffe08a', '#e07a12'], memory: ['#9b5cff', '#ff4fd8'], trivia: ['#18e0c4', '#2f4bff'],
+};
 let artSeq = 0;
-function cover(id, emoji) { // returns an inline SVG; u keeps gradient ids unique when a cover appears twice on the page
-  const u = 'c' + (++artSeq), W = 800, H = 450;
-  const bg = (a, b, cx = '72%') => `<defs><radialGradient id="${u}b" cx="${cx}" cy="40%" r="85%"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></radialGradient>
-    <linearGradient id="${u}g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe08a"/><stop offset="1" stop-color="#f5a623"/></linearGradient>
-    <filter id="${u}f" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8"/></filter></defs><rect width="${W}" height="${H}" fill="url(#${u}b)"/>`;
-  const em = (x, y, s, e, extra = '') => `<text x="${x}" y="${y}" font-size="${s}" text-anchor="middle" dominant-baseline="central" ${extra}>${e}</text>`;
-  const logo = (x, y, s) => `<image href="logo.svg" x="${x - s / 2}" y="${y - s / 2}" width="${s}" height="${s}"/>`;
-  let a = '';
+function objArt(id, u) { // returns SVG markup for the game's object, drawn in a 300x300 box
+  const rg = (n, ...s) => `<radialGradient id="${u}${n}" cx=".35" cy=".3" r=".85">${s.map(([o, c]) => `<stop offset="${o}" stop-color="${c}"/>`).join('')}</radialGradient>`;
+  const lg = (n, ...s) => `<linearGradient id="${u}${n}" x1="0" y1="0" x2="1" y2="1">${s.map(([o, c]) => `<stop offset="${o}" stop-color="${c}"/>`).join('')}</linearGradient>`;
+  const gold = lg('gold', [0, '#fff3a8'], [.5, '#f6b800'], [1, '#a86400']), shadow = '<ellipse cx="150" cy="270" rx="88" ry="11" fill="#000" opacity=".3"/>';
+  const em = (x, y, sz, e, extra = '') => `<text x="${x}" y="${y}" font-size="${sz}" text-anchor="middle" dominant-baseline="central" ${extra}>${e}</text>`;
+  const card = (x, y, rot, rank, suit, col) => `<g transform="translate(${x} ${y}) rotate(${rot})"><rect x="-55" y="-75" width="110" height="150" rx="12" fill="#fff" stroke="#c9cfe8" stroke-width="3"/><text x="-42" y="-42" font-size="34" font-weight="900" fill="${col}">${rank}</text><text x="0" y="28" font-size="76" text-anchor="middle" fill="${col}">${suit}</text></g>`;
+  const chip = (x, y, c, n) => Array.from({ length: n }, (_, k) => `<ellipse cx="${x}" cy="${y - k * 11}" rx="38" ry="14" fill="${c}" stroke="#fff" stroke-width="3" stroke-dasharray="9 7"/>`).join('');
   switch (id) {
     case 'plinko': {
-      a = bg('#173f8f', '#05080d');
-      for (let r = 0; r < 8; r++) for (let j = 0; j < r + 3; j++) a += `<circle cx="${590 + (j - (r + 2) / 2) * 36}" cy="${70 + r * 38}" r="5" fill="#5b8cff"/>`;
-      ['#ffc542', '#12c26a', '#12c26a', '#2a3a4d', '#2a3a4d', '#2a3a4d', '#12c26a', '#12c26a', '#ffc542'].forEach((c, k) => a += `<rect x="${590 + (k - 4) * 36 - 15}" y="372" width="30" height="22" rx="5" fill="${c}"/>`);
-      [[572, 104], [626, 218], [554, 300]].forEach(([x, y]) => a += `<circle cx="${x}" cy="${y}" r="16" fill="#12c26a" filter="url(#${u}f)"/><circle cx="${x}" cy="${y}" r="10" fill="#fff"/><circle cx="${x}" cy="${y}" r="5" fill="#12c26a"/>`);
-      break;
+      const pegs = [[165, 3], [197, 4], [229, 5]].flatMap(([y, n]) => Array.from({ length: n }, (_, k) => `<circle cx="${150 + (k - (n - 1) / 2) * 48}" cy="${y}" r="7.5" fill="#fff" opacity=".93"/>`)).join('');
+      return `<defs>${rg('b', [0, '#ffe0f8'], [.35, '#ff4fd8'], [1, '#7a1a9a'])}${rg('c', [0, '#d8fbff'], [.4, '#27d3ff'], [1, '#0a5fa8'])}</defs>${shadow}${pegs}${[0, 1, 2, 3, 4, 5].map(k => `<rect x="${52 + k * 40}" y="252" width="34" height="16" rx="6" fill="${[ '#ffc542', '#19e58a', '#2a3a6a', '#2a3a6a', '#19e58a', '#ffc542'][k]}"/>`).join('')}<circle cx="150" cy="92" r="46" fill="url(#${u}b)"/><image href="logo.svg" x="124" y="66" width="52" height="52" /><ellipse cx="132" cy="70" rx="17" ry="10" fill="#fff" opacity=".55" transform="rotate(-30 132 70)"/><circle cx="104" cy="186" r="15" fill="url(#${u}c)"/><circle cx="99" cy="181" r="5" fill="#fff" opacity=".8"/>`;
     }
-    case 'mines': {
-      a = bg('#0f4a2e', '#04070a');
-      for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) {
-        const x = 440 + c * 88, y = 70 + r * 110, k = r * 4 + c, open = k === 5 || k === 2, bad = k === 10;
-        a += `<rect x="${x}" y="${y}" width="76" height="98" rx="10" fill="${open ? '#0f2a1e' : bad ? '#3a1018' : '#1b4fd8'}" stroke="${open ? '#12c26a' : bad ? '#ff4d5e' : '#5b8cff'}" stroke-width="3"/>`;
-        a += open ? em(x + 38, y + 49, 40, '🦅') : bad ? em(x + 38, y + 49, 40, '📋') : `<rect x="${x + 34}" y="${y + 30}" width="8" height="38" rx="3" fill="#ffffff44"/>`;
-      }
-      a += `<rect x="527" y="180" width="76" height="98" rx="10" fill="none" stroke="#12c26a" stroke-width="6" filter="url(#${u}f)"/>`;
-      break;
-    }
-    case 'cross': {
-      a = bg('#2c3644', '#07090c');
-      for (let k = 0; k < 6; k++) { const x = 360 + k * 74; a += `<rect x="${x}" y="0" width="70" height="450" fill="#1a222c"/>`; for (let y = 0; y < 450; y += 46) a += `<rect x="${x + 33}" y="${y}" width="4" height="24" fill="#ffffff30"/>`; }
-      a += em(434, 150, 64, '🚌') + em(582, 300, 56, '🚗') + em(730, 120, 64, '🚌') + em(508, 250, 62, '🦅') + em(656, 380, 44, '💥', 'opacity=".9"');
-      [[434, '1.21x'], [508, '1.47x'], [582, '1.79x'], [656, '2.18x']].forEach(([x, t]) => a += `<text x="${x}" y="40" fill="#19e58a" font-weight="800" font-size="18" text-anchor="middle">${t}</text>`);
-      break;
-    }
-    case 'flip': {
-      a = bg('#4a3305', '#06080b', '70%');
-      a += `<ellipse cx="660" cy="300" rx="60" ry="130" fill="#b26b00" transform="rotate(25 660 300)" opacity=".6"/>`;
-      a += `<circle cx="580" cy="220" r="160" fill="#ffc542" filter="url(#${u}f)" opacity=".5"/><circle cx="580" cy="220" r="150" fill="url(#${u}g)"/><circle cx="580" cy="220" r="126" fill="#0a8f4e" stroke="#06582f" stroke-width="6"/>` + logo(580, 220, 170);
-      [[400, 90], [760, 60], [740, 380], [430, 380]].forEach(([x, y]) => a += em(x, y, 28, '✨'));
-      break;
-    }
+    case 'mines':
+      return `<defs>${lg('l', [0, '#5cc0ff'], [1, '#2a3fd8'])}${lg('g1', [0, '#d8fcff'], [.5, '#34e0ff'], [1, '#1a7fe0'])}</defs>${shadow}<rect x="62" y="38" width="118" height="200" rx="14" fill="url(#${u}l)" stroke="#0e1a66" stroke-width="5"/><rect x="74" y="52" width="94" height="170" rx="8" fill="none" stroke="#0e1a6688" stroke-width="3"/>${[66, 80, 94].map(y => `<rect x="90" y="${y}" width="60" height="7" rx="3.5" fill="#0e1a66" opacity=".55"/>`).join('')}<rect x="88" y="104" width="62" height="62" rx="12" fill="#ffffff2e" stroke="#0e1a66" stroke-width="2.5"/><image href="logo.svg" x="93" y="109" width="52" height="52" /><circle cx="160" cy="196" r="8" fill="#e8eef8" stroke="#0e1a66" stroke-width="3"/><rect x="86" y="198" width="46" height="16" rx="4" fill="#ffffff55"/><path d="M216 140 L268 188 L216 262 L164 188Z" fill="url(#${u}g1)" stroke="#fff" stroke-width="3" stroke-linejoin="round"/><path d="M164 188H268M216 140L194 188L216 262L238 188Z" fill="none" stroke="#ffffffaa" stroke-width="2.5" stroke-linejoin="round"/><path d="M216 140L238 188H194Z" fill="#fff" opacity=".55"/><path d="M262 110l5 12 12 5-12 5-5 12-5-12-12-5 12-5z" fill="#fff"/>`;
+    case 'cross':
+      return `<defs>${lg('y', [0, '#fff08a'], [.55, '#ffc21a'], [1, '#d88a00'])}${lg('w', [0, '#bfe8ff'], [1, '#4a8fd0'])}</defs><rect x="0" y="262" width="300" height="38" fill="#2a3150"/>${[10, 110, 210].map(x => `<rect x="${x}" y="278" width="60" height="6" rx="3" fill="#ffffffaa"/>`).join('')}<ellipse cx="150" cy="262" rx="120" ry="9" fill="#000" opacity=".3"/><rect x="26" y="136" width="248" height="104" rx="26" fill="url(#${u}y)" stroke="#8a5a00" stroke-width="4"/>${[0, 1, 2, 3, 4].map(k => `<rect x="${44 + k * 42}" y="152" width="34" height="32" rx="6" fill="url(#${u}w)" stroke="#0e2a50" stroke-width="2.5"/>`).join('')}<rect x="26" y="200" width="248" height="10" fill="#1a1a1a" opacity=".45"/><text x="150" y="228" font-size="14" font-weight="900" text-anchor="middle" fill="#3a2a00" letter-spacing="3">SOUTH LAKES</text><rect x="262" y="176" width="14" height="22" rx="4" fill="#fff6c0"/>${[78, 222].map(x => `<circle cx="${x}" cy="244" r="25" fill="#1a1f2b" stroke="#6b7489" stroke-width="6"/><circle cx="${x}" cy="244" r="9" fill="#aab4c8"/>`).join('')}<image href="hawk.svg" x="168" y="46" width="96" height="96"/>`;
+    case 'flip':
+      return `<defs>${gold}</defs>${shadow}<svg x="38" y="28" width="224" height="224" viewBox="0 0 200 200">${coinFace('heads').replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '')}</svg><ellipse cx="62" cy="258" rx="30" ry="9" fill="url(#${u}gold)" stroke="#7a4a00" stroke-width="3"/><ellipse cx="238" cy="250" rx="26" ry="8" fill="url(#${u}gold)" stroke="#7a4a00" stroke-width="3"/><path d="M262 40l4 11 11 4-11 4-4 11-4-11-11-4 11-4z" fill="#fff"/>`;
     case 'dice': {
-      a = bg('#3a1c00', '#04070a');
-      a += `<rect x="410" y="60" width="350" height="170" rx="16" fill="#05080b" stroke="#2a3a4d" stroke-width="6"/><text x="585" y="96" fill="#ffc542" font-size="16" font-weight="800" letter-spacing="4" text-anchor="middle">SEAHAWKS · HOME</text>`;
-      a += `<text x="585" y="180" fill="#ff9f1a" font-family="ui-monospace,Menlo,monospace" font-size="84" font-weight="800" text-anchor="middle" filter="url(#${u}f)">73.41</text><text x="585" y="180" fill="#ffb347" font-family="ui-monospace,Menlo,monospace" font-size="84" font-weight="800" text-anchor="middle">73.41</text>`;
-      const die = (x, y, rot, pips) => `<g transform="rotate(${rot} ${x + 55} ${y + 55})"><rect x="${x}" y="${y}" width="110" height="110" rx="20" fill="#fff"/>${pips.map(([px, py]) => `<circle cx="${x + px}" cy="${y + py}" r="11" fill="${rot > 0 ? '#1b4fd8' : '#0a8f4e'}"/>`).join('')}</g>`;
-      a += die(470, 270, -14, [[28, 28], [55, 55], [82, 82]]) + die(620, 262, 12, [[28, 28], [82, 28], [28, 82], [82, 82], [55, 55]]);
-      break;
+      const die = (x, y, rot, s, pips, col, logo) => `<g transform="translate(${x} ${y}) rotate(${rot})"><rect x="${-s / 2 + 9}" y="${-s / 2 + 11}" width="${s}" height="${s}" rx="${s * .2}" fill="#2a1f9a" opacity=".7"/><rect x="${-s / 2}" y="${-s / 2}" width="${s}" height="${s}" rx="${s * .2}" fill="url(#${u}d)" stroke="#d8d4ff" stroke-width="3"/>${logo ? `<image href="logo.svg" x="${-s * .34}" y="${-s * .34}" width="${s * .68}" height="${s * .68}"/>` : pips.map(([px, py]) => `<circle cx="${px * s / 4}" cy="${py * s / 4}" r="${s * .075}" fill="${col}"/>`).join('')}</g>`;
+      return `<defs>${lg('d', [0, '#ffffff'], [1, '#d4d0ff'])}</defs>${shadow}${die(108, 118, -14, 124, [[-1, -1], [0, 0], [1, 1]], '#5b2bd0')}${die(196, 176, 16, 104, [], '#ff4fd8', true)}<path d="M262 60l4 11 11 4-11 4-4 11-4-11-11-4 11-4z" fill="#fff"/>`;
     }
-    case 'limbo': {
-      a = bg('#0f7a42', '#032414', '60%');
-      for (let k = 0; k < 9; k++) a += `<rect x="${k * 100}" y="0" width="3" height="450" fill="#ffffff2a"/><text x="${k * 100 + 12}" y="430" fill="#ffffff55" font-weight="800" font-size="20">${[10, 20, 30, 40, 50, 40, 30, 20, 10][k]}</text>`;
-      a += `<path d="M380 400 Q 560 -40 760 170" fill="none" stroke="#fff" stroke-width="4" stroke-dasharray="10 12" opacity=".8"/>` + em(760, 170, 70, '🏈', 'transform="rotate(30 760 170)"');
-      a += `<text x="610" y="320" fill="url(#${u}g)" font-size="90" font-weight="900" text-anchor="middle" filter="url(#${u}f)" opacity=".6">100x</text><text x="610" y="320" fill="url(#${u}g)" font-size="90" font-weight="900" text-anchor="middle">100x</text>`;
-      break;
-    }
-    case 'slots': {
-      a = bg('#3a1668', '#05070d', '66%');
-      a += `<rect x="404" y="40" width="350" height="76" rx="14" fill="#1a0d3a" stroke="url(#${u}g)" stroke-width="4"/><text x="579" y="92" fill="url(#${u}g)" font-size="42" font-weight="900" letter-spacing="3" text-anchor="middle">SEAHAWK SLOTS</text>`;
-      for (let k = 0; k < 14; k++) a += `<circle cx="${420 + k * 25}" cy="52" r="4" fill="${k % 2 ? '#ffe08a' : '#ff4fd8'}"/>`;
-      a += `<rect x="404" y="124" width="350" height="284" rx="22" fill="url(#${u}g)"/><rect x="420" y="140" width="318" height="252" rx="12" fill="#06070d"/>`;
-      const sy = [['🏈', '🦅', '🏆'], ['🚌', '🦅', '🏐'], ['🏀', '🦅', '📋']], tc = { '🏈': '#b2561a', '🦅': '#12a05c', '🏆': '#d4a017', '🚌': '#e0b400', '🏐': '#2f6bff', '🏀': '#e0701a', '📋': '#c2399e' };
-      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) { const x = 428 + c * 102, y = 148 + r * 80, e = sy[r][c]; a += `<rect x="${x}" y="${y}" width="96" height="74" rx="10" fill="${tc[e]}" ${c === 1 ? 'stroke="#fff" stroke-width="4"' : ''}/>` + em(x + 48, y + 38, 46, e); }
-      a += `<path d="M436 186 H730" stroke="#ffe08a" stroke-width="7" stroke-linecap="round" filter="url(#${u}f)"/><path d="M436 186 H730" stroke="#fff" stroke-width="3" stroke-linecap="round"/>`;
-      a += `<line x1="776" y1="330" x2="782" y2="200" stroke="#cfd8e3" stroke-width="10" stroke-linecap="round"/><circle cx="782" cy="190" r="22" fill="#ff3b4e" stroke="#fff" stroke-width="3"/><circle cx="775" cy="182" r="6" fill="#ffffff99"/>`;
-      [[420, 70], [770, 150], [400, 420], [760, 430]].forEach(([x, y]) => a += em(x, y, 26, '🪙'));
-      break;
-    }
+    case 'limbo':
+      return `<defs>${lg('f', [0, '#e0894a'], [1, '#6b3210'])}</defs>${shadow}<path d="M20 244 Q120 20 262 84" fill="none" stroke="#fff" stroke-width="5" stroke-dasharray="3 12" stroke-linecap="round" opacity=".8"/><g transform="rotate(-28 150 160)"><ellipse cx="150" cy="160" rx="112" ry="66" fill="url(#${u}f)" stroke="#3a1a08" stroke-width="5"/><path d="M82 112Q70 160 82 208M218 112Q230 160 218 208" fill="none" stroke="#fff" stroke-width="9"/><line x1="112" y1="168" x2="188" y2="168" stroke="#fff" stroke-width="7" stroke-linecap="round"/><image href="logo.svg" x="126" y="106" width="52" height="52" />${[122, 140, 160, 180].map(x => `<line x1="${x}" y1="156" x2="${x}" y2="180" stroke="#fff" stroke-width="6" stroke-linecap="round"/>`).join('')}<ellipse cx="120" cy="124" rx="52" ry="14" fill="#fff" opacity=".22"/></g><path d="M246 34l4 10 10 4-10 4-4 10-4-10-10-4 10-4z" fill="#fff"/>`;
+    case 'slots':
+      return `<defs>${lg('m', [0, '#ff6a86'], [1, '#6a1fd8'])}${gold}</defs>${shadow}<rect x="46" y="22" width="190" height="238" rx="26" fill="url(#${u}m)" stroke="url(#${u}gold)" stroke-width="6"/>${Array.from({ length: 9 }, (_, k) => `<circle cx="${68 + k * 20.6}" cy="44" r="5" fill="${k % 2 ? '#ffe08a' : '#fff'}"/>`).join('')}<rect x="64" y="72" width="154" height="104" rx="12" fill="#0a0a18" stroke="url(#${u}gold)" stroke-width="5"/>${[0, 1, 2].map(k => `<rect x="${70 + k * 50}" y="80" width="46" height="88" rx="8" fill="#fff"/>${k === 1 ? `<image href="logo.svg" x="${73 + k * 50}" y="106" width="40" height="40"/>` : `<text x="${93 + k * 50}" y="146" font-size="64" font-weight="900" text-anchor="middle" fill="#e0182e" stroke="#7a0a18" stroke-width="2">7</text>`}`).join('')}<line x1="66" y1="124" x2="216" y2="124" stroke="#ff4d5e" stroke-width="4" opacity=".7"/><rect x="92" y="200" width="98" height="40" rx="10" fill="#1a0a3a" stroke="url(#${u}gold)" stroke-width="3"/>${[108, 128, 148, 168].map((x, k) => `<ellipse cx="${x}" cy="${222 - (k % 2) * 4}" rx="11" ry="5" fill="url(#${u}gold)"/>`).join('')}<line x1="244" y1="122" x2="270" y2="60" stroke="#d8e0ee" stroke-width="9" stroke-linecap="round"/><circle cx="273" cy="52" r="16" fill="#ff2d44" stroke="#fff" stroke-width="3"/><circle cx="267" cy="46" r="5" fill="#fff" opacity=".8"/>`;
     case 'roulette': {
-      a = bg('#0b2a6b', '#04070a');
-      const cx = 590, cy = 225, R = 180, seg = Math.PI * 2 / 37, C = { green: '#0f9d58', blue: '#1b4fd8', gold: '#f5a623' };
-      a += `<circle cx="${cx}" cy="${cy}" r="${R + 16}" fill="url(#${u}g)"/>`;
-      WHEEL.forEach((n, i) => { const t0 = i * seg - Math.PI / 2, t1 = t0 + seg;
-        a += `<path d="M${cx} ${cy}L${cx + R * Math.cos(t0)} ${cy + R * Math.sin(t0)}A${R} ${R} 0 0 1 ${cx + R * Math.cos(t1)} ${cy + R * Math.sin(t1)}Z" fill="${C[rcol(n)]}"/>`; });
-      a += `<circle cx="${cx}" cy="${cy}" r="62" fill="#05080b" stroke="url(#${u}g)" stroke-width="5"/>` + logo(cx, cy, 90) + `<circle cx="${cx + 120}" cy="${cy - 90}" r="11" fill="#fff"/>`;
-      break;
+      const seg = Math.PI * 2 / 37, C = { green: '#0f9d58', blue: '#1b4fd8', gold: '#f5a623' }, R = 104;
+      return `<defs>${gold}</defs>${shadow}<circle cx="150" cy="148" r="122" fill="url(#${u}gold)" stroke="#7a4a00" stroke-width="4"/><circle cx="150" cy="148" r="112" fill="#0a1a2a"/>${WHEEL.map((n, i) => { const a0 = i * seg - Math.PI / 2, a1 = a0 + seg; return `<path d="M150 148L${150 + R * Math.cos(a0)} ${148 + R * Math.sin(a0)}A${R} ${R} 0 0 1 ${150 + R * Math.cos(a1)} ${148 + R * Math.sin(a1)}Z" fill="${C[rcol(n)]}"/>`; }).join('')}<circle cx="150" cy="148" r="62" fill="#0a1424" stroke="url(#${u}gold)" stroke-width="5"/><image href="logo.svg" x="116" y="114" width="68" height="68"/><circle cx="222" cy="86" r="8" fill="#fff"/><circle cx="219" cy="83" r="3" fill="#fff" opacity=".9"/>`;
     }
-    case 'rps': {
-      a = bg('#2a1260', '#05070b');
-      a += em(470, 230, 150, '✊', 'transform="translate(940 0) scale(-1 1)"') + em(700, 230, 150, '✌️');
-      a += `<text x="585" y="240" fill="url(#${u}g)" font-size="70" font-weight="900" text-anchor="middle" filter="url(#${u}f)">VS</text><text x="585" y="240" fill="url(#${u}g)" font-size="70" font-weight="900" text-anchor="middle">VS</text>`;
-      a += `<text x="470" y="380" fill="#9ff5c8" font-weight="800" font-size="22" text-anchor="middle">SOUTH LAKES</text><text x="700" y="380" fill="#ff9aa4" font-weight="800" font-size="22" text-anchor="middle">RIVAL</text>`;
-      break;
-    }
-    case 'bj': {
-      a = bg('#13894c', '#04200f', '62%');
-      const pc = (x, y, rot, r, s, col) => `<g transform="rotate(${rot} ${x + 70} ${y + 100})"><rect x="${x}" y="${y}" width="140" height="200" rx="14" fill="#fff" stroke="#00000022"/><text x="${x + 16}" y="${y + 44}" fill="${col}" font-size="38" font-weight="900">${r}</text><text x="${x + 70}" y="${y + 120}" fill="${col}" font-size="72" text-anchor="middle">${s}</text></g>`;
-      a += pc(470, 110, -12, 'A', '♠', '#0f3fb5') + pc(580, 100, 10, 'K', '♥', '#0a8f4e');
-      [[450, 360, '#1b4fd8'], [500, 372, '#f5a623'], [700, 360, '#0a8f4e']].forEach(([x, y, c]) => { for (let k = 0; k < 4; k++) a += `<ellipse cx="${x}" cy="${y - k * 10}" rx="34" ry="12" fill="${c}" stroke="#fff" stroke-width="3" stroke-dasharray="8 6"/>`; });
-      a += `<text x="740" y="70" fill="#ffe08a" font-size="34" font-weight="900" text-anchor="end">21</text>`;
-      break;
-    }
-    case 'rocket': {
-      a = bg('#1d1060', '#03040a', '70%');
-      for (let k = 0; k < 40; k++) a += `<circle cx="${380 + (k * 97) % 420}" cy="${(k * 53) % 450}" r="${1 + (k % 3)}" fill="#ffffff${k % 2 ? '99' : '55'}"/>`;
-      a += `<path d="M380 420 Q 560 400 740 80" fill="none" stroke="url(#${u}g)" stroke-width="10" stroke-linecap="round" filter="url(#${u}f)" opacity=".7"/><path d="M380 420 Q 560 400 740 80" fill="none" stroke="#19e58a" stroke-width="6" stroke-linecap="round"/>`;
-      a += em(740, 80, 84, '🚀') + `<text x="560" y="250" fill="url(#${u}g)" font-size="96" font-weight="900" text-anchor="middle" filter="url(#${u}f)" opacity=".55">12.4x</text><text x="560" y="250" fill="url(#${u}g)" font-size="96" font-weight="900" text-anchor="middle">12.4x</text>`;
-      break;
-    }
-    case 'bell': {
-      a = bg('#3a2a05', '#05080b', '70%');
-      for (let k = 0; k < 6; k++) a += `<rect x="${400 + k * 70}" y="40" width="62" height="370" rx="6" fill="#16337f" stroke="#2f6bff" stroke-width="2" opacity=".55"/><rect x="${428 + k * 70}" y="170" width="6" height="40" rx="2" fill="#ffffff44"/>`;
-      a += `<circle cx="590" cy="215" r="150" fill="#ffc542" opacity=".25" filter="url(#${u}f)"/>` + em(590, 215, 200, '🔔', 'transform="rotate(-12 590 215)"');
-      [[400, 120, 470, 160], [380, 230, 455, 230], [400, 330, 470, 290], [780, 120, 710, 160], [800, 230, 725, 230], [780, 330, 710, 290]].forEach(([x1, y1, x2, y2]) => a += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="url(#${u}g)" stroke-width="8" stroke-linecap="round"/>`);
-      a += `<text x="590" y="420" fill="#ffe08a" font-size="44" font-weight="900" letter-spacing="8" text-anchor="middle">RING!</text>`;
-      break;
-    }
+    case 'rps':
+      return `${shadow}${em(100, 150, 128, '✊', 'transform="rotate(-8 100 150)"')}${em(204, 168, 128, '✌️', 'transform="rotate(10 204 168)"')}<text x="150" y="120" font-size="58" font-weight="900" text-anchor="middle" fill="#ffe08a" stroke="#8a2a00" stroke-width="5" paint-order="stroke" letter-spacing="2">VS</text><path d="M150 20v28M96 38l14 22M204 38l-14 22" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".7"/><image href="hawk.svg" x="108" y="196" width="84" height="84"/>`;
+    case 'bj':
+      return `<defs>${gold}</defs>${shadow}${card(112, 128, -14, 'A', '♠', '#14182e')}${card(184, 118, 12, 'K', '♥', '#e0182e')}${chip(76, 252, '#e0284a', 4)}${chip(224, 256, '#1b4fd8', 3)}<ellipse cx="150" cy="268" rx="40" ry="16" fill="url(#${u}gold)" stroke="#7a4a00" stroke-width="3"/><image href="logo.svg" x="130" y="246" width="40" height="40"/>`;
+    case 'rocket':
+      return `<defs>${lg('fl', [0, '#fff'], [.4, '#ffe08a'], [1, '#ff4d5e00'])}</defs>${shadow}<path d="M20 262 Q60 150 190 70" fill="none" stroke="#fff" stroke-width="5" stroke-dasharray="2 12" stroke-linecap="round" opacity=".7"/><g transform="rotate(36 150 150)"><path d="M122 222Q150 330 178 222Z" fill="url(#${u}fl)"/><image href="rocket.svg" x="92" y="40" width="116" height="217"/></g><g><rect x="196" y="196" width="86" height="40" rx="12" fill="#0a0a1ccc" stroke="#ffe08a" stroke-width="3"/><text x="239" y="224" font-size="25" font-weight="900" text-anchor="middle" fill="#ffe08a">12.4x</text></g><path d="M262 120l4 10 10 4-10 4-4 10-4-10-10-4 10-4z" fill="#fff"/>`;
+    case 'bell':
+      return `<defs>${gold}</defs>${shadow}<path d="M20 120Q4 150 18 186M280 120Q296 150 282 186M36 100Q22 150 36 202M264 100Q278 150 264 202" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".65"/><circle cx="150" cy="44" r="14" fill="url(#${u}gold)" stroke="#7a4a00" stroke-width="4"/><path d="M150 52C108 52 94 104 92 156C90 196 74 210 66 228H234C226 210 210 196 208 156C206 104 192 52 150 52Z" fill="url(#${u}gold)" stroke="#7a4a00" stroke-width="5" stroke-linejoin="round"/><ellipse cx="150" cy="229" rx="86" ry="13" fill="#d89a00" stroke="#7a4a00" stroke-width="4"/><circle cx="150" cy="250" r="19" fill="url(#${u}gold)" stroke="#7a4a00" stroke-width="4"/><image href="logo.svg" x="116" y="110" width="68" height="68"/><path d="M118 82C104 108 102 150 100 184" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round" opacity=".55"/>`;
     case 'memory': {
-      a = bg('#24125a', '#05070b');
-      const ic = ['🦅', '📚', '🍕', '🦅', '🔔', '🎒'];
-      for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) {
-        const x = 430 + c * 88, y = 60 + r * 115, k = r * 4 + c, up = [0, 5, 6, 9].includes(k);
-        a += up ? `<rect x="${x}" y="${y}" width="76" height="100" rx="12" fill="#f3f6fa" stroke="${k === 0 || k === 9 ? '#12c26a' : '#ffffff'}" stroke-width="4"/>` + em(x + 38, y + 50, 44, ic[[0, 5, 6, 9].indexOf(k) % ic.length] || '🦅')
-          : `<rect x="${x}" y="${y}" width="76" height="100" rx="12" fill="#1b4fd8" stroke="#5b8cff" stroke-width="3"/>` + logo(x + 38, y + 50, 46);
-      }
-      a += `<rect x="426" y="56" width="84" height="108" rx="14" fill="none" stroke="#12c26a" stroke-width="6" filter="url(#${u}f)"/>`;
-      break;
+      const back = (x, y, r) => `<g transform="translate(${x} ${y}) rotate(${r})"><rect x="-48" y="-62" width="96" height="124" rx="12" fill="url(#${u}k)" stroke="#fff" stroke-width="4"/><image href="logo.svg" x="-28" y="-28" width="56" height="56"/></g>`;
+      return `<defs>${lg('k', [0, '#4f7cff'], [1, '#6a2bd0'])}</defs>${shadow}${back(88, 96, -8)}${back(212, 92, 7)}${back(92, 208, 6)}<g transform="translate(212 208) rotate(-6)"><rect x="-48" y="-62" width="96" height="124" rx="12" fill="#fff" stroke="#19e58a" stroke-width="6"/>${em(0, 4, 64, '🦅')}</g><path d="M150 140l4 10 10 4-10 4-4 10-4-10-10-4 10-4z" fill="#fff"/>`;
     }
-    case 'trivia': {
-      a = bg('#0b3a22', '#05080b', '68%');
-      a += `<rect x="410" y="50" width="360" height="250" rx="12" fill="#7a4a1c"/><rect x="424" y="64" width="332" height="222" rx="6" fill="#163d2a"/>`;
-      a += `<text x="590" y="225" fill="url(#${u}g)" font-size="190" font-weight="900" text-anchor="middle" filter="url(#${u}f)" opacity=".5">?</text><text x="590" y="225" fill="url(#${u}g)" font-size="190" font-weight="900" text-anchor="middle">?</text>`;
-      ['A', 'B', 'C', 'D'].forEach((l, k) => a += `<circle cx="${470 + k * 80}" cy="360" r="30" fill="${k === 2 ? '#12c26a' : '#1b4fd8'}" stroke="#fff" stroke-width="3"/><text x="${470 + k * 80}" y="372" fill="#fff" font-size="32" font-weight="900" text-anchor="middle">${l}</text>`);
-      a += `<text x="452" y="104" fill="#ffffff88" font-size="20" font-family="ui-monospace,monospace">Q7 / 7</text>`;
-      break;
-    }
-    default: a = bg('#1b4fd8', '#05080b') + em(590, 225, 180, emoji || '🎮');
+    case 'trivia':
+      return `<defs>${gold}</defs>${shadow}<rect x="34" y="34" width="232" height="168" rx="12" fill="#0f5a44" stroke="#a8672a" stroke-width="12"/><text x="150" y="168" font-size="150" font-weight="900" text-anchor="middle" fill="url(#${u}gold)" stroke="#7a4a00" stroke-width="5" paint-order="stroke">?</text><image href="logo.svg" x="216" y="150" width="44" height="44"/>${['A', 'B', 'C', 'D'].map((l, k) => `<circle cx="${68 + k * 55}" cy="240" r="21" fill="${k === 2 ? '#19e58a' : '#2f4bff'}" stroke="#fff" stroke-width="3"/><text x="${68 + k * 55}" y="248" font-size="22" font-weight="900" text-anchor="middle" fill="#fff">${l}</text>`).join('')}`;
+    default: return em(150, 150, 150, '🎮');
   }
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">${a}</svg>`;
+}
+function cover(id, emoji) { // landscape art for the carousel (800x450)
+  const u = 'c' + (++artSeq), [a, b] = ART[id] || ['#2f4bff', '#0a1131'];
+  return `<svg viewBox="0 0 800 450" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false"><defs><linearGradient id="${u}bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient><radialGradient id="${u}gl" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff" stop-opacity=".45"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>
+    <rect width="800" height="450" fill="url(#${u}bg)"/><circle cx="620" cy="225" r="260" fill="url(#${u}gl)"/><path d="M380 0h90L250 450H160zM560 0h40L400 450h-40z" fill="#fff" opacity=".07"/><g transform="translate(450 40) scale(1.28)">${objArt(id, u)}</g></svg>`;
+}
+function tileArt(id, title) { // portrait Stake-style tile (300x375)
+  const u = 't' + (++artSeq), [a, b] = ART[id] || ['#2f4bff', '#0a1131'], t = String(title).toUpperCase(), words = t.split(' '), two = t.length > 10 && words.length > 1, half = Math.ceil(words.length / 2), lines = two ? [words.slice(0, half).join(' '), words.slice(half).join(' ')] : [t], fs = two ? 31 : 38;
+  return `<svg viewBox="0 0 300 375" aria-hidden="true" focusable="false"><defs><linearGradient id="${u}bg" x1="0" y1="0" x2=".7" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient><radialGradient id="${u}gl" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>
+    <rect width="300" height="375" fill="url(#${u}bg)"/><circle cx="150" cy="160" r="170" fill="url(#${u}gl)"/><path d="M-20 90L300 -30V20L-20 160zM-20 250L320 120v50L-20 320z" fill="#fff" opacity=".08"/>
+    <g transform="translate(0 6)">${objArt(id, u)}</g>
+    <image href="logo.svg" x="9" y="8" width="38" height="38"/>
+    <rect y="298" width="300" height="77" fill="#000" opacity=".3"/>${lines.map((ln, k) => `<text x="150" y="${two ? 334 + k * 32 : 349}" font-size="${fs}" font-weight="900" text-anchor="middle" fill="#fff" stroke="#00000066" stroke-width="7" paint-order="stroke" letter-spacing="1.2" font-family="Inter,system-ui,sans-serif">${esc(ln)}</text>`).join('')}</svg>`;
 }
 const gameList = () => GAMES.filter(([id]) => GAME_FNS[id]).map(([id, label]) => {
   const [emoji, ...rest] = label.split(' '), info = GAME_INFO[id] || {};
@@ -603,7 +555,7 @@ const gameLabel = id => (GAMES.find(([k]) => k === id) || [id, id])[1];
 function mountShowcase(el) {
   const list = gameList();
   el.innerHTML = `<div id="carHost"></div><section class="allg" aria-labelledby="allgH"><h2 id="allgH">🎰 HawkBet Originals</h2>
-    <div class="allgames orig">${list.map(g => `<button class="gcard" data-car-play="${g.id}" aria-label="Play ${esc(g.title)}">${NEW_GAMES.has(g.id) ? '<i class="newb">NEW</i>' : ''}<div class="gthumb">${cover(g.id, g.emoji)}</div><b>${esc(g.title)}</b><small>${esc(g.tag)}</small></button>`).join('')}</div></section>`;
+    <div class="allgames orig">${list.map(g => `<button class="gcard tile" data-car-play="${g.id}" aria-label="Play ${esc(g.title)}">${NEW_GAMES.has(g.id) ? '<i class="newb">NEW</i>' : ''}<div class="tilea">${tileArt(g.id, g.title)}</div><span class="tiletag">${esc(g.tag)}</span></button>`).join('')}</div></section>`;
   el.querySelector('.allgames').addEventListener('click', e => { const b = e.target.closest('[data-car-play]'); if (b) openGame(b.dataset.carPlay); });
   el.querySelectorAll('.gcard').forEach(c => { // tilt toward the pointer
     c.addEventListener('pointermove', e => { if (calm || e.pointerType !== 'mouse') return; const r = c.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5; c.style.transform = `perspective(600px) rotateY(${x * 10}deg) rotateX(${-y * 10}deg) translateY(-4px)`; });
@@ -618,7 +570,7 @@ async function renderHome(my) {
   const ago = t => { const m = Math.max(0, Math.round((Date.now() - t) / 60000)); return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : Math.round(m / 60) + 'h ago'; };
   const betRow = b => `<div class="lbrow"><span class="g">${esc(gameLabel(b.game))}</span><span class="u">${esc(b.username)}</span><span class="b">${fmt(b.bet)} 🪙</span><span class="m ${b.payout > b.bet ? 'win' : 'lose'}">${b.payout ? b.mult.toFixed(2) + 'x' : '0.00x'}</span><span class="p ${b.payout > b.bet ? 'win' : 'lose'}">${b.payout > b.bet ? '+' : '−'}${fmt(Math.abs(b.payout - b.bet))}</span></div>`;
   const ticker = feed.big.length ? feed.big.concat(feed.big).map(b => `<span>🔥 <b>${esc(b.username)}</b> hit <b class="win">${b.mult.toFixed(2)}x</b> on ${esc(gameLabel(b.game))} <b class="win">+${fmt(b.payout - b.bet)} 🪙</b></span>`).join('') : '';
-  $('#app').innerHTML = `<section class="hero"><div class="heroin"><div><small>Welcome back</small><h1>${esc(U.username)}</h1></div>
+  $('#app').innerHTML = `<section class="hero"><div class="heroin"><div class="floaties" aria-hidden="true"><span style="left:46%;top:14%;--d:7s">🪙</span><span style="left:60%;top:58%;--d:9s;--l:-2s">🎲</span><span style="left:74%;top:12%;--d:8s;--l:-4s">♠️</span><span style="left:88%;top:52%;--d:10s;--l:-1s">💎</span><span style="left:34%;top:62%;--d:8.5s;--l:-3s">🍀</span><span style="left:94%;top:10%;--d:7.5s;--l:-5s">🏈</span></div><div><small>Welcome back</small><h1>${esc(U.username)}</h1></div>
       <div class="herobal"><small>Your balance</small><b>${fmt(U.balance)}</b><span>Hawk Bucks</span></div>
       <div class="heroact"><a class="btn gold" href="#arcade">🎰 Play now</a><a class="btn alt" href="#bank">🏦 Bank</a><a class="btn alt" href="#luck">🍀 Luck Lab</a></div></div></section>
     ${ticker ? `<div class="marq" aria-label="Recent big wins"><div class="marqin">${ticker}</div></div>` : ''}
@@ -1175,14 +1127,57 @@ async function rps(root, my) {
   paint();
 }
 
+/* Coach: the Hawk 21 dealer. A cartoon South Lakes coach in SVG; CSS classes on .coach switch his mood. */
+const coachSvg = () => `<svg viewBox="0 0 220 250" aria-hidden="true">
+  <g class="cbody"><path d="M26 252C26 192 60 168 110 168S194 192 194 252Z" fill="#0a8f4e"/><path d="M26 252C26 206 48 182 78 174C58 196 52 224 56 252Z" fill="#14c46f" opacity=".5"/>
+    <rect x="94" y="136" width="32" height="38" rx="9" fill="#e0a87c"/><path d="M82 170L110 210L138 170L126 163L110 188L94 163Z" fill="#fff"/><path d="M95 164L110 188L125 164" fill="none" stroke="#06582f" stroke-width="2"/>
+    <image href="logo.svg" x="136" y="198" width="32" height="32"/><path d="M90 166Q110 220 130 166" fill="none" stroke="#e8eef5" stroke-width="3.5"/><rect x="101" y="206" width="20" height="13" rx="6.5" fill="#ffd24a" stroke="#a86a00" stroke-width="2"/><circle cx="106" cy="212" r="2.6" fill="#a86a00"/></g>
+  <g class="carm"><path d="M168 194C192 202 202 230 194 254L170 254C174 232 168 216 154 206Z" fill="#0a8f4e"/><g class="chand2"><circle cx="184" cy="246" r="13" fill="#f0bd92"/><rect x="178" y="224" width="24" height="32" rx="4" fill="#fff" stroke="#c9cfe8" stroke-width="2" transform="rotate(14 190 240)"/></g></g>
+  <g class="chead">
+    <circle cx="64" cy="98" r="10" fill="#e0a87c"/><circle cx="156" cy="98" r="10" fill="#e0a87c"/><ellipse cx="110" cy="98" rx="47" ry="50" fill="#f0bd92"/>
+    <ellipse cx="82" cy="112" rx="9" ry="6" fill="#ff8a8a" opacity=".28"/><ellipse cx="138" cy="112" rx="9" ry="6" fill="#ff8a8a" opacity=".28"/>
+    <g class="eye"><ellipse cx="90" cy="94" rx="9.5" ry="10.5" fill="#fff"/><circle class="pup" cx="91" cy="96" r="4.6" fill="#1b2a4a"/><circle cx="93" cy="93" r="1.6" fill="#fff"/><ellipse class="lid" cx="90" cy="94" rx="10.5" ry="11.5" fill="#f0bd92"/></g>
+    <g class="eye"><ellipse cx="130" cy="94" rx="9.5" ry="10.5" fill="#fff"/><circle class="pup" cx="131" cy="96" r="4.6" fill="#1b2a4a"/><circle cx="133" cy="93" r="1.6" fill="#fff"/><ellipse class="lid" cx="130" cy="94" rx="10.5" ry="11.5" fill="#f0bd92"/></g>
+    <path class="brow bl" d="M77 80Q90 73 103 80" stroke="#4a2e1a" stroke-width="5.5" fill="none" stroke-linecap="round"/><path class="brow br" d="M117 80Q130 73 143 80" stroke="#4a2e1a" stroke-width="5.5" fill="none" stroke-linecap="round"/>
+    <path d="M110 98Q104 110 110 114" stroke="#c98f66" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M80 122Q96 110 110 119Q124 110 140 122Q128 132 110 126Q92 132 80 122Z" fill="#5a3a22"/>
+    <path class="m m-smile" d="M93 133Q110 150 127 133" stroke="#7a2a1a" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+    <g class="m m-open"><ellipse cx="110" cy="138" rx="12" ry="9.5" fill="#5a1410"/><ellipse cx="110" cy="143" rx="7" ry="4" fill="#e0627a"/></g>
+    <path class="m m-flat" d="M97 138H123" stroke="#7a2a1a" stroke-width="4.5" stroke-linecap="round"/>
+    <path class="m m-frown" d="M95 143Q110 130 125 143" stroke="#7a2a1a" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+    <path d="M60 80C60 40 88 26 110 26S160 40 160 80Z" fill="#0a8f4e"/><path d="M110 26V80M84 34Q78 56 80 80M136 34Q142 56 140 80" stroke="#06582f" stroke-width="2" fill="none" opacity=".55"/>
+    <path d="M52 82C80 70 140 70 170 84C148 98 80 98 52 82Z" fill="#1b4fd8" stroke="#0b2a6b" stroke-width="3"/><image href="logo.svg" x="92" y="36" width="36" height="36"/>
+  </g>
+  <g class="chand"><ellipse cx="110" cy="100" rx="40" ry="32" fill="#f0bd92" stroke="#d99a6c" stroke-width="3"/><path d="M82 90Q110 78 138 90M84 104Q110 94 136 104" stroke="#d99a6c" stroke-width="3" fill="none"/></g>
+</svg>`;
+const COACH_LINES = {
+  hello: ['Welcome to Hawk 21, rookie.', 'Coach is dealing. Try to keep up.', 'Hustle up and place your bet!'],
+  deal: ['Cards are out!', 'Here we go.', 'Eyes on the table, rookie.'],
+  hit: ['Another card? Bold.', 'Hit you? Okay, hit YOU.', 'Careful now…'],
+  stand: ['Standing? Smart. My turn.', 'Let’s see what I’ve got…'],
+  dbl: ['Doubling down! I respect it.', 'Big swing, rookie.'],
+  win: ['Okay okay… nice hand.', 'You got me this time.', 'Take your Hawk Bucks. Don’t spend them all in one place.'],
+  natural: ['BLACKJACK?! In MY gym?!', 'Wow. Just… wow.'],
+  lose: ['Coach stands on 17. Always.', 'That’s a lap for you.', 'Better luck next time, rookie.'],
+  bust: ['BUST! Drop and give me twenty.', 'Too greedy, rookie.'],
+  push: ['A push. Nobody runs laps.', 'Tie game. Run it back.'],
+};
+
 /* Blackjack: Hawk 21 */
 async function bj(root, my) {
   const RK = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' }, SU = ['♠', '♥', '♦', '♣']; let v = null, shown = { player: 0, dealer: 0 };
   root.innerHTML = gameShell(`${betBox()}<div style="height:14px"></div><button class="btn bjbig" id="deal">🃏 Deal <kbd>Space</kbd></button>
     <div class="note">Beat Coach to 21. Blackjack pays 3:2, Coach stands on 17, and you can double on your first two cards.</div>`,
-    `<div class="felt"><div class="who2">Coach <b id="dt"></b></div><div class="hand2" id="dealer"></div><div class="feltlogo"><img src="logo.svg" alt="">HAWK 21</div><div class="hand2" id="player"></div><div class="who2">You <b id="pt"></b></div></div>
+    `<div class="coachrow"><div class="coach idle" id="coach" role="img" aria-label="Coach, the dealer">${coachSvg()}</div><div class="cbub" id="cbub"></div></div><div class="felt"><div class="who2">Coach <b id="dt"></b></div><div class="hand2" id="dealer"></div><div class="feltlogo"><img src="logo.svg" alt="">HAWK 21</div><div class="hand2" id="player"></div><div class="who2">You <b id="pt"></b></div></div>
     <div class="bjacts hidden" id="acts"><button class="btn blue" id="hit"><span>👊</span>Hit<kbd>H</kbd></button><button class="btn" id="stand"><span>✋</span>Stand<kbd>S</kbd></button><button class="btn gold" id="dbl"><span>💰</span>Double<kbd>D</kbd></button></div>
     <button class="btn bjbig bjdeal2 hidden" id="deal2">🃏 Deal again <kbd>Space</kbd></button>`);
+  let coachT = 0;
+  function coachSay(kind, mood, hold = 3200) { // mood: idle | deal | think | smug | shock | shrug | sad
+    const c = $('#coach'), b = $('#cbub'); if (!c) return; const L = COACH_LINES[kind], line = L[Math.floor(Math.random() * L.length)];
+    c.className = 'coach ' + mood; b.textContent = line; b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
+    clearTimeout(coachT); coachT = setTimeout(() => { if (c.isConnected) c.className = 'coach idle'; }, hold);
+  }
+  stopFns.push(() => clearTimeout(coachT)); setTimeout(() => coachSay('hello', 'idle', 6000), 300);
   const cardHtml = (c, i, isNew, hidden) => hidden ? `<div class="pc back ${isNew ? 'new' : ''}" style="--d:${i * 0.12}s"><img src="logo.svg" alt=""></div>`
     : `<div class="pc s${c.s} ${isNew ? 'new' : ''}" style="--d:${i * 0.12}s"><b>${RK[c.r] || c.r}</b><span>${SU[c.s]}</span></div>`;
   function paint(fresh) {
@@ -1199,11 +1194,12 @@ async function bj(root, my) {
     v = r; paint(); setBal(r.balance);
     const msg = { blackjack: `Blackjack! +${fmt(r.payout - r.bet)} 🪙`, win: `You beat Coach! +${fmt(r.payout - r.bet)} 🪙`, push: 'Push · bet back', lose: `Coach wins · −${fmt(r.bet)} 🪙`, bust: `Bust! · −${fmt(r.bet)} 🪙` }[r.result];
     resMsg(r.payout >= r.bet, msg); if (r.payout > r.bet) fx.win(r.result === 'blackjack'); else if (r.payout < r.bet) fx.lose();
+    setTimeout(() => coachSay({ blackjack: 'natural', win: 'win', push: 'push', lose: 'lose', bust: 'bust' }[r.result], { blackjack: 'shock', win: 'sad', push: 'shrug', lose: 'smug', bust: 'smug' }[r.result], 4500), calm ? 0 : 450);
   }
   const a = (await api('GET', '/arcade/active?game=bj')).round; if (my !== nav) return;
   if (a) { v = a; $('#res').textContent = 'Hand restored'; }
-  const step = path => act(async () => { const r = await api('POST', '/arcade/bj/' + path); if (!root.isConnected) return setBal(r.balance); if (r.done) done(r); else { v = r; paint(); } });
-  $('#deal').onclick = act(async () => { $('#res').textContent = ''; const r = await api('POST', '/arcade/bj/start', { bet: readBet() }); v = null; paint(true); if (r.done) { await wait(calm ? 0 : 300); if (!root.isConnected) return setBal(r.balance); done(r); } else { v = r; setBal(r.balance); paint(); } });
+  const step = path => act(async () => { coachSay({ hit: 'hit', stand: 'stand', double: 'dbl' }[path], path === 'double' ? 'smug' : 'think', 2600); const r = await api('POST', '/arcade/bj/' + path); if (!root.isConnected) return setBal(r.balance); if (r.done) done(r); else { v = r; paint(); } });
+  $('#deal').onclick = act(async () => { $('#res').textContent = ''; coachSay('deal', 'deal', 2400); const r = await api('POST', '/arcade/bj/start', { bet: readBet() }); v = null; paint(true); if (r.done) { await wait(calm ? 0 : 300); if (!root.isConnected) return setBal(r.balance); done(r); } else { v = r; setBal(r.balance); paint(); } });
   $('#hit').onclick = step('hit'); $('#stand').onclick = step('stand'); $('#dbl').onclick = step('double'); $('#deal2').onclick = () => $('#deal').click();
   paint();
 }
@@ -1457,6 +1453,47 @@ async function rocket(root, my) {
   rocketImg.onload = () => draw(performance.now());
 }
 
+/* ---------- Rewards: level, daily wheel, daily challenges, achievements ---------- */
+const LEVEL_TABLE = [[1, 'Freshman', 0], [2, 'Sophomore', 500], [3, 'Junior', 1500], [4, 'Senior', 3500], [5, 'Varsity', 7000], [6, 'Captain', 12000], [7, 'Hall of Fame', 20000]];
+const WHEEL_COLORS = ['#2f6bff', '#a040ff', '#ff4fd8', '#ff9f1a', '#19e58a', '#16c0e0', '#ff4d5e', '#ffc542'];
+function wheelSvg(prizes) {
+  const R = 140, c = 150, paths = prizes.map((p, i) => {
+    const a0 = (i * 45 - 90) * Math.PI / 180, a1 = ((i + 1) * 45 - 90) * Math.PI / 180, mid = ((i + .5) * 45 - 90) * Math.PI / 180;
+    return `<path d="M${c} ${c}L${c + R * Math.cos(a0)} ${c + R * Math.sin(a0)}A${R} ${R} 0 0 1 ${c + R * Math.cos(a1)} ${c + R * Math.sin(a1)}Z" fill="${WHEEL_COLORS[i]}" stroke="#0a1131" stroke-width="3"/><text transform="translate(${c + 96 * Math.cos(mid)} ${c + 96 * Math.sin(mid)}) rotate(${(i + .5) * 45})" font-size="${p >= 1000 ? 19 : 22}" font-weight="900" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="#00000088" stroke-width="4" paint-order="stroke">${p}</text>`;
+  }).join('');
+  return `<svg viewBox="0 0 300 300" class="wsvg" aria-hidden="true"><circle cx="150" cy="150" r="147" fill="#ffc542"/><g id="wg" class="wg">${paths}</g><circle cx="150" cy="150" r="30" fill="#0a1131" stroke="#ffc542" stroke-width="5"/><image href="logo.svg" x="128" y="128" width="44" height="44"/></svg>`;
+}
+async function renderRewards(my) {
+  const rw = await api('GET', '/rewards'); if (my !== nav) return;
+  const L = rw.level, done = rw.achievements.filter(a => a.unlocked).length, claimable = rw.challenges.filter(c => !c.claimed && c.progress >= c.goal).length;
+  $('#app').innerHTML = `<h1>🎁 Rewards</h1>
+    <section class="panel lvlcard"><div class="bigbadge sm">${L.level}</div><div class="lvlinfo"><h2>${esc(L.name)}</h2><div class="xpbig"><u style="width:${L.pct}%"></u></div>
+      <small>${fmt(L.xp)} XP${L.next ? ` · ${fmt(L.next - L.xp)} more to <b>${esc(L.nextName)}</b>` : ' · max level!'}</small></div>
+      <div class="lvlsteps">${LEVEL_TABLE.map(([n, name, xp]) => `<span class="${L.level >= n ? 'on' : ''}" title="${fmt(xp)} XP"><b>${n}</b>${esc(name)}</span>`).join('')}</div>
+      <div class="note">Earn XP in every game: +10 per round (+5 if you win), +25–50 for each skill game, +50 for each daily challenge. Each new level gives free Hawk Bucks.</div></section>
+    <div class="rwgrid"><section class="panel wheelcard"><h2>🎡 Daily Wheel</h2><div class="wheelbox"><div class="wptr">▼</div>${wheelSvg(rw.wheel)}</div>
+        <button class="btn bjbig" id="wspin" ${rw.wheelReady ? '' : 'disabled'}>${rw.wheelReady ? '🎡 Spin! <kbd>Space</kbd>' : 'Come back tomorrow'}</button><div class="res" id="wres"></div></section>
+      <section class="panel"><h2>📋 Daily challenges ${claimable ? `<span class="chip2">${claimable} ready</span>` : ''}</h2>
+        ${rw.challenges.map(c => `<div class="chal ${c.claimed ? 'done' : ''}"><i>${c.icon}</i><div class="cinfo"><b>${esc(c.title)}</b><small>${esc(c.desc)}</small><div class="cbar"><u style="width:${Math.round(c.progress / c.goal * 100)}%"></u></div><small>${c.progress} / ${c.goal}</small></div>
+          <div class="cact"><b>+${c.reward} 🪙</b>${c.claimed ? '<span class="win">Claimed ✓</span>' : `<button class="btn gold" data-claim="${c.id}" ${c.progress >= c.goal ? '' : 'disabled'}>Claim</button>`}</div></div>`).join('')}
+        <div class="note">Same 3 challenges for everyone, and they refresh every day at midnight (school time).</div></section></div>
+    <section class="panel"><h2>🏅 Achievements <small class="mutecell">${done} / ${rw.achievements.length}</small></h2><div class="achgrid">${rw.achievements.map(a => `<div class="ach ${a.unlocked ? 'on' : ''}" title="${esc(a.desc)}"><i>${a.icon}</i><b>${esc(a.title)}</b><small>${esc(a.desc)}</small><em>${a.unlocked ? `✓ +${a.xp} XP` : `🔒 ${a.xp} XP`}</em></div>`).join('')}</div></section>`;
+  const spin = $('#wspin'); let rot = 0;
+  async function doSpin() {
+    if (!spin || spin.disabled) return; spin.disabled = true;
+    try {
+      const r = await api('POST', '/wheel'), i = r.index; rot += 360 * 6 + (360 - (i + .5) * 45); const wg = $('#wg'); wg.style.transition = calm ? 'none' : 'transform 4.6s cubic-bezier(.12,.75,.15,1)'; wg.style.transform = `rotate(${rot}deg)`;
+      if (!calm) for (let t = 0; t < 16; t++) { sfx.play('tap'); await wait(110 + t * 22); }
+      if (!root_ok()) return; setBal(r.balance); $('#wres').innerHTML = `<span class="win">You won +${fmt(r.prize)} 🪙!</span>`; fx.burst(r.prize >= 250 ? 220 : 110); sfx.play(r.prize >= 250 ? 'jackpot' : 'big'); spin.textContent = 'Come back tomorrow'; checkProgress();
+    } catch (e) { toast(e.message); sfx.play('error'); spin.disabled = false; }
+  }
+  const root_ok = () => !!$('#wspin') && view === 'rewards';
+  if (spin) spin.onclick = doSpin;
+  const key = e => { if (e.code === 'Space' && view === 'rewards' && $('#wspin') && !$('#wspin').disabled && !e.target.matches('input,textarea,button')) { e.preventDefault(); doSpin(); } };
+  document.addEventListener('keydown', key); stopFns.push(() => document.removeEventListener('keydown', key));
+  document.querySelectorAll('[data-claim]').forEach(b => b.onclick = act(async () => { const r = await api('POST', '/challenges/claim', { id: b.dataset.claim }); setBal(r.balance); toast(`+${fmt(r.reward)} Hawk Bucks!`); fx.burst(90); sfx.play('big'); checkProgress(); renderRewards(nav); }));
+}
+
 /* ---------- Luck Lab ---------- */
 async function renderLuck() {
   const cur = String(luckLevel()), reg = LUCK.filter(x => String(x[0])[0] !== 'x'), sup = LUCK.filter(x => String(x[0])[0] === 'x');
@@ -1477,5 +1514,44 @@ async function renderLuck() {
   $('#preview').onclick = () => { fx.burst(160); sfx.play('big'); };
 }
 
+/* ---------- levels, achievements, shell ---------- */
+function paintLevel() {
+  if (!U || !U.lvl) return; const l = U.lvl;
+  $('#lvlnum').textContent = l.level; $('#lvlname').textContent = l.name; $('#xpfill').style.width = l.pct + '%'; $('#lvlchip').title = `${l.name} · ${fmt(l.xp)} XP${l.next ? ` · ${fmt(l.next - l.xp)} to ${l.nextName}` : ''}`;
+}
+function showModal(html) { const m = $('#modal'); m.innerHTML = `<div class="mbox">${html}</div>`; m.classList.remove('hidden'); const b = m.querySelector('[data-close]'); if (b) { b.onclick = closeModal; b.focus(); } }
+const closeModal = () => $('#modal').classList.add('hidden');
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); document.body.classList.remove('drawer'); } });
+function achToast(a) {
+  const el = document.createElement('div'); el.className = 'achcard'; el.innerHTML = `<i>${a.icon}</i><div><b>Achievement unlocked!</b><small>${esc(a.title)} · +${a.xp} XP</small></div>`; $('#achstack').appendChild(el); sfx.play('pb');
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 420); }, 4200);
+}
+function levelUpModal(l) {
+  showModal(`<div class="bigbadge">${l.to}</div><h2>LEVEL UP!</h2><p>You're now a <b>${esc(l.name)}</b>.<br>Reward: <b>+${fmt(l.reward)} 🪙</b> Hawk Bucks</p><button class="btn gold" data-close>Nice!</button>`);
+  fx.burst(220); sfx.play('jackpot');
+}
+let progT = 0; const queueProgress = () => { clearTimeout(progT); progT = setTimeout(checkProgress, 1500); };
+async function checkProgress() {
+  if (!U) return;
+  try {
+    const r = await api('POST', '/progress'); U.lvl = r.level; paintLevel();
+    r.achievements.forEach((a, i) => setTimeout(() => achToast(a), i * 700));
+    if (r.levelUp) { setBal(r.balance); levelUpModal(r.levelUp); }
+    refreshRewardDot();
+  } catch (e) {}
+}
+async function refreshRewardDot() { try { const r = await api('GET', '/rewards'); $('#rwdot').classList.toggle('hidden', !(r.wheelReady || r.challenges.some(c => !c.claimed && c.progress >= c.goal))); } catch (e) {} }
+// gentle break reminder: after 45 minutes of active play
+let playedMin = 0; setInterval(() => { if (!U || document.hidden) return; if (++playedMin % 45 === 0) showModal(`<div class="bigbadge">⏰</div><h2>Take a break?</h2><p>You've been playing for ${playedMin} minutes. Stretch, grab some water, and come back later. HawkBet will still be here.</p><button class="btn" data-close>Keep playing</button>`); }, 60000);
+function initShell() {
+  $('#origlist').innerHTML = GAMES.filter(([id]) => GAME_FNS[id]).map(([id, label]) => { const [e, ...r] = label.split(' '); return `<a href="#arcade" data-og="${id}" style="--gc:${GAME_COLOR[id]}"><i>${e}</i><span>${esc(r.join(' '))}</span></a>`; }).join('');
+  $('#origlist').addEventListener('click', e => { const a = e.target.closest('[data-og]'); if (!a) return; e.preventDefault(); game = a.dataset.og; arcCat = 'all'; if (location.hash === '#arcade') go(); else location.hash = '#arcade'; document.body.classList.remove('drawer'); });
+  try { document.body.classList.toggle('sbc', localStorage.getItem('hb.sidebar') === 'min'); } catch (e) {}
+  $('#sidecol').onclick = () => { const on = document.body.classList.toggle('sbc'); try { localStorage.setItem('hb.sidebar', on ? 'min' : 'open'); } catch (e) {} };
+  const drawer = () => document.body.classList.toggle('drawer'); $('#menubtn').onclick = drawer; $('#tabmore').onclick = drawer; $('#scrim').onclick = () => document.body.classList.remove('drawer');
+  $('#side').addEventListener('click', e => { if (e.target.closest('a')) document.body.classList.remove('drawer'); });
+}
+initShell(); setTimeout(() => { if (U) checkProgress(); }, 2500);
 go();
 })();
