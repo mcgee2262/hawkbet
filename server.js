@@ -510,12 +510,13 @@ Object.assign(arcade, {
 
 /* ---------- skill games: Bell Rush, Classroom Memory, Seahawk Trivia ----------
    Score-only (no Hawk Bucks at stake). The server holds all hidden state and keeps the clock. */
-const SKILL_GAMES = ['bell', 'memory', 'trivia'];
+const SKILL_GAMES = ['bell', 'memory', 'trivia', 'hoops', 'math', 'band', 'dash'];
 // Optional bets: your score picks the payout. Luck has no effect on skill games.
-const SKILL_TIERS = { bell: [[4100, 3], [3800, 2], [3500, 1.5], [3000, 1]], memory: [[2600, 3], [2300, 2], [2000, 1.5], [1700, 1]], trivia: [[900, 3], [750, 2], [600, 1.5], [450, 1]] };
+const SKILL_TIERS = { bell: [[4100, 3], [3800, 2], [3500, 1.5], [3000, 1]], memory: [[2600, 3], [2300, 2], [2000, 1.5], [1700, 1]], trivia: [[900, 3], [750, 2], [600, 1.5], [450, 1]],
+  hoops: [[1900, 3], [1500, 2], [1100, 1.5], [700, 1]], math: [[3600, 3], [3000, 2], [2400, 1.5], [1800, 1]], band: [[2000, 3], [1400, 2], [900, 1.5], [500, 1]], dash: [[2500, 3], [1800, 2], [1200, 1.5], [700, 1]] };
 const skillMult = (game, score) => (SKILL_TIERS[game].find(([min]) => score >= min) || [0, 0])[1];
 function skillStart(ctx, game, state) {
-  const bet = ctx.body.bet == null || ctx.body.bet === 0 ? 0 : stake(ctx.body.bet); // 0 = free practice
+  const bet = ctx.body.bet == null || ctx.body.bet === 0 || isSchool() ? 0 : stake(ctx.body.bet); // 0 = free practice (and no betting in school mode)
   db.prepare("UPDATE rounds SET status='abandoned' WHERE user_id=? AND game=? AND status='active'").run(ctx.user.id, game); // restarting forfeits an unfinished round
   const id = Number(db.prepare('INSERT INTO rounds(user_id,game,bet,state,created) VALUES(?,?,?,?,?)').run(ctx.user.id, game, bet, JSON.stringify(state), now()).lastInsertRowid);
   return { id, bet, balance: bet ? adjust(ctx.user.id, -bet, game + '_bet', id) : balanceOf(ctx.user.id) };
@@ -526,8 +527,12 @@ function skillFinish(ctx, r, st, score, detail = {}) {
   save(r, st); db.prepare("UPDATE rounds SET status='done', mult=?, payout=? WHERE id=?").run(mult, payout, r.id);
   db.prepare('INSERT INTO scores(user_id,game,score,detail,created) VALUES(?,?,?,?,?)').run(ctx.user.id, r.game, score, JSON.stringify(detail), now());
   addXp(ctx.user.id, 25 + Math.min(25, Math.round(score / 200))); // skill games earn the most XP
-  const balance = payout ? adjust(ctx.user.id, payout, r.game + '_win', r.id) : balanceOf(ctx.user.id);
-  return { done: true, score, best: Math.max(score, prev ?? 0), newBest: prev == null || score > prev, bet: r.bet, mult, payout, balance, ...detail };
+  let balance = payout ? adjust(ctx.user.id, payout, r.game + '_win', r.id) : balanceOf(ctx.user.id), reward = 0;
+  if (isSchool()) { // school mode: a small Hawk Bucks reward by score tier, capped per day
+    const tier = skillMult(r.game, score), used = q1("SELECT COALESCE(SUM(delta),0) n FROM txns WHERE user_id=? AND kind='school_reward' AND ts>=?", ctx.user.id, etMidnight(dayKey())).n;
+    reward = tier ? Math.max(0, Math.min(Math.round(SCHOOL_REWARD * tier), SCHOOL_DAILY_CAP - used)) : 0; if (reward) balance = grant(ctx.user.id, reward, 'school_reward');
+  }
+  return { done: true, score, best: Math.max(score, prev ?? 0), newBest: prev == null || score > prev, bet: r.bet, mult, payout, balance, reward, ...detail };
 }
 const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = crypto.randomInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
@@ -622,6 +627,113 @@ Object.assign(arcade, {
     const recent = db.prepare("SELECT game FROM rounds WHERE user_id=? GROUP BY game ORDER BY MAX(created) DESC LIMIT 6").all(ctx.user.id).map(x => x.game);
     return { best, recent };
   },
+});
+
+/* ---------- four more skill games: Free Throw Line, Mental Math Sprint, Marching Band, Hallway Dash ---------- */
+const TSCALE = Number(process.env.SKILL_TIME_SCALE) || 1; // tests shrink the clocks
+// Free Throw Line: a meter sweeps back and forth; tap when it is inside the green zone. The server runs the meter clock.
+const HOOPS_SHOTS = 10, hoopsPeriod = i => Math.round(1700 - 55 * i), hoopsZone = streak => Math.max(0.07, 0.17 - 0.012 * streak), HOOPS_STALL_MS = 9000;
+const meterPos = (el, period) => { const ph = (el % period) / period; return ph < 0.5 ? ph * 2 : 2 - ph * 2; };
+// Mental Math Sprint: 60 seconds, problems get harder as you go
+const MATH_SECS = 60 * TSCALE, MATH_GRACE_MS = 1500;
+function mathQuestion(i) {
+  const r = n => crypto.randomInt(n); let a, b, c, q, ans;
+  if (i < 5) { a = 10 + r(40); b = 5 + r(30); if (r(2)) { q = `${a} + ${b}`; ans = a + b; } else { if (b > a) [a, b] = [b, a]; q = `${a} − ${b}`; ans = a - b; } }
+  else if (i < 12) { if (r(3)) { a = 3 + r(10); b = 3 + r(10); q = `${a} × ${b}`; ans = a * b; } else { a = 40 + r(60); b = 20 + r(40); q = `${a} + ${b}`; ans = a + b; } }
+  else if (i < 20) { if (r(2)) { a = 6 + r(10); b = 6 + r(10); c = 5 + r(40); q = `${a} × ${b} + ${c}`; ans = a * b + c; } else { b = 3 + r(10); ans = 4 + r(15); a = b * ans; q = `${a} ÷ ${b}`; } }
+  else { a = 11 + r(14); b = 3 + r(9); c = 10 + r(60); if (r(2)) { q = `${a} × ${b} − ${c}`; ans = a * b - c; } else { b = 4 + r(10); ans = 5 + r(20); a = b * ans; c = 5 + r(50); q = `${a} ÷ ${b} + ${c}`; ans = ans + c; } }
+  return { q, ans };
+}
+const mathPoints = (secs, combo) => 100 + Math.max(0, 40 - Math.floor(secs * 8)) + Math.min(combo, 10) * 5;
+// Marching Band: repeat the drum pattern, one beat longer every round
+const BAND_MAX = 20, BAND_STEP_MS = 4500, bandRound = n => 50 + 30 * n;
+// Hallway Dash: dodge backpacks in 3 lanes. The server builds the hallway, replays your lane changes and checks the clock.
+const DASH_MAX = 400, DASH_CHUNK = 120, dashTick = i => Math.max(150, Math.round(340 - 2.5 * i));
+const dashTimeAt = r => { let t = 0; for (let i = 0; i < r; i++) t += dashTick(i); return t * TSCALE; };
+const dashRowAt = el => { let r = 0, t = 0; while (r < DASH_MAX + 1 && t + dashTick(r) * TSCALE <= el) t += dashTick(r++) * TSCALE; return r; };
+function dashRows(seed) { // [blockedMask, passLane] per row; a safe path always exists (it shifts at most one lane per row)
+  const rnd = mulberry(seed), rows = []; let p = 1;
+  for (let r = 0; r <= DASH_MAX; r++) {
+    if (r < 5) { rows.push([0, -1]); continue; }
+    const k = rnd(); p = Math.min(2, Math.max(0, p + (k < 0.22 ? -1 : k > 0.78 ? 1 : 0)));
+    const q = Math.min(0.65, 0.25 + r * 0.004); let mask = 0; for (let l = 0; l < 3; l++) if (l !== p && rnd() < q) mask |= 1 << l;
+    let pass = -1; if (rnd() < 0.24) { const free = [0, 1, 2].filter(l => !(mask >> l & 1)); pass = free[Math.floor(rnd() * free.length)]; }
+    rows.push([mask, pass]);
+  }
+  return rows;
+}
+function dashReplay(rows, moves) { // -> { dist, passes, crashed }
+  let lane = 1, mi = 0, passes = 0;
+  for (let r = 0; r <= DASH_MAX; r++) {
+    while (mi < moves.length && moves[mi].row <= r) lane = moves[mi++].lane;
+    const [mask, pass] = rows[r];
+    if (mask >> lane & 1) return { dist: r, passes, crashed: true };
+    if (pass === lane) passes++;
+  }
+  return { dist: DASH_MAX, passes, crashed: false };
+}
+Object.assign(arcade, {
+  hoopsStart: ctx => tx(() => { const s = { i: 0, score: 0, makes: 0, perfects: 0, streak: 0, s0: now(), shots: [] }; return { ...skillStart(ctx, 'hoops', s), shots: HOOPS_SHOTS, period: hoopsPeriod(0), zone: hoopsZone(0) }; }),
+  hoopsShoot: ctx => tx(() => {
+    const { r, st } = live(ctx, 'hoops'), el = now() - st.s0, period = hoopsPeriod(st.i), zone = hoopsZone(st.streak);
+    const stalled = el > HOOPS_STALL_MS, pos = meterPos(el, period), off = Math.abs(pos - 0.5), hit = !stalled && off <= zone, perfect = hit && off <= zone / 3;
+    const pts = !hit ? 0 : (perfect ? 150 : 100) + Math.min(100, 25 * st.streak);
+    st.streak = hit ? st.streak + 1 : 0; st.makes += hit ? 1 : 0; st.perfects += perfect ? 1 : 0; st.score += pts; st.i++; st.shots.push(hit ? (perfect ? 2 : 1) : 0);
+    const out = { hit, perfect, pts, pos, stalled, score: st.score, shot: st.i, streak: st.streak, makes: st.makes };
+    if (st.i >= HOOPS_SHOTS) return { ...out, ...skillFinish(ctx, r, st, st.score, { makes: st.makes, perfects: st.perfects }) };
+    st.s0 = now(); save(r, st); return { ...out, period: hoopsPeriod(st.i), zone: hoopsZone(st.streak) };
+  }),
+  mathStart: ctx => tx(() => {
+    const q = mathQuestion(0), st = { t0: now(), i: 0, score: 0, right: 0, combo: 0, bestCombo: 0, ans: q.ans, asked: now() };
+    return { ...skillStart(ctx, 'math', st), q: q.q, secs: MATH_SECS };
+  }),
+  mathAnswer: ctx => tx(() => {
+    const { r, st } = live(ctx, 'math'), over = now() - st.t0 > MATH_SECS * 1000 + MATH_GRACE_MS;
+    if (over) return { late: true, ...skillFinish(ctx, r, st, st.score, { right: st.right, bestCombo: st.bestCombo, asked: st.i }) };
+    const a = ctx.body.answer; if (!Number.isInteger(a)) bad('Type a whole number');
+    const right = a === st.ans, secs = (now() - st.asked) / 1000;
+    st.combo = right ? st.combo + 1 : 0; st.bestCombo = Math.max(st.bestCombo, st.combo);
+    const pts = right ? mathPoints(secs, st.combo - 1) : 0; st.score += pts; st.right += right ? 1 : 0; st.i++;
+    const out = { right, answer: st.ans, pts, score: st.score, combo: st.combo, rightCount: st.right };
+    const q = mathQuestion(st.i); st.ans = q.ans; st.asked = now(); save(r, st); return { ...out, q: q.q };
+  }),
+  mathEnd: ctx => tx(() => {
+    const { r, st } = live(ctx, 'math'); if (now() - st.t0 < MATH_SECS * 1000 - 1000) bad('The sprint is not over yet');
+    return skillFinish(ctx, r, st, st.score, { right: st.right, bestCombo: st.bestCombo, asked: st.i });
+  }),
+  bandStart: ctx => tx(() => {
+    const st = { seq: [crypto.randomInt(4)], pos: 0, score: 0, done: 0, last: now() };
+    return { ...skillStart(ctx, 'band', st), show: st.seq };
+  }),
+  bandPress: ctx => tx(() => {
+    const { r, st } = live(ctx, 'band'), pad = int(ctx.body.pad, 0, 3, 'Pad'), late = now() - st.last > BAND_STEP_MS + st.seq.length * 150;
+    if (late || pad !== st.seq[st.pos]) return { ok: false, late, expected: st.seq[st.pos], length: st.seq.length, ...skillFinish(ctx, r, st, st.score, { length: st.done }) };
+    st.pos++; st.last = now();
+    if (st.pos < st.seq.length) { save(r, st); return { ok: true, pos: st.pos }; }
+    st.score += bandRound(st.seq.length); st.done = st.seq.length; st.pos = 0;
+    if (st.done >= BAND_MAX) return { ok: true, perfect: true, ...skillFinish(ctx, r, st, st.score, { length: st.done }) };
+    st.seq.push(crypto.randomInt(4)); st.last = now() + 800 + st.seq.length * 450; save(r, st); // grace for the playback of the new pattern
+    return { ok: true, round: st.done, score: st.score, show: st.seq };
+  }),
+  dashStart: ctx => tx(() => {
+    const seed = crypto.randomInt(2 ** 31), st = { seed, t0: now() };
+    return { ...skillStart(ctx, 'dash', st), rows: dashRows(seed).slice(0, DASH_CHUNK), tick: Array.from({ length: DASH_MAX + 1 }, (_, i) => dashTick(i)), max: DASH_MAX };
+  }),
+  dashRows: ctx => { // the next stretch of hallway, only as far ahead as the clock allows
+    const { st } = live(ctx, 'dash'), from = int(ctx.body.from, 0, DASH_MAX, 'From');
+    if (from > dashRowAt(now() - st.t0) + DASH_CHUNK) bad('Too far ahead');
+    return { from, rows: dashRows(st.seed).slice(from, from + DASH_CHUNK) };
+  },
+  dashEnd: ctx => tx(() => {
+    const { r, st } = live(ctx, 'dash'), moves = ctx.body.moves;
+    if (!Array.isArray(moves) || moves.length > 500) bad('Bad moves');
+    let prevRow = -1, prevLane = 1;
+    for (const m of moves) { if (!m || !Number.isInteger(m.row) || !Number.isInteger(m.lane) || m.row <= prevRow || m.row > DASH_MAX || m.lane < 0 || m.lane > 2 || Math.abs(m.lane - prevLane) !== 1) bad('Those moves are not possible'); prevRow = m.row; prevLane = m.lane; }
+    const res = dashReplay(dashRows(st.seed), moves);
+    if (now() - st.t0 < dashTimeAt(res.dist) - 800 * TSCALE) bad('Too fast: that run is not possible yet');
+    const score = res.dist * 10 + res.passes * 50 + (res.crashed ? 0 : 500);
+    return skillFinish(ctx, r, st, score, { rows: res.dist, passes: res.passes, crashed: res.crashed });
+  }),
 });
 
 /* ---------- Luck Lab setting (see luckK): changes odds in five arcade games with RTP held constant; never touches picks or skill scores ---------- */
@@ -824,6 +936,47 @@ function adminBan(ctx) {
 const adminLog = () => ({ log: db.prepare('SELECT l.*, u.username AS admin FROM admin_log l JOIN users u ON u.id=l.admin_id ORDER BY l.id DESC LIMIT 100').all() });
 function myNotes(ctx) { const n = db.prepare('SELECT id, msg, ts FROM notes WHERE user_id=? AND seen=0 ORDER BY id').all(ctx.user.id); if (n.length) db.prepare('UPDATE notes SET seen=1 WHERE user_id=? AND seen=0').run(ctx.user.id); return { notes: n, balance: balanceOf(ctx.user.id) }; }
 
+/* ---------- Site Mode: HawkBet (everything) vs Seahawk Arcade (School Edition: skill games only) ----------
+   The admin picks the mode and can turn on a school-hours schedule. In school mode the SERVER refuses every chance game,
+   sports picks and the live feed, bets are off, and skill scores pay a small daily-capped Hawk Bucks reward instead. */
+const SCHOOL_DEFAULT = { mode: 'full', schedule: { on: false, days: [1, 2, 3, 4, 5], start: '07:30', end: '14:30' } };
+const modeCfg = () => ({ ...SCHOOL_DEFAULT, ...getSetting('site_mode', {}), schedule: { ...SCHOOL_DEFAULT.schedule, ...(getSetting('site_mode', {}).schedule || {}) } });
+const hm = s => { const [h, m] = String(s).split(':').map(Number); return h * 60 + m; };
+function siteMode() { // 'school' or 'full', and why
+  const c = modeCfg();
+  if (c.schedule.on) {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { ...ET, weekday: 'short', hour12: false, hour: '2-digit', minute: '2-digit' }).formatToParts(new Date()).map(x => [x.type, x.value]));
+    const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday), mins = (Number(p.hour) % 24) * 60 + Number(p.minute);
+    if (c.schedule.days.includes(dow) && mins >= hm(c.schedule.start) && mins < hm(c.schedule.end)) return { mode: 'school', source: 'schedule' };
+    return { mode: 'full', source: 'schedule' };
+  }
+  return { mode: c.mode, source: 'manual' };
+}
+const isSchool = () => siteMode().mode === 'school';
+const SCHOOL_REWARD = 50, SCHOOL_DAILY_CAP = 1000;
+function blockedInSchool(key) {
+  const m = /^(?:GET|POST) \/api\/arcade\/([a-z-]+)/.exec(key);
+  if (m) return !['config', 'stats', 'highscores', 'active'].includes(m[1]) && !SKILL_GAMES.includes(m[1]);
+  return /^(?:GET|POST) \/api\/(?:slips|props|fair|tournament|feed|shop\/booster)/.test(key);
+}
+function refundBlocked(uid) { // bets still on the table when school mode starts go back to the player
+  const rows = db.prepare("SELECT id, bet, game FROM rounds WHERE user_id=? AND status='active'").all(uid).filter(r => !SKILL_GAMES.includes(r.game) || r.bet > 0);
+  if (!rows.length) return;
+  tx(() => { for (const r of rows) { if (r.bet) adjust(uid, r.bet, r.game + '_refund', r.id); db.prepare("UPDATE rounds SET status='refunded' WHERE id=?").run(r.id); } });
+}
+function adminMode(ctx) {
+  const c = modeCfg();
+  if (ctx.body.mode !== undefined) { if (!['full', 'school'].includes(ctx.body.mode)) bad('Mode must be full or school'); c.mode = ctx.body.mode; }
+  const s = ctx.body.schedule;
+  if (s) {
+    if (typeof s.on === 'boolean') c.schedule.on = s.on;
+    if (Array.isArray(s.days)) c.schedule.days = [...new Set(s.days.filter(d => Number.isInteger(d) && d >= 0 && d <= 6))];
+    for (const k of ['start', 'end']) if (s[k] !== undefined) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s[k])) bad('Times look like 07:30'); c.schedule[k] = s[k]; }
+    if (hm(c.schedule.start) >= hm(c.schedule.end)) bad('School should end after it starts');
+  }
+  putSetting('site_mode', c); alog(ctx, 'site_mode', null, JSON.stringify(c)); return { ...c, now: siteMode() };
+}
+
 /* ---------- rewards: XP and levels, daily challenges, the daily wheel, achievements, weekly tournament ----------
    All progress is computed on the server from the rounds and scores tables. Free Hawk Bucks from rewards go through grant(),
    which also counts them as `added`, so they never count toward leaderboard net winnings. */
@@ -860,6 +1013,10 @@ const CHALLENGES = [
   { id: 'cross5', title: 'Hop 5 lanes in one crossing', desc: 'Dodge the buses', goal: 5, reward: 125, icon: '🚌', p: (u, t) => q1("SELECT COALESCE(MAX(json_extract(state,'$.at')),0) n FROM rounds WHERE user_id=? AND game='cross' AND created>=?", u, t).n },
   { id: 'dice5', title: 'Win 5 Scoreboard Rolls', desc: 'Beat the scoreboard 5 times', goal: 5, reward: 125, icon: '🎲', p: (u, t) => q1("SELECT COUNT(*) n FROM rounds WHERE user_id=? AND game='dice' AND payout>bet AND created>=?", u, t).n },
   { id: 'dicelow', title: 'Win a long-shot roll', desc: 'Win Scoreboard Roll at 10% chance or less', goal: 1, reward: 150, icon: '🎯', p: (u, t) => q1("SELECT COUNT(*) n FROM rounds WHERE user_id=? AND game='dice' AND payout>bet AND json_extract(state,'$.zone')<=10 AND created>=?", u, t).n },
+  { id: 'hoops7', title: 'Hit 7 free throws in one game', desc: 'Free Throw Line', goal: 1, reward: 150, icon: '🏀', p: (u, t) => q1("SELECT COUNT(*) n FROM scores WHERE user_id=? AND game='hoops' AND json_extract(detail,'$.makes')>=7 AND created>=?", u, t).n },
+  { id: 'math20', title: 'Get 20 right in Mental Math Sprint', desc: 'Quick mind', goal: 1, reward: 150, icon: '➕', p: (u, t) => q1("SELECT COUNT(*) n FROM scores WHERE user_id=? AND game='math' AND json_extract(detail,'$.right')>=20 AND created>=?", u, t).n },
+  { id: 'band8', title: 'Repeat a pattern of 8 in Marching Band', desc: 'Keep the beat', goal: 1, reward: 150, icon: '🥁', p: (u, t) => q1("SELECT COUNT(*) n FROM scores WHERE user_id=? AND game='band' AND json_extract(detail,'$.length')>=8 AND created>=?", u, t).n },
+  { id: 'dash60', title: 'Run 60 rows in Hallway Dash', desc: 'Dodge the backpacks', goal: 1, reward: 150, icon: '🏃', p: (u, t) => q1("SELECT COUNT(*) n FROM scores WHERE user_id=? AND game='dash' AND json_extract(detail,'$.rows')>=60 AND created>=?", u, t).n },
   { id: 'mines5', title: 'Open 5 lockers in one Locker Hunt', desc: 'Avoid the hall monitor', goal: 5, reward: 125, icon: '🔐', p: (u, t) => q1("SELECT COALESCE(MAX(json_array_length(json_extract(state,'$.opened'))),0) n FROM rounds WHERE user_id=? AND game='mines' AND created>=?", u, t).n },
 ];
 function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -875,9 +1032,9 @@ const ACH = [ // [key, icon, title, description, xp, check(uid)]
   ['rounds10', '🎲', 'Warming Up', 'Play 10 rounds', 50, u => q1(`SELECT COUNT(*) n FROM rounds WHERE user_id=? AND ${done}`, u).n >= 10],
   ['rounds100', '🏟️', 'Regular', 'Play 100 rounds', 150, u => q1(`SELECT COUNT(*) n FROM rounds WHERE user_id=? AND ${done}`, u).n >= 100],
   ['rounds1000', '🏅', 'Lifer', 'Play 1,000 rounds', 400, u => q1(`SELECT COUNT(*) n FROM rounds WHERE user_id=? AND ${done}`, u).n >= 1000],
-  ['mult5', '💥', 'Big Hit', 'Win at 5x or more', 75, u => !!q1(`SELECT 1 FROM rounds WHERE user_id=? AND payout>bet AND mult>=5 AND game NOT IN ('bell','memory','trivia') LIMIT 1`, u)],
-  ['mult20', '🔥', 'On Fire', 'Win at 20x or more', 150, u => !!q1(`SELECT 1 FROM rounds WHERE user_id=? AND payout>bet AND mult>=20 AND game NOT IN ('bell','memory','trivia') LIMIT 1`, u)],
-  ['mult100', '🌙', 'Moonshot', 'Win at 100x or more', 400, u => !!q1(`SELECT 1 FROM rounds WHERE user_id=? AND payout>bet AND mult>=100 AND game NOT IN ('bell','memory','trivia') LIMIT 1`, u)],
+  ['mult5', '💥', 'Big Hit', 'Win at 5x or more', 75, u => !!q1(`SELECT 1 FROM rounds WHERE user_id=? AND payout>bet AND mult>=5 AND game NOT IN ('bell','memory','trivia','hoops','math','band','dash') LIMIT 1`, u)],
+  ['mult20', '🔥', 'On Fire', 'Win at 20x or more', 150, u => !!q1(`SELECT 1 FROM rounds WHERE user_id=? AND payout>bet AND mult>=20 AND game NOT IN ('bell','memory','trivia','hoops','math','band','dash') LIMIT 1`, u)],
+  ['mult100', '🌙', 'Moonshot', 'Win at 100x or more', 400, u => !!q1(`SELECT 1 FROM rounds WHERE user_id=? AND payout>bet AND mult>=100 AND game NOT IN ('bell','memory','trivia','hoops','math','band','dash') LIMIT 1`, u)],
   ['jackpot', '🏆', 'State Champs', 'Hit the Seahawk Slots jackpot', 500, u => !!q1("SELECT 1 FROM rounds WHERE user_id=? AND game='slots' AND mult>=250 LIMIT 1", u)],
   ['rocket10', '🚀', 'To the Moon', 'Cash out Seahawk Launch at 10x+', 200, u => !!q1("SELECT 1 FROM rounds WHERE user_id=? AND game='rocket' AND status='cashed' AND mult>=10 LIMIT 1", u)],
   ['natural', '🃏', 'Natural', 'Get a blackjack in Hawk 21', 100, u => !!q1("SELECT 1 FROM rounds WHERE user_id=? AND game='bj' AND mult=2.5 LIMIT 1", u)],
@@ -888,6 +1045,10 @@ const ACH = [ // [key, icon, title, description, xp, check(uid)]
   ['trivia7', '❓', 'Honor Roll', 'Get all 7 right in Seahawk Trivia', 250, u => !!q1("SELECT 1 FROM scores WHERE user_id=? AND game='trivia' AND json_extract(detail,'$.correct')=7 LIMIT 1", u)],
   ['sniper', '🎯', 'Sniper', 'Win Scoreboard Roll at 5% chance or less', 150, u => !!q1("SELECT 1 FROM rounds WHERE user_id=? AND game='dice' AND payout>bet AND json_extract(state,'$.zone')<=5 LIMIT 1", u)],
   ['bullseye', '🔔', 'Bullseye', 'Roll exactly 50.00 on Scoreboard Roll', 100, u => !!q1("SELECT 1 FROM rounds WHERE user_id=? AND game='dice' AND json_extract(state,'$.roll')=50 LIMIT 1", u)],
+  ['buzzer', '🏀', 'Nothing But Net', 'Make all 10 free throws', 200, u => !!q1("SELECT 1 FROM scores WHERE user_id=? AND game='hoops' AND json_extract(detail,'$.makes')=10 LIMIT 1", u)],
+  ['mathlete', '➕', 'Mathlete', 'Get 30 right in one Mental Math Sprint', 200, u => !!q1("SELECT 1 FROM scores WHERE user_id=? AND game='math' AND json_extract(detail,'$.right')>=30 LIMIT 1", u)],
+  ['drumline', '🥁', 'Drumline', 'Repeat a pattern of 12 in Marching Band', 200, u => !!q1("SELECT 1 FROM scores WHERE user_id=? AND game='band' AND json_extract(detail,'$.length')>=12 LIMIT 1", u)],
+  ['hallpass', '🏃', 'Hall Pass', 'Grab 10 hall passes in one Hallway Dash run', 200, u => !!q1("SELECT 1 FROM scores WHERE user_id=? AND game='dash' AND json_extract(detail,'$.passes')>=10 LIMIT 1", u)],
   ['wheel', '🎡', 'Spin Doctor', 'Spin the daily wheel', 50, u => !!q1("SELECT 1 FROM users WHERE id=? AND last_wheel!=''", u)],
   ['claims10', '📋', 'Overachiever', 'Finish 10 daily challenges', 200, u => q1('SELECT COUNT(*) n FROM challenge_claims WHERE user_id=?', u).n >= 10],
   ['varsity', '🎓', 'Varsity', 'Reach level 5', 300, u => q1('SELECT level FROM users WHERE id=?', u).level >= 5],
@@ -929,7 +1090,7 @@ function spinWheel(ctx) {
   });
 }
 function tournament(ctx) { // best multiplier of the week (Super Luck rounds and skill games excluded)
-  const t = weekStart(), base = `FROM rounds r JOIN users u ON u.id=r.user_id WHERE r.created>=? AND r.payout>r.bet AND r.game NOT IN ('bell','memory','trivia') AND r.state NOT LIKE '%"sup":1%'`;
+  const t = weekStart(), base = `FROM rounds r JOIN users u ON u.id=r.user_id WHERE r.created>=? AND r.payout>r.bet AND r.game NOT IN ('bell','memory','trivia','hoops','math','band','dash') AND r.state NOT LIKE '%"sup":1%'`;
   const top = db.prepare(`SELECT u.username, r.game, MAX(r.mult) AS mult, r.bet, r.payout ${base} GROUP BY r.user_id ORDER BY mult DESC, r.id LIMIT 10`).all(t);
   const mine = db.prepare(`SELECT MAX(r.mult) AS mult ${base} AND r.user_id=?`).get(t, ctx.user.id).mult;
   return { top, mine, since: t };
@@ -949,7 +1110,7 @@ function bank(ctx) { // broke-only refill: under 100 Hawk Bucks, once an hour
 /* ---------- routes ---------- */
 const need = fn => ctx => { if (!ctx.user) bad('Please log in', 401); return fn(ctx); };
 const routes = {
-  'GET /api/me': ctx => ({ user: ctx.user ? publicUser(ctx.user) : null, inviteRequired: !!INVITE_CODE }),
+  'GET /api/me': ctx => { const m = siteMode(); if (ctx.user && m.mode === 'school') { refundBlocked(ctx.user.id); ctx.user = db.prepare('SELECT * FROM users WHERE id=?').get(ctx.user.id); } return { user: ctx.user ? publicUser(ctx.user) : null, inviteRequired: !!INVITE_CODE, mode: m.mode, schoolReward: { each: SCHOOL_REWARD, cap: SCHOOL_DAILY_CAP } }; },
   'POST /api/register': ctx => { limit(ctx.ip); return register(ctx); },
   'POST /api/login': ctx => { limit(ctx.ip); return login(ctx); },
   'POST /api/logout': ctx => { const m = /sp_sid=([a-f0-9]{64})/.exec(ctx.req.headers.cookie || ''); if (m) db.prepare('DELETE FROM sessions WHERE token_hash=?').run(sha(m[1])); ctx.res.setHeader('Set-Cookie', `sp_sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${PROD ? '; Secure' : ''}`); return { ok: true }; },
@@ -1032,6 +1193,18 @@ const routes = {
   'POST /api/arcade/memory/flip': need(arcade.memoryFlip),
   'POST /api/arcade/trivia/start': need(arcade.triviaStart),
   'POST /api/arcade/trivia/answer': need(arcade.triviaAnswer),
+  'POST /api/arcade/hoops/start': need(arcade.hoopsStart),
+  'POST /api/arcade/hoops/shoot': need(arcade.hoopsShoot),
+  'POST /api/arcade/math/start': need(arcade.mathStart),
+  'POST /api/arcade/math/answer': need(arcade.mathAnswer),
+  'POST /api/arcade/math/end': need(arcade.mathEnd),
+  'POST /api/arcade/band/start': need(arcade.bandStart),
+  'POST /api/arcade/band/press': need(arcade.bandPress),
+  'POST /api/arcade/dash/start': need(arcade.dashStart),
+  'POST /api/arcade/dash/rows': need(arcade.dashRows),
+  'POST /api/arcade/dash/end': need(arcade.dashEnd),
+  'GET /api/admin/mode': need(admin(() => ({ ...modeCfg(), now: siteMode() }))),
+  'POST /api/admin/mode': need(admin(adminMode)),
   'POST /api/arcade/rocket/start': need(arcade.rocketStart),
   'POST /api/arcade/rocket/cashout': need(arcade.rocketCash),
   'POST /api/arcade/rocket/watch': need(arcade.rocketWatch),
@@ -1075,6 +1248,7 @@ const server = http.createServer((req, res) => {
       if (req.method === 'POST' && !sameOrigin(req)) bad('Cross-site request blocked', 403);
       if (req.method === 'POST' && !/application\/json/.test(req.headers['content-type'] || '')) bad('JSON only', 415);
       const body = raw ? JSON.parse(raw) : {};
+      if (isSchool() && blockedInSchool(key)) bad('Not available in Seahawk Arcade (School Edition)', 403);
       const result = handler({ req, res, url, body, user: userFrom(req), ip: clientIp(req) });
       if (result && typeof result.then === 'function') return result.then(r => send(res, 200, JSON.stringify(r)), fail);
       send(res, 200, JSON.stringify(result));

@@ -6,6 +6,8 @@ const fmt = n => Math.round(n).toLocaleString();
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /* ---------- api + session ---------- */
+let MODE = 'full', SCHOOLR = { each: 50, cap: 1000 };
+const SCHOOL = () => MODE === 'school';
 let U = null, INVITE = false, PROPS = [], CFG = null, pending = 0; // pending = payout still being animated, hidden from the balance until it lands
 async function api(method, path, body) {
   const r = await fetch('/api' + path, { method, headers: method === 'POST' ? { 'Content-Type': 'application/json' } : {}, body: method === 'POST' ? JSON.stringify(body || {}) : undefined });
@@ -94,6 +96,10 @@ const sfx = (() => {
     clunk: () => { tone(160, 0, 0.14, 'sine', 0.13, 62); tone(95, 0.01, 0.12, 'triangle', 0.08); },
     ratchet: () => [0, 0.05, 0.1, 0.15, 0.2].forEach((t, k) => tone(700 + k * 90, t, 0.035, 'square', 0.04)),
     lever: () => tone(380, 0, 0.3, 'sawtooth', 0.04, 130),
+    pad0: () => { tone(196, 0, 0.22, 'triangle', 0.12, 130); tone(392, 0, 0.08, 'sine', 0.04); },
+    pad1: () => { tone(247, 0, 0.22, 'triangle', 0.12, 165); tone(494, 0, 0.08, 'sine', 0.04); },
+    pad2: () => { tone(311, 0, 0.22, 'triangle', 0.12, 208); tone(622, 0, 0.08, 'sine', 0.04); },
+    pad3: () => { tone(392, 0, 0.22, 'triangle', 0.12, 262); tone(784, 0, 0.08, 'sine', 0.04); },
     coin: () => { tone(1568, 0, 0.06, 'square', 0.035); tone(2093, 0.06, 0.2, 'square', 0.035); },
     jackpot: () => { notes([523, 659, 784, 1047, 1319, 1568, 2093, 2637], 0.07, 0.26, 'triangle', 0.075); tone(262, 0, 1.1, 'sawtooth', 0.035); tone(2093, 0.6, 0.8, 'sine', 0.05); },
   };
@@ -172,7 +178,8 @@ const pick = {}; let mode = 'power', entry = 25, slipOpen = false;
 let view = 'home', sport = 'All', stat = 'All', lineTab = 'open', game = 'plinko', nav = 0;
 async function go() {
   const my = ++nav; stopGames();
-  if (!U) { try { const m = await api('GET', '/me'); U = m.user; INVITE = m.inviteRequired; } catch (e) {} if (my !== nav) return; }
+  try { const m = await api('GET', '/me'); U = m.user; INVITE = m.inviteRequired; if (m.schoolReward) SCHOOLR = m.schoolReward; setMode(m.mode); } catch (e) {} if (my !== nav) return;
+  if (U && SCHOOL() && ['board', 'lineups', 'luck'].includes(location.hash.slice(1))) { location.hash = '#home'; return; }
   document.body.classList.toggle('out', !U);
   $('#logout').classList.toggle('hidden', !U); $('#adminLink').classList.toggle('hidden', !(U && U.isAdmin)); $('#lvlchip').classList.toggle('hidden', !U);
   if (!U) return renderAuth();
@@ -181,6 +188,7 @@ async function go() {
   document.querySelectorAll('[data-v]').forEach(a => a.classList.toggle('on', a.dataset.v === view));
   document.querySelectorAll('#origlist a').forEach(a => a.classList.toggle('on', view === 'arcade' && a.dataset.og === game));
   if (view !== 'arcade') document.documentElement.style.removeProperty('--ga');
+  if (SCHOOL() && !SKILL_IDS.has(game)) game = 'hoops';
   paintLevel(); document.body.classList.remove('drawer');
   const R = { rewards: renderRewards, home: renderHome, board: renderBoard, arcade: renderArcade, lineups: renderLineups, leaders: renderLeaders, admin: renderAdmin, bank: renderBank, luck: renderLuck, shop: renderShop };
   try { await (R[view] || renderHome)(my); const ap = $('#app'); ap.classList.remove('pagein'); void ap.offsetWidth; ap.classList.add('pagein'); } catch (e) { if (my === nav) $('#app').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
@@ -291,7 +299,14 @@ async function renderLineups(my) {
 
 /* ---------- leaderboard ---------- */
 let lbTab = 'net';
+let lbGame = 'hoops';
 async function renderLeaders(my) {
+  if (SCHOOL()) {
+    const ids = [...SKILL_IDS], t = await api('GET', '/arcade/highscores?game=' + lbGame); if (my !== nav) return;
+    $('#app').innerHTML = `<h1>Top Scores</h1><div class="sub">${ids.map(id => `<button class="pill ${id === lbGame ? 'on' : ''}" data-lbg="${id}">${esc(gameLabel(id))}</button>`).join('')}</div>
+      <div class="panel"><table class="lb"><tr><th>#</th><th>Player</th><th>Best score</th></tr>${t.top.map((x, i) => `<tr class="${x.username === U.username ? 'me' : ''}"><td>${i + 1}</td><td>${esc(x.username)}</td><td><b>${fmt(x.best)}</b></td></tr>`).join('') || '<tr><td colspan="3" class="mutecell">No scores yet. Be the first!</td></tr>'}</table></div>`;
+    document.querySelectorAll('[data-lbg]').forEach(b => b.onclick = () => { lbGame = b.dataset.lbg; renderLeaders(nav); }); return;
+  }
   const tabs = `<div class="sub"><button class="pill ${lbTab === 'net' ? 'on' : ''}" data-lbt="net">💰 Net winnings</button><button class="pill ${lbTab === 'week' ? 'on' : ''}" data-lbt="week">⚡ Best win this week</button></div>`;
   if (lbTab === 'week') {
     const t = await api('GET', '/tournament'); if (my !== nav) return;
@@ -336,12 +351,13 @@ async function renderLines(my) {
 /* ---------- arcade ---------- */
 let stopFns = [];
 function stopGames() { stopFns.forEach(f => f()); stopFns = []; if (pending) { pending = 0; showBal(); } }
-const GAME_COLOR = { plinko: '#ff4fd8', mines: '#3d8bff', cross: '#ffc542', flip: '#f5a623', dice: '#a855ff', limbo: '#19e58a', slots: '#ff4d5e', roulette: '#12c26a', rps: '#ff7a3c', bj: '#e0284a', rocket: '#ffb21a', bell: '#ffd24a', memory: '#9b5cff', trivia: '#16e0c0' };
-const GAMES = [['plinko', '🔵 Hawk Drop'], ['mines', '🔐 Locker Hunt'], ['cross', '🚌 Seahawk Crossing'], ['flip', '🪙 Heads or Tails'], ['dice', '🎲 Scoreboard Roll'], ['limbo', '🏈 Hail Mary'], ['slots', '🎰 Seahawk Slots'], ['roulette', '🎡 Lakes Roulette'], ['rps', '✊ Hallway RPS'], ['bj', '🃏 Hawk 21'], ['rocket', '🚀 Seahawk Launch'], ['bell', '🔔 Bell Rush'], ['memory', '🧠 Classroom Memory'], ['trivia', '❓ Seahawk Trivia']];
-const GAME_FNS = { plinko, mines, cross, flip, dice, limbo, slots, roulette, rps, bj, rocket, bell, memory, trivia }; // every game that can launch
+const GAME_COLOR = { plinko: '#ff4fd8', mines: '#3d8bff', cross: '#ffc542', flip: '#f5a623', dice: '#a855ff', limbo: '#19e58a', slots: '#ff4d5e', roulette: '#12c26a', rps: '#ff7a3c', bj: '#e0284a', rocket: '#ffb21a', bell: '#ffd24a', memory: '#9b5cff', trivia: '#16e0c0', hoops: '#ff8a3c', math: '#4f8bff', band: '#19e58a', dash: '#ffc542' };
+const GAMES = [['plinko', '🔵 Hawk Drop'], ['mines', '🔐 Locker Hunt'], ['cross', '🚌 Seahawk Crossing'], ['flip', '🪙 Heads or Tails'], ['dice', '🎲 Scoreboard Roll'], ['limbo', '🏈 Hail Mary'], ['slots', '🎰 Seahawk Slots'], ['roulette', '🎡 Lakes Roulette'], ['rps', '✊ Hallway RPS'], ['bj', '🃏 Hawk 21'], ['rocket', '🚀 Seahawk Launch'], ['bell', '🔔 Bell Rush'], ['memory', '🧠 Classroom Memory'], ['trivia', '❓ Seahawk Trivia'], ['hoops', '🏀 Free Throw Line'], ['math', '➕ Mental Math Sprint'], ['band', '🥁 Marching Band'], ['dash', '🏃 Hallway Dash']];
+const GAME_FNS = { plinko, mines, cross, flip, dice, limbo, slots, roulette, rps, bj, rocket, bell, memory, trivia, hoops, math, band, dash }; // every game that can launch
 const CATS = [['all', 'All'], ['featured', '⭐ Featured'], ['recent', '🕘 Recent'], ['classic', '🎰 Classic'], ['skill', '🧠 Skill']];
-const SKILL_IDS = new Set(['bell', 'memory', 'trivia']);
+const SKILL_IDS = new Set(['bell', 'memory', 'trivia', 'hoops', 'math', 'band', 'dash']);
 let arcCat = 'all';
+const catsNow = () => SCHOOL() ? CATS.filter(([k]) => k !== 'classic') : CATS;
 async function renderArcade(my) {
   CFG = { ...(await api('GET', '/arcade/config')), user: U.username }; U.luck = CFG.luckName; // luck can change between visits (boosters and charges run out)
   if (Date.now() - (renderArcade.at || 0) > 30000) { STATS = await api('GET', '/arcade/stats').catch(() => STATS); renderArcade.at = Date.now(); } if (my !== nav) return;
@@ -349,8 +365,8 @@ async function renderArcade(my) {
   const week = Math.floor((Date.now() / 864e5 + 4) / 7), featured = [...new Set([0, 1, 2].map(k => list[(week * 3 + k * 5) % list.length]))]; // rotates every Monday
   const shown = { all: list, featured, recent: STATS.recent.map(id => byId[id]).filter(Boolean), classic: list.filter(g => !SKILL_IDS.has(g.id)), skill: list.filter(g => SKILL_IDS.has(g.id)) }[arcCat] || list;
   const cur = byId[game] || list[0]; document.documentElement.style.setProperty('--ga', GAME_COLOR[cur.id] || '#3d6bff');
-  $('#app').innerHTML = `<div class="archead"><h1>Seahawk Arcade</h1><a class="luckchip" href="#shop">${luckBadge()}</a></div>
-    <div class="pills cats" role="group" aria-label="Filter games">${CATS.map(([k, l]) => `<button class="pill ${k === arcCat ? 'on' : ''}" data-cat="${k}" aria-pressed="${k === arcCat}">${l}</button>`).join('')}</div>
+  $('#app').innerHTML = `<div class="archead"><h1>Seahawk Arcade</h1>${SCHOOL() ? `<span class="luckchip">🏫 Seahawk Arcade · skill games earn up to ${fmt(SCHOOLR.cap)} 🪙 a day</span>` : `<a class="luckchip" href="#shop">${luckBadge()}</a>`}</div>
+    <div class="pills cats" role="group" aria-label="Filter games">${catsNow().map(([k, l]) => `<button class="pill ${k === arcCat ? 'on' : ''}" data-cat="${k}" aria-pressed="${k === arcCat}">${l}</button>`).join('')}</div>
     <div class="gstrip">${shown.map(g => `<button class="gtile ${g.id === game ? 'on' : ''}" data-g="${g.id}" aria-label="${esc(g.title)}"><span>${esc(g.emoji)}</span><b>${esc(g.title)}</b><small>${esc(bestText(g.id) ? '🏆 ' + bestText(g.id) : g.tag)}</small></button>`).join('') || '<div class="mutecell gempty">Nothing here yet – play a game first!</div>'}</div>
     <div class="gamehead"><span class="ge">${esc(cur.emoji)}</span><div class="gt"><h2>${esc(cur.title)}</h2><small>${esc(cur.desc)}</small></div><div class="pbbar" id="pb"></div></div>
     <div id="gm"></div>
@@ -379,6 +395,10 @@ const GAME_KEYS = {
   bell: { Space: ['#pad', '#start'], hint: 'Space start / tap the bell' },
   memory: { Space: ['#start'], hint: 'Space start · Tab + Enter flips a card' },
   trivia: { Space: ['#start'], ...ANS, hint: 'Space start · 1–4 or A–D answer' },
+  hoops: { Space: ['#shoot', '#start'], hint: 'Space start / shoot' },
+  math: { Space: ['#start'], hint: 'Space start · type the answer, Enter to submit' },
+  band: { Space: ['#start'], hint: 'Space start · keys 1–4 play the drums' },
+  dash: { Space: ['#start'], hint: 'Space start · ← → or A / D change lanes' },
 };
 const usable = el => el && !el.disabled && !el.closest('.hidden') && el.offsetParent !== null;
 function bindKeys(id) {
@@ -428,12 +448,16 @@ const GAME_INFO = {
   bell: { tag: 'Reaction', desc: 'The bell rings, you move. Like 7th period, but now it’s a competition.' },
   memory: { tag: 'Memory', desc: 'Match the classroom cards fast. Easier than remembering your locker combo.' },
   trivia: { tag: 'Trivia', desc: 'Seven questions, twenty seconds each. Finally, a quiz where speed counts.' },
+  hoops: { tag: 'Timing', desc: 'Ten shots, one swinging meter. Hit the green and the gym goes quiet for you.' },
+  math: { tag: 'Quick math', desc: 'Sixty seconds of mental math that keeps getting harder. No calculator, no mercy.' },
+  band: { tag: 'Memory', desc: 'Repeat the drumline, one beat longer every round. Band kids already know.' },
+  dash: { tag: 'Action', desc: 'Dodge backpacks between classes and grab hall passes. The bell is not waiting.' },
 };
 /* ---------- cover art: one glossy vector object per game, reused for the carousel (landscape) and the Originals grid (portrait) ---------- */
 const ART = { // [gradient start, gradient end]
   plinko: ['#ff4fd8', '#5b2bd0'], mines: ['#2fb0ff', '#2a3fd8'], cross: ['#ffc542', '#ff5a3c'], flip: ['#ffb53a', '#b83a1c'], dice: ['#b06aff', '#3a2fe0'],
   limbo: ['#22e08a', '#06705a'], slots: ['#ff4d6e', '#6a1fd8'], roulette: ['#14c98a', '#0a4f8a'], rps: ['#ff8a3c', '#d8204a'], bj: ['#e0284a', '#2e0a2a'],
-  rocket: ['#ffb21a', '#ff2d6e'], bell: ['#ffe08a', '#e07a12'], memory: ['#9b5cff', '#ff4fd8'], trivia: ['#18e0c4', '#2f4bff'],
+  rocket: ['#ffb21a', '#ff2d6e'], bell: ['#ffe08a', '#e07a12'], memory: ['#9b5cff', '#ff4fd8'], trivia: ['#18e0c4', '#2f4bff'], hoops: ['#ff8a3c', '#b8341c'], math: ['#2f6bff', '#0a2a7a'], band: ['#12c26a', '#0a3a8a'], dash: ['#ffc542', '#d8204a'],
 };
 let artSeq = 0;
 function objArt(id, u) { // returns SVG markup for the game's object, drawn in a 300x300 box
@@ -480,6 +504,14 @@ function objArt(id, u) { // returns SVG markup for the game's object, drawn in a
     }
     case 'trivia':
       return `<defs>${gold}</defs>${shadow}<rect x="34" y="34" width="232" height="168" rx="12" fill="#0f5a44" stroke="#a8672a" stroke-width="12"/><text x="150" y="168" font-size="150" font-weight="900" text-anchor="middle" fill="url(#${u}gold)" stroke="#7a4a00" stroke-width="5" paint-order="stroke">?</text><image href="logo.svg" x="216" y="150" width="44" height="44"/>${['A', 'B', 'C', 'D'].map((l, k) => `<circle cx="${68 + k * 55}" cy="240" r="21" fill="${k === 2 ? '#19e58a' : '#2f4bff'}" stroke="#fff" stroke-width="3"/><text x="${68 + k * 55}" y="248" font-size="22" font-weight="900" text-anchor="middle" fill="#fff">${l}</text>`).join('')}`;
+    case 'hoops':
+      return `<defs>${rg('b', [0, '#ffd2a0'], [.4, '#ff7a1a'], [1, '#8a2a00'])}</defs>${shadow}<rect x="70" y="30" width="160" height="110" rx="10" fill="#fff" stroke="#c9cfe8" stroke-width="6"/><rect x="108" y="64" width="84" height="56" rx="4" fill="none" stroke="#e8461a" stroke-width="6"/><path d="M96 142h108l-22 66h-64z" fill="none" stroke="#fff" stroke-width="3" opacity=".85"/><ellipse cx="150" cy="142" rx="56" ry="10" fill="none" stroke="#ff5a1a" stroke-width="9"/><circle cx="150" cy="226" r="40" fill="url(#${u}b)" stroke="#5a1a00" stroke-width="4"/><path d="M110 226h80M150 186v80M121 198q29 28 58 0M121 254q29-28 58 0" fill="none" stroke="#3a1000" stroke-width="3.5"/><image href="logo.svg" x="26" y="26" width="46" height="46"/>`;
+    case 'math':
+      return `<defs>${gold}</defs>${shadow}<rect x="30" y="38" width="240" height="176" rx="14" fill="#0f5a44" stroke="#a8672a" stroke-width="12"/><text x="82" y="112" font-size="62" font-weight="900" fill="#fff" text-anchor="middle">7</text><text x="150" y="112" font-size="62" font-weight="900" fill="url(#${u}gold)" text-anchor="middle">×</text><text x="218" y="112" font-size="62" font-weight="900" fill="#fff" text-anchor="middle">8</text><text x="150" y="182" font-size="56" font-weight="900" fill="#ffe08a" text-anchor="middle">= ?</text><rect x="46" y="232" width="208" height="14" rx="7" fill="#c9cfe8"/><image href="logo.svg" x="116" y="224" width="0" height="0"/>`;
+    case 'band':
+      return `<defs>${lg('d', [0, '#ffffff'], [1, '#c9d4f0'])}${gold}</defs>${shadow}<path d="M70 120l-40 -70M230 120l40 -70" stroke="#d8a85a" stroke-width="9" stroke-linecap="round"/><circle cx="26" cy="46" r="11" fill="#d8a85a"/><circle cx="274" cy="46" r="11" fill="#d8a85a"/><ellipse cx="150" cy="120" rx="96" ry="30" fill="url(#${u}d)" stroke="#1b4fd8" stroke-width="6"/><path d="M54 120v84q0 36 96 36t96-36v-84" fill="#1b4fd8" stroke="#0a2a7a" stroke-width="6"/><path d="M62 150l40 70m40-70l-0 80m0-80l40 70m16-70l40 70" stroke="#fff" stroke-width="5" opacity=".7" fill="none"/><image href="logo.svg" x="118" y="146" width="64" height="64"/>`;
+    case 'dash':
+      return `<defs>${gold}</defs>${shadow}<path d="M30 270L120 40M270 270L180 40" stroke="#fff" stroke-width="6" opacity=".35"/><path d="M150 250V60" stroke="#fff" stroke-width="5" stroke-dasharray="16 18" opacity=".35"/>${em(86, 120, 56, '🎒')}${em(214, 170, 56, '🪣')}${em(150, 96, 40, '🎫')}<image href="hawk.svg" x="88" y="150" width="124" height="124"/>${em(60, 240, 40, '💨', 'opacity=".8"')}`;
     default: return em(150, 150, 150, '🎮');
   }
 }
@@ -496,7 +528,7 @@ function tileArt(id, title) { // portrait Stake-style tile (300x375)
     <image href="logo.svg" x="9" y="8" width="38" height="38"/>
     <rect y="298" width="300" height="77" fill="#000" opacity=".3"/>${lines.map((ln, k) => `<text x="150" y="${two ? 334 + k * 32 : 349}" font-size="${fs}" font-weight="900" text-anchor="middle" fill="#fff" stroke="#00000066" stroke-width="7" paint-order="stroke" letter-spacing="1.2" font-family="Inter,system-ui,sans-serif">${esc(ln)}</text>`).join('')}</svg>`;
 }
-const gameList = () => GAMES.filter(([id]) => GAME_FNS[id]).map(([id, label]) => {
+const gameList = () => GAMES.filter(([id]) => GAME_FNS[id] && (!SCHOOL() || SKILL_IDS.has(id))).map(([id, label]) => {
   const [emoji, ...rest] = label.split(' '), info = GAME_INFO[id] || {};
   return { id, emoji, title: rest.join(' '), tag: info.tag || 'Arcade', desc: info.desc || 'A fresh game in the Seahawk Arcade.' };
 });
@@ -549,11 +581,11 @@ function carousel(root, items, { interval = 5000, label = 'Featured', onPlay } =
   arm();
   return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', vis); };
 }
-const NEW_GAMES = new Set(['rocket', 'bell', 'memory', 'trivia']);
+const NEW_GAMES = new Set(['hoops', 'math', 'band', 'dash']);
 const gameLabel = id => (GAMES.find(([k]) => k === id) || [id, id])[1];
 function mountShowcase(el) {
   const list = gameList();
-  el.innerHTML = `<div id="carHost"></div><section class="allg" aria-labelledby="allgH"><h2 id="allgH">🎰 HawkBet Originals</h2>
+  el.innerHTML = `<div id="carHost"></div><section class="allg" aria-labelledby="allgH"><h2 id="allgH">${SCHOOL() ? '🏫 Seahawk Arcade' : '🎰 HawkBet Originals'}</h2>
     <div class="allgames orig">${list.map(g => `<button class="gcard tile" data-car-play="${g.id}" aria-label="Play ${esc(g.title)}">${NEW_GAMES.has(g.id) ? '<i class="newb">NEW</i>' : ''}<div class="tilea">${tileArt(g.id, g.title)}</div><span class="tiletag">${esc(g.tag)}</span></button>`).join('')}</div></section>`;
   el.querySelector('.allgames').addEventListener('click', e => { const b = e.target.closest('[data-car-play]'); if (b) openGame(b.dataset.carPlay); });
   el.querySelectorAll('.gcard').forEach(c => { // tilt toward the pointer
@@ -565,6 +597,12 @@ function mountShowcase(el) {
 
 /* ---------- Home: the casino lobby ---------- */
 async function renderHome(my) {
+  if (SCHOOL()) {
+    $('#app').innerHTML = `<section class="hero"><div class="heroin"><div class="herobal"><small>Your balance</small><b>${fmt(U.balance)}</b><span>Hawk Bucks</span></div>
+      <div class="heroact"><a class="btn gold" href="#arcade">🎮 Play now</a><a class="btn alt" href="#rewards">🎁 Rewards</a><a class="btn alt" href="#shop">🛍️ Hawk Shop</a></div></div></section><div id="showcase"></div>
+      <div class="arcfoot">🎟️ Hawk Bucks are pretend: no money, no prizes, nothing to cash out. Not affiliated with South Lakes HS or FCPS.</div>`;
+    return mountShowcase($('#showcase'));
+  }
   const feed = await api('GET', '/feed').catch(() => ({ bets: [], big: [], stats: { players: 0, rounds: 0, biggest: 0 } })); if (my !== nav) return;
   const ago = t => { const m = Math.max(0, Math.round((Date.now() - t) / 60000)); return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : Math.round(m / 60) + 'h ago'; };
   const betRow = b => `<div class="lbrow"><span class="g">${esc(gameLabel(b.game))}</span><span class="u">${esc(b.username)}</span><span class="b">${fmt(b.bet)} 🪙</span><span class="m ${b.payout > b.bet ? 'win' : 'lose'}">${b.payout ? b.mult.toFixed(2) + 'x' : '0.00x'}</span><span class="p ${b.payout > b.bet ? 'win' : 'lose'}">${b.payout > b.bet ? '+' : '−'}${fmt(Math.abs(b.payout - b.bet))}</span></div>`;
@@ -1332,12 +1370,15 @@ function countUp(el, to, ms = 900) {
   const t0 = performance.now(), step = () => { const k = Math.min(1, (performance.now() - t0) / ms); el.textContent = fmt(from + (to - from) * (1 - Math.pow(1 - k, 3))); if (k < 1) setTimeout(step, 16); };
   step();
 }
-const skillBet = id => `${betBox()}<div class="tiers" aria-label="Payout by score">${CFG.skillTiers[id].map(([min, m]) => `<span>${fmt(min)}+ <b>${m}x</b></span>`).join('')}<span>lower <b>0</b></span></div>
+const skillBet = id => SCHOOL() ? `<div class="tiers" aria-label="Hawk Bucks by score">${CFG.skillTiers[id].map(([min, m]) => `<span>${fmt(min)}+ <b>+${Math.round(SCHOOLR.each * m)} 🪙</b></span>`).join('')}</div>
+  <div class="duo"><button class="btn bjbig" id="start">▶ Play <kbd>Space</kbd></button></div>
+  <div class="note">Your score earns Hawk Bucks (up to ${fmt(SCHOOLR.cap)} a day). Scores go on the top-scores board and count toward challenges and achievements.</div>` : `${betBox()}<div class="tiers" aria-label="Payout by score">${CFG.skillTiers[id].map(([min, m]) => `<span>${fmt(min)}+ <b>${m}x</b></span>`).join('')}<span>lower <b>0</b></span></div>
   <div class="duo"><button class="btn" id="start">🪙 Play for Hawk Bucks</button><button class="btn alt" id="practice">Practice (free)</button></div>
   <div class="note">Your score sets the payout, and luck doesn't apply here. Starting over or leaving a paid game early forfeits the bet.</div>`;
 const lockStart = on => { $('#start').disabled = on; const p = $('#practice'); if (p) p.disabled = on; };
 function skillDone(id, r, great) {
   STATS.best[id] = { score: r.best }; paintPB(); lastRes = null;
+  if (r.reward) { setBal(r.balance); $('#res').insertAdjacentHTML('beforeend', ` <span class="win">· +${fmt(r.reward)} 🪙 Hawk Bucks</span>`); }
   if (r.bet) {
     setBal(r.balance);
     $('#res').insertAdjacentHTML('beforeend', r.payout ? ` <span class="win">· ${r.mult}x → +${fmt(r.payout - r.bet)} 🪙</span>` : ` <span class="lose">· −${fmt(r.bet)} 🪙</span>`);
@@ -1348,7 +1389,7 @@ function skillDone(id, r, great) {
   else if (great) fx.win(false); else sfx.play('win');
   loadHS(id);
 }
-function skillButtons(begin) { $('#start').onclick = () => begin(readBet())(); $('#practice').onclick = () => begin(0)(); }
+function skillButtons(begin) { $('#start').onclick = () => begin(SCHOOL() ? 0 : readBet())(); if ($('#practice')) $('#practice').onclick = () => begin(0)(); }
 
 /* Reaction: Bell Rush */
 async function bell(root) {
@@ -1445,6 +1486,170 @@ async function trivia(root) {
     } else show(r.next);
   });
   loadHS('trivia');
+}
+
+/* Timing: Free Throw Line. The server runs the meter clock; we draw a copy of it and send the tap. */
+async function hoops(root) {
+  let st = null, s0 = 0, period = 1700, zone = 0.17, frozen = false, timer = 0, busy = false;
+  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> 10 shots. The power meter swings back and forth: tap <b>SHOOT</b> (or press Space) when the marker is in the <b style="color:#19e58a">green zone</b>. Dead center is a perfect shot (150). Makes in a row add a streak bonus, but the zone shrinks and the meter speeds up.</div>
+    ${skillBet('hoops')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Shot</small><b id="sn">–</b></div></div>${hsBox()}`,
+    `<div class="court" id="court"><div class="hoopx" aria-hidden="true"><i class="board2"></i><i class="rim2"></i></div><div class="hball" id="hball">🏀</div><div class="hfloor"></div></div>
+      <div class="meter" id="meter"><i class="mzone" id="mz"></i><i class="mmark" id="mm"></i></div>
+      <button class="btn bjbig" id="shoot" disabled>🏀 SHOOT <kbd>Space</kbd></button><div class="pips" id="pips">${'<i></i>'.repeat(10)}</div>`);
+  const mm = $('#mm'), mz = $('#mz'), meter = $('#meter'), ball = $('#hball'), shoot = $('#shoot');
+  const paintZone = () => { mz.style.left = (0.5 - zone) * 100 + '%'; mz.style.width = zone * 200 + '%'; };
+  const tri = el => { const ph = (el % period) / period; return ph < 0.5 ? ph * 2 : 2 - ph * 2; };
+  const place = pos => { mm.style.transform = `translateX(${pos * (meter.clientWidth - 8)}px)`; };
+  function loop() { clearTimeout(timer); if (!root.isConnected || !st) return; if (!frozen) place(tri(performance.now() - s0)); timer = setTimeout(loop, 16); }
+  stopFns.push(() => clearTimeout(timer)); paintZone(); place(0.5);
+  function nextShot(r) { s0 = performance.now(); period = r.period; zone = r.zone; paintZone(); frozen = false; ball.className = 'hball'; shoot.disabled = false; }
+  async function fire() {
+    if (!st || busy || frozen) return; busy = true; frozen = true; shoot.disabled = true;
+    try {
+      const r = await api('POST', '/arcade/hoops/shoot'); if (!root.isConnected) return;
+      place(r.pos); const pip = $('#pips').children[r.shot - 1];
+      ball.className = 'hball ' + (r.hit ? (r.perfect ? 'swish' : 'make') : 'miss'); void ball.offsetWidth;
+      if (r.hit) { pip.classList.add('on'); sfx.play(r.perfect ? 'pb' : 'reveal'); resMsg(true, r.perfect ? `SWISH! +${r.pts}` : `Bucket! +${r.pts}`); if (r.streak >= 3) streakFx(r.streak); }
+      else { pip.classList.add('bad'); sfx.play('miss'); resMsg(false, r.stalled ? 'Shot clock! +0' : 'Off the rim'); }
+      $('#sn').textContent = `${Math.min(r.shot + 1, 10)} / 10`; countUp($('#sc'), r.score, 300);
+      await wait(calm ? 300 : 900); if (!root.isConnected) return;
+      if (r.done) { st = null; clearTimeout(timer); lockStart(false); resMsg(true, `${r.makes}/10 made · ${fmt(r.score)} pts`); skillDone('hoops', r, r.makes >= 7); }
+      else nextShot(r);
+    } catch (e) { toast(e.message); frozen = false; shoot.disabled = false; } finally { busy = false; }
+  }
+  shoot.onclick = fire;
+  skillButtons(bet => act(async () => {
+    const r = await api('POST', '/arcade/hoops/start', { bet }); if (r.bet) setBal(r.balance); st = {}; lockStart(true); $('#sc').textContent = '0'; $('#sn').textContent = '1 / 10'; $('#res').textContent = '';
+    [...$('#pips').children].forEach(i => i.className = ''); nextShot(r); loop();
+  }));
+  loadHS('hoops');
+}
+
+/* Math: Mental Math Sprint */
+async function math(root) {
+  let st = null, endT = 0, ending = false;
+  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> 60 seconds, as many problems as you can. 100 points for each right answer, plus up to 40 for speed and a combo bonus for answering right in a row. Problems get harder as you go. Press Enter to answer.</div>
+    ${skillBet('math')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Right</small><b id="mr">0</b></div></div>${hsBox()}`,
+    `<div class="mq"><div class="mtimer"><i id="mt"></i></div><div class="mcombo" id="mc"></div><div class="mbig" id="mqq">Ready? ➕</div>
+      <div class="mrow"><input id="mans" inputmode="numeric" autocomplete="off" aria-label="Your answer" placeholder="?" disabled><button class="btn" id="msub" disabled>Answer ↵</button></div><div class="mfb" id="mfb"></div></div>`);
+  stopFns.push(() => clearTimeout(endT));
+  const ans = $('#mans'), sub = $('#msub'), setQ = q => { $('#mqq').textContent = q + ' = ?'; ans.value = ''; ans.focus(); };
+  function finish(r) {
+    if (!st) return; st = null; clearTimeout(endT); ans.disabled = sub.disabled = true; $('#mqq').textContent = `Time! ${fmt(r.score)} pts`; lockStart(false);
+    resMsg(true, `${r.right} right · best combo ${r.bestCombo} · ${fmt(r.score)} pts`); skillDone('math', r, r.right >= 20);
+  }
+  async function submit() {
+    if (!st || ending) return; const v = ans.value.trim(); if (!/^-?\d+$/.test(v)) return; sub.disabled = true;
+    try {
+      const r = await api('POST', '/arcade/math/answer', { answer: parseInt(v, 10) }); if (!root.isConnected || !st) return;
+      if (r.done) return finish(r);
+      const fb = $('#mfb'); fb.className = 'mfb ' + (r.right ? 'good' : 'bad'); fb.textContent = r.right ? `+${r.pts}` : `✗ ${r.answer}`; r.right ? sfx.play('reveal') : sfx.play('miss'); if (r.right) fx.bump($('#mqq'));
+      countUp($('#sc'), r.score, 250); $('#mr').textContent = r.rightCount; $('#mc').textContent = r.combo >= 2 ? `🔥 combo ×${r.combo}` : ''; setQ(r.q);
+    } catch (e) { toast(e.message); } finally { if (st) sub.disabled = false; }
+  }
+  sub.onclick = submit; ans.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } };
+  skillButtons(bet => act(async () => {
+    const r = await api('POST', '/arcade/math/start', { bet }); if (r.bet) setBal(r.balance); st = {}; ending = false; lockStart(true); ans.disabled = sub.disabled = false;
+    $('#sc').textContent = '0'; $('#mr').textContent = '0'; $('#mc').textContent = ''; $('#mfb').textContent = ''; $('#res').textContent = ''; setQ(r.q);
+    const bar = $('#mt'); bar.style.transition = 'none'; bar.style.width = '100%'; void bar.offsetWidth; bar.style.transition = `width ${r.secs}s linear`; bar.style.width = '0%';
+    clearTimeout(endT); endT = setTimeout(async () => { if (!st) return; ending = true; try { finish(await api('POST', '/arcade/math/end')); } catch (e) { toast(e.message); ending = false; } }, r.secs * 1000 + 300);
+  }));
+  loadHS('math');
+}
+
+/* Rhythm memory: Marching Band */
+const BAND_PADS = [['#1b4fd8', 'Blue'], ['#12c26a', 'Green'], ['#f5b800', 'Gold'], ['#e8ecf5', 'White']];
+async function band(root) {
+  let st = null, playing = false, busy = false, tok = 0;
+  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> watch the drums light up, then play the pattern back (click, or keys 1–4). Every round adds one beat, and the faster you go the better. Finishing a round of length n scores 50 + 30 × n.</div>
+    ${skillBet('band')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Pattern</small><b id="bl">–</b></div></div>${hsBox()}`,
+    `<div class="bandgrid" id="bg">${BAND_PADS.map(([c, n], k) => `<button class="bpad" data-pad="${k}" style="--pc:${c}" disabled aria-label="${n} drum"><b>${k + 1}</b></button>`).join('')}</div><div class="bandmsg" id="bm">Press Play 🥁</div>`);
+  const pads = [...root.querySelectorAll('.bpad')], msg = t => { $('#bm').textContent = t; };
+  stopFns.push(() => { tok++; });
+  const lit = (k, on) => pads[k].classList.toggle('lit', on);
+  async function playback(seq) {
+    const me = ++tok; playing = true; pads.forEach(p => p.disabled = true); msg('Watch…'); await wait(calm ? 250 : 600);
+    const step = Math.max(240, 480 - seq.length * 14);
+    for (const k of seq) { if (me !== tok || !root.isConnected) return; lit(k, true); sfx.play('pad' + k); await wait(step * 0.7); lit(k, false); await wait(step * 0.3); }
+    if (me !== tok) return; playing = false; pads.forEach(p => p.disabled = false); msg('Your turn!');
+  }
+  async function press(k) {
+    if (!st || playing || busy) return; busy = true; lit(k, true); sfx.play('pad' + k); setTimeout(() => lit(k, false), 160);
+    try {
+      const r = await api('POST', '/arcade/band/press', { pad: k }); if (!root.isConnected) return;
+      if (!r.ok) {
+        st = null; tok++; pads.forEach(p => { p.disabled = true; }); pads[r.expected].classList.add('hint'); setTimeout(() => pads[r.expected].classList.remove('hint'), 1200); sfx.play('miss'); fx.lose();
+        msg(r.late ? 'Too slow!' : 'Wrong drum!'); lockStart(false); resMsg(true, `Pattern of ${r.length} · cleared ${r.length - 1 < 0 ? 0 : r.length - 1} rounds · ${fmt(r.score)} pts`); skillDone('band', r, r.length >= 8); return;
+      }
+      if (r.perfect) { st = null; msg('PERFECT!'); lockStart(false); resMsg(true, `All ${BAND_MAXC} rounds! ${fmt(r.score)} pts`); skillDone('band', r, true); return; }
+      if (r.round) { countUp($('#sc'), r.score, 300); $('#bl').textContent = r.show.length; sfx.play('reveal'); fx.bump($('#bl')); msg(`Round ${r.round} cleared!`); await wait(calm ? 200 : 700); if (root.isConnected && st) playback(r.show); }
+    } catch (e) { toast(e.message); } finally { busy = false; }
+  }
+  const BAND_MAXC = 20;
+  $('#bg').onclick = e => { const b = e.target.closest('.bpad'); if (b && !b.disabled) press(+b.dataset.pad); };
+  const keys = e => { if (!root.isConnected) return; if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return; const k = ['1', '2', '3', '4'].indexOf(e.key); if (k >= 0 && !e.repeat) { e.preventDefault(); if (!pads[k].disabled) press(k); } };
+  document.addEventListener('keydown', keys); stopFns.push(() => document.removeEventListener('keydown', keys));
+  skillButtons(bet => act(async () => {
+    const r = await api('POST', '/arcade/band/start', { bet }); if (r.bet) setBal(r.balance); st = {}; lockStart(true); $('#sc').textContent = '0'; $('#bl').textContent = '1'; $('#res').textContent = ''; playback(r.show);
+  }));
+  loadHS('band');
+}
+
+/* Action: Hallway Dash. The server builds the hallway; we run it, then send our lane changes to be replayed and checked. */
+async function dash(root) {
+  let st = null, run = null, timer = 0, img = null;
+  const W = 360, H = 520, PY = 410, RH = 62, LX = l => 60 + l * 120;
+  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> switch lanes with ← → (or A / D, or tap the left / right side of the hallway, or swipe) to dodge backpacks and buckets, and grab 🎫 hall passes. Every row you survive is 10 points and each pass is 50. It speeds up. One hit and the bell rings.</div>
+    ${skillBet('dash')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Passes</small><b id="ps">0</b></div></div>${hsBox()}`,
+    `<div class="dashwrap"><canvas id="dcv" width="${W}" height="${H}" aria-label="Hallway Dash game"></canvas><div class="dashmsg" id="dm">Press Play 🏃</div></div>`);
+  const cv = $('#dcv'), c = cv.getContext('2d'); img = new Image(); img.src = 'hawk.svg';
+  const msg = t => { const m = $('#dm'); m.textContent = t; m.classList.toggle('hidden', !t); };
+  stopFns.push(() => { clearTimeout(timer); run = null; });
+  function draw(rowPos, lane, laneX, crashed) {
+    c.clearRect(0, 0, W, H); const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#0d1b46'); g.addColorStop(1, '#1b2f73'); c.fillStyle = g; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#0a1233'; c.fillRect(0, 0, 24, H); c.fillRect(W - 24, 0, 24, H); // lockers
+    const off = (rowPos % 1) * RH; c.fillStyle = '#2b4aa8'; for (let y = -RH + off; y < H; y += RH) { c.fillRect(2, y, 20, RH - 6); c.fillRect(W - 22, y, 20, RH - 6); }
+    c.strokeStyle = '#ffffff22'; c.lineWidth = 2; c.setLineDash([14, 14]); c.lineDashOffset = -off; for (const x of [120, 240]) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke(); } c.setLineDash([]);
+    c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = '38px sans-serif';
+    const r0 = Math.floor(rowPos) - 2, r1 = Math.ceil(rowPos + (PY + 40) / RH);
+    for (let r = Math.max(0, r0); r <= r1; r++) { const row = run.rows[r]; if (!row) continue; const y = PY - (r - rowPos) * RH; if (y < -40 || y > H + 40) continue;
+      for (let l = 0; l < 3; l++) { if (row[0] >> l & 1) c.fillText((r * 7 + l) % 3 ? '🎒' : '🪣', LX(l), y); else if (row[1] === l) c.fillText('🎫', LX(l), y); } }
+    const sz = 62; if (img.complete) { c.save(); c.translate(laneX, PY); if (crashed) { c.rotate(0.6); c.globalAlpha = .85; } c.drawImage(img, -sz / 2, -sz * 0.62, sz, sz); c.restore(); } else c.fillText('🦅', laneX, PY);
+    if (crashed) { c.font = '56px sans-serif'; c.fillText('💥', laneX, PY - 30); }
+  }
+  const cum = t => { const a = [0]; t.forEach(x => a.push(a[a.length - 1] + x)); return a; };
+  function rowPosAt(el) { const T = run.tick, C = run.cum; let lo = 0, hi = T.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (C[mid] <= el) lo = mid; else hi = mid - 1; } return lo + Math.min(1, (el - C[lo]) / T[lo]); }
+  function turn(d) { if (!run || run.over) return; run.queued = d; }
+  async function more() { if (run.fetching || run.rows.length > run.max) return; run.fetching = true; try { const r = await api('POST', '/arcade/dash/rows', { from: run.rows.length }); if (run) run.rows.push(...r.rows); } catch (e) {} finally { if (run) run.fetching = false; } }
+  async function over(crashed, dist) {
+    run.over = true; clearTimeout(timer); const moves = run.moves; draw(run.pos, run.lane, LX(run.lane), crashed); if (crashed) { sfx.play('miss'); fx.lose(); } else sfx.play('pb');
+    msg(crashed ? '💥 Ouch! Tardy slip.' : '🎓 You made it to class!'); await wait(calm ? 300 : 700); if (!root.isConnected) return;
+    try { const r = await api('POST', '/arcade/dash/end', { moves }); st = null; run = null; lockStart(false); resMsg(true, `${r.rows} rows · ${r.passes} passes · ${fmt(r.score)} pts`); msg(`${fmt(r.score)} pts`); skillDone('dash', r, r.score >= 1200); }
+    catch (e) { toast(e.message); st = null; run = null; lockStart(false); }
+  }
+  function tickLoop() {
+    if (!run || run.over || !root.isConnected) return; const el = performance.now() - run.t0, rp = rowPosAt(el); run.pos = rp;
+    if (run.queued) { const nr = Math.floor(rp) + 1, nl = run.lane + run.queued; if (nl >= 0 && nl <= 2 && nr > run.lastRow) { run.moves.push({ row: nr, lane: nl }); run.lastRow = nr; run.next = nl; sfx.play('tap'); } run.queued = 0; }
+    while (run.checked + 1 <= rp) { // evaluate each row as it reaches the player; a lane change takes effect from its row on
+      run.checked++; const r = run.checked; const mv = run.moves.find(m => m.row === r); if (mv) run.lane = mv.lane;
+      if (r > run.max) return over(false, r - 1); const row = run.rows[r]; if (!row) break;
+      if (row[0] >> run.lane & 1) return over(true, r); if (row[1] === run.lane) { run.passes++; sfx.play('coin'); }
+    }
+    run.laneX += (LX(run.next ?? run.lane) - run.laneX) * 0.35; draw(rp, run.lane, run.laneX, false);
+    countUp0($('#sc'), Math.floor(rp) * 10 + run.passes * 50); $('#ps').textContent = run.passes; if (rp > run.rows.length - 60) more();
+    timer = setTimeout(tickLoop, 16);
+  }
+  const countUp0 = (el, v) => { if (el && el.textContent !== fmt(v)) el.textContent = fmt(v); };
+  const keys = e => { if (!root.isConnected) return; const k = e.key.toLowerCase(); if (k === 'arrowleft' || k === 'a') { e.preventDefault(); turn(-1); } else if (k === 'arrowright' || k === 'd') { e.preventDefault(); turn(1); } };
+  document.addEventListener('keydown', keys); stopFns.push(() => document.removeEventListener('keydown', keys));
+  let sx = 0; cv.addEventListener('pointerdown', e => { sx = e.clientX; }); cv.addEventListener('pointerup', e => { const dx = e.clientX - sx, r = cv.getBoundingClientRect(); turn(Math.abs(dx) > 24 ? Math.sign(dx) : e.clientX < r.left + r.width / 2 ? -1 : 1); });
+  skillButtons(bet => act(async () => {
+    const r = await api('POST', '/arcade/dash/start', { bet }); if (r.bet) setBal(r.balance); st = {}; lockStart(true); $('#sc').textContent = '0'; $('#ps').textContent = '0'; $('#res').textContent = '';
+    run = { rows: r.rows, tick: r.tick, cum: cum(r.tick), max: r.max, moves: [], lane: 1, next: 1, laneX: LX(1), lastRow: -1, checked: -1, passes: 0, pos: 0, queued: 0, over: false };
+    draw(0, 1, LX(1), false); for (const n of [3, 2, 1]) { msg(String(n)); sfx.play('tap'); await wait(calm ? 200 : 650); if (!root.isConnected || !run) return; } msg('GO!'); setTimeout(() => { if (run && !run.over) msg(''); }, 500);
+    run.t0 = performance.now(); tickLoop();
+  }));
+  loadHS('dash');
 }
 
 /* Crash: Seahawk Launch. The browser animates the climb; the server's clock decides cash-outs and crashes. */
@@ -1642,17 +1847,17 @@ async function renderShop(my) {
       ${it.maxCharges ? `<small class="chg">${it.owned ? `⚡ ${it.charges}/${it.maxCharges} charges` : `Lasts ${it.maxCharges} luck-game rounds`}</small>` : ''}
       ${locked ? `<ul class="locks">${it.locks.map(l => `<li>🔒 ${esc(l)}</li>`).join('')}</ul>` : ''}${btn}
       ${it.owned && it.maxCharges && it.charges < it.maxCharges ? `<button class="pill" data-recharge="${it.id}">Recharge · ${fmt(Math.round(it.price / 10))} 🪙</button>` : ''}</div>`; };
-  const list = S.items.filter(it => (shopTab === 'locker' ? it.owned : true) && (shopSlot === 'all' || it.slot === shopSlot));
+  const list = S.items.filter(it => (shopTab === 'locker' ? it.owned : true) && (shopSlot === 'all' || it.slot === shopSlot) && !(SCHOOL() && (it.luck || it.sup) && !it.owned));
   $('#app').innerHTML = `<div class="archead"><h1>🛍️ Hawk Shop</h1><div class="sub"><button class="pill ${shopTab === 'shop' ? 'on' : ''}" data-st="shop">🛍️ Shop</button><button class="pill ${shopTab === 'locker' ? 'on' : ''}" data-st="locker">🎒 My Locker</button></div></div>
     ${S.sale ? `<div class="salebar">🔥 SALE: everything ${S.sale}% off!</div>` : ''}
     <div class="shopwrap"><aside class="panel mecard">${avatar(preview, 170, 'big')}
       ${tryOn ? `<div class="trynote">Trying on: <b>${esc(S.items.find(i => i.id === tryOn.id).name)}</b> <button class="pill" id="untry">✕</button></div>` : ''}
-      <div class="lucktotal ${S.luck.sup ? 'sup' : ''}">${luckSum(S.luck)}</div>
+      ${SCHOOL() ? '<div class="note">In Seahawk Arcade you can still dress up your Seahawk. Luck gear only matters in the chance games.</div>' : `<div class="lucktotal ${S.luck.sup ? 'sup' : ''}">${luckSum(S.luck)}</div>`}
       ${S.override ? `<div class="note">The admin set your luck to <b>${esc(String(S.override))}</b>. Gear is ignored until they clear it.</div>` : ''}
       <ul class="lparts">${S.luck.parts.map(p => `<li>${p.emoji} ${esc(p.src)} <b>${p.sup ? '×' + p.sup + ' Super' : '+' + p.luck}</b>${p.rounds ? ` · ${p.rounds} rounds left` : ''}${p.charges ? ` · ${p.charges} charges` : ''}</li>`).join('') || '<li class="mutecell">No luck gear yet. Everyone starts at Luck 5 (Normal).</li>'}</ul>
       <div class="note">Luck 6–10 = you win more often but each win pays a bit less (same 99% payback), and it <b>counts</b> on the leaderboard. 🔥 Super Luck pays full price, so those rounds <b>don't count</b> on the leaderboard. Luck works in Heads or Tails, RPS, Crossing, Scoreboard Roll and Hail Mary. Max total: Luck 10.</div></aside>
     <div class="shopmain"><div class="pills">${[['all', 'All'], ...SLOT_NAMES].map(([k, l]) => `<button class="pill ${shopSlot === k ? 'on' : ''}" data-ss="${k}">${l}</button>`).join('')}</div>
-      ${shopTab === 'shop' && (shopSlot === 'all') ? `<h2>⚡ Luck Boosters</h2><div class="igrid">${S.boosters.map(b => `<div class="icard r-rare" style="--rc:#19e58a"><span class="iemo">${b.emoji}</span><small class="rar">Booster</small><b>${esc(b.name)}</b>
+      ${shopTab === 'shop' && shopSlot === 'all' && !SCHOOL() ? `<h2>⚡ Luck Boosters</h2><div class="igrid">${S.boosters.map(b => `<div class="icard r-rare" style="--rc:#19e58a"><span class="iemo">${b.emoji}</span><small class="rar">Booster</small><b>${esc(b.name)}</b>
         <span class="ltag ${b.sup ? 'sup' : ''}">${b.sup ? '🔥 Super Luck ×' + b.sup : '🍀 +' + b.luck + ' luck'} for ${b.rounds} rounds</span>${b.active ? `<small class="chg">Active: ${b.active} rounds left</small>` : ''}<button class="btn" data-boost="${b.id}">Buy · ${fmt(b.price)} 🪙</button></div>`).join('')}</div>` : ''}
       ${list.length ? `<div class="igrid">${list.map(card).join('')}</div>` : '<div class="empty">Nothing here yet. Go shopping! 🛍️</div>'}</div></div>`;
   const redo = () => renderShop(nav), apply = r => { U.gear = r.gear; U.luck = r.luck.luck; CFG = null; setBal(r.balance); paintMe(); };
@@ -1682,9 +1887,25 @@ setInterval(() => { if (!document.hidden) checkNotes(); }, 20000);
 let admTab = 'players', admSel = null;
 async function renderAdmin(my) {
   if (!U.isAdmin) { location.hash = '#home'; return; }
-  const tabs = `<div class="sub">${[['players', '👥 Players'], ['shop', '🛍️ Shop'], ['log', '📜 Log'], ['lines', '🏈 Sports lines']].map(([k, l]) => `<button class="pill ${admTab === k ? 'on' : ''}" data-at="${k}">${l}</button>`).join('')}</div>`;
+  const tabs = `<div class="sub">${[['players', '👥 Players'], ['mode', '🏫 Site mode'], ['shop', '🛍️ Shop'], ['log', '📜 Log'], ['lines', '🏈 Sports lines']].map(([k, l]) => `<button class="pill ${admTab === k ? 'on' : ''}" data-at="${k}">${l}</button>`).join('')}</div>`;
   const wire = () => document.querySelectorAll('[data-at]').forEach(b => b.onclick = () => { admTab = b.dataset.at; renderAdmin(nav); });
   if (admTab === 'lines') { await renderLines(my); if (my !== nav) return; $('#app').insertAdjacentHTML('afterbegin', `<h1>🛠️ Admin</h1>${tabs}`); return wire(); }
+  if (admTab === 'mode') {
+    const c = await api('GET', '/admin/mode'); if (my !== nav) return; const sc = c.schedule, D = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    $('#app').innerHTML = `<h1>🛠️ Admin</h1>${tabs}<div class="panel adm"><h2>Site mode</h2>
+      <div class="modecards"><button class="modecard ${c.mode === 'full' ? 'on' : ''}" data-mode="full"><b>🎰 HawkBet</b><span>Everything: all games, sports picks, luck, bets.</span></button>
+        <button class="modecard ${c.mode === 'school' ? 'on' : ''}" data-mode="school"><b>🏫 Seahawk Arcade</b><span>School Edition: only the 7 skill games. No bets, no chance games, no sports picks. Skill scores earn Hawk Bucks (up to ${fmt(SCHOOLR.cap)} a day). The server blocks everything else.</span></button></div>
+      <div class="note">Right now the site is in <b>${c.now.mode === 'school' ? '🏫 School Edition' : '🎰 HawkBet'}</b> mode${c.now.source === 'schedule' ? ' (set by the schedule)' : ''}. Balances and items carry over when you switch. Bets still open in chance games are refunded when School mode starts.</div></div>
+    <div class="panel adm"><h2>⏰ Auto-schedule</h2><label class="chk"><input type="checkbox" id="son" ${sc.on ? 'checked' : ''}> Switch to School Edition automatically during school hours (Eastern time). Off by default.</label>
+      <div class="admrow">${D.map((d, i) => `<button class="pill ${sc.days.includes(i) ? 'on' : ''}" data-day="${i}">${d}</button>`).join('')}</div>
+      <div class="admrow"><label>From <input type="time" id="sst" value="${sc.start}"></label><label>Until <input type="time" id="sen" value="${sc.end}"></label><button class="btn" id="ssave">Save schedule</button></div>
+      <div class="note">With the schedule on, the manual setting above is used outside school hours. Every change is written to the admin log. If a teacher or IT approved the site, tell them this switch exists.</div></div>`;
+    wire();
+    document.querySelectorAll('[data-mode]').forEach(b => b.onclick = act(async () => { if (!confirm(b.dataset.mode === 'school' ? 'Switch to Seahawk Arcade (School Edition)?' : 'Switch to full HawkBet?')) return; await api('POST', '/admin/mode', { mode: b.dataset.mode }); toast('Mode saved'); await go(); }));
+    const days = new Set(sc.days); document.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { const d = +b.dataset.day; days.has(d) ? days.delete(d) : days.add(d); b.classList.toggle('on', days.has(d)); });
+    $('#ssave').onclick = act(async () => { await api('POST', '/admin/mode', { schedule: { on: $('#son').checked, days: [...days], start: $('#sst').value, end: $('#sen').value } }); toast('Schedule saved'); await go(); });
+    return;
+  }
   if (admTab === 'log') {
     const { log } = await api('GET', '/admin/log'); if (my !== nav) return;
     $('#app').innerHTML = `<h1>🛠️ Admin</h1>${tabs}<div class="panel"><table class="lb"><tr><th>When</th><th>Admin</th><th>Action</th><th>Player</th><th>Detail</th></tr>
@@ -1763,8 +1984,23 @@ async function checkProgress() {
 async function refreshRewardDot() { try { const r = await api('GET', '/rewards'); $('#rwdot').classList.toggle('hidden', !(r.wheelReady || r.challenges.some(c => !c.claimed && c.progress >= c.goal))); } catch (e) {} }
 // gentle break reminder: after 45 minutes of active play
 let playedMin = 0; setInterval(() => { if (!U || document.hidden) return; if (++playedMin % 45 === 0) showModal(`<div class="bigbadge">⏰</div><h2>Take a break?</h2><p>You've been playing for ${playedMin} minutes. Stretch, grab some water, and come back later. HawkBet will still be here.</p><button class="btn" data-close>Keep playing</button>`); }, 60000);
+/* ---------- Site Mode: HawkBet (all games) vs Seahawk Arcade (School Edition, skill games only) ---------- */
+function renderOrig() {
+  $('#origlist').innerHTML = gameList().map(g => `<a href="#arcade" data-og="${g.id}" style="--gc:${GAME_COLOR[g.id]}"><i>${g.emoji}</i><span>${esc(g.title)}</span></a>`).join('');
+  $('#origtitle').textContent = SCHOOL() ? 'Skill Games' : 'HawkBet Originals';
+}
+function applyMode() {
+  const s = SCHOOL(); document.body.classList.toggle('school', s);
+  document.querySelector('.wordmark').innerHTML = s ? 'Seahawk<b>Arcade</b>' : 'Hawk<b>Bet</b>';
+  document.title = s ? 'Seahawk Arcade – South Lakes' : "HawkBet – South Lakes Pick'em";
+  $('.banner').textContent = s ? 'Seahawk Arcade · play for points · pretend Hawk Bucks only · not affiliated with South Lakes HS or FCPS' : 'Fake credits only · no real money · not affiliated with South Lakes HS or FCPS · lines are demo data';
+  renderOrig();
+}
+let modeSeen = null;
+function setMode(m) { if (!m) return; if (m !== MODE || modeSeen === null) { MODE = m; applyMode(); } modeSeen = m; }
+setInterval(async () => { if (!U || document.hidden) return; try { const m = await api('GET', '/me'); if (m.mode !== MODE) { setMode(m.mode); toast(m.mode === 'school' ? '🏫 Switched to Seahawk Arcade (School Edition)' : '🎰 Switched to HawkBet'); go(); } } catch (e) {} }, 45000);
 function initShell() {
-  $('#origlist').innerHTML = GAMES.filter(([id]) => GAME_FNS[id]).map(([id, label]) => { const [e, ...r] = label.split(' '); return `<a href="#arcade" data-og="${id}" style="--gc:${GAME_COLOR[id]}"><i>${e}</i><span>${esc(r.join(' '))}</span></a>`; }).join('');
+  renderOrig();
   $('#origlist').addEventListener('click', e => { const a = e.target.closest('[data-og]'); if (!a) return; e.preventDefault(); game = a.dataset.og; arcCat = 'all'; if (location.hash === '#arcade') go(); else location.hash = '#arcade'; document.body.classList.remove('drawer'); });
   try { document.body.classList.toggle('sbc', localStorage.getItem('hb.sidebar') === 'min'); } catch (e) {}
   $('#sidecol').onclick = () => { const on = document.body.classList.toggle('sbc'); try { localStorage.setItem('hb.sidebar', on ? 'min' : 'open'); } catch (e) {} };
