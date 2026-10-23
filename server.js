@@ -633,7 +633,7 @@ Object.assign(arcade, {
 const TSCALE = Number(process.env.SKILL_TIME_SCALE) || 1; // tests shrink the clocks
 // Free Throw Line: a meter sweeps back and forth; tap when it is inside the green zone. The server runs the meter clock.
 const HOOPS_SHOTS = 10, hoopsPeriod = i => Math.round(1700 - 55 * i), hoopsZone = streak => Math.max(0.07, 0.17 - 0.012 * streak), HOOPS_STALL_MS = 9000;
-const HOOPS_TOP = 0.97, hoopsCenter = zone => HOOPS_TOP - zone; // the green window sits at the top of the meter, like NBA 2K
+const HOOPS_TOP = 0.97, HOOPS_GRACE_MS = 35, HOOPS_LAT_MAX = 150, hoopsCenter = zone => HOOPS_TOP - zone; // the green window sits at the top of the meter, like NBA 2K
 const meterPos = (el, period) => { const ph = (el % period) / period; return ph < 0.5 ? ph * 2 : 2 - ph * 2; };
 // Mental Math Sprint: 60 seconds, problems get harder as you go
 const MATH_SECS = 60 * TSCALE, MATH_GRACE_MS = 1500;
@@ -650,20 +650,26 @@ const mathPoints = (secs, combo) => 100 + Math.max(0, 40 - Math.floor(secs * 8))
 const BAND_MAX = 20, BAND_STEP_MS = 4500, bandRound = n => 50 + 30 * n;
 // Hallway Dash: 3 lanes. Rows are [blockedMask, passLane, lowMask, highMask, power]. Full blocks need a lane change, low hurdles need a jump,
 // high signs need a slide. Power-ups: magnet (pulls in nearby passes) and shield (saves you from one hit). The server replays your moves.
-const DASH_MAX = 400, DASH_CHUNK = 120, DASH_AIR = 2, DASH_ACT_GAP = 3, DASH_MAGNET = 12, dashTick = i => Math.max(150, Math.round(340 - 2.5 * i));
+const DASH_MAX = 400, DASH_CHUNK = 120, DASH_AIR = 2, DASH_ACT_GAP = 3, DASH_MAGNET = 12;
+// Levels (every 100 rows): 0 Freshman, 1 Sophomore, 2 Junior, 3 Senior. Slow and roomy at first, faster and busier later.
+const dashLevel = r => Math.min(3, Math.floor(r / 100));
+const dashTick = i => i < 100 ? Math.round(460 - 1.6 * i) : i < 200 ? Math.round(300 - 0.7 * (i - 100)) : i < 300 ? Math.round(230 - 0.5 * (i - 200)) : Math.max(150, Math.round(180 - 0.3 * (i - 300)));
 const dashTimeAt = r => { let t = 0; for (let i = 0; i < r; i++) t += dashTick(i); return t * TSCALE; };
 const dashRowAt = el => { let r = 0, t = 0; while (r < DASH_MAX + 1 && t + dashTick(r) * TSCALE <= el) t += dashTick(r++) * TSCALE; return r; };
+const DASH_LV = [ // per level: path shift chance, wall chance per side lane, obstacle row gap, hurdle/sign chance on the path, spare obstacles, chip chance, power-up chance
+  { shift: 0.07, wall: 0.10, gap: 8, act: 0.20, spare: 0.03, chip: 0.34, power: 0.06 }, { shift: 0.16, wall: 0.20, gap: 6, act: 0.26, spare: 0.06, chip: 0.30, power: 0.045 },
+  { shift: 0.24, wall: 0.30, gap: 5, act: 0.32, spare: 0.08, chip: 0.26, power: 0.035 }, { shift: 0.32, wall: 0.42, gap: 4, act: 0.38, spare: 0.10, chip: 0.22, power: 0.03 }];
 function dashRows(seed) { // a safe path always exists: it shifts at most one lane per row, and hurdles on it are spaced so you can jump or slide in time
-  const rnd = mulberry(seed), rows = []; let p = 1, lastAct = -9;
+  const rnd = mulberry(seed), rows = []; let p = 1, lastAct = -9, lastShift = -9;
   for (let r = 0; r <= DASH_MAX; r++) {
-    if (r < 5) { rows.push([0, -1, 0, 0, -1]); continue; }
-    const k = rnd(); p = Math.min(2, Math.max(0, p + (k < 0.22 ? -1 : k > 0.78 ? 1 : 0)));
-    const q = Math.min(0.62, 0.22 + r * 0.004); let mask = 0, low = 0, high = 0; for (let l = 0; l < 3; l++) if (l !== p && rnd() < q) mask |= 1 << l;
-    if (r >= 8 && r - lastAct >= 4 && rnd() < 0.3) { if (rnd() < 0.5) low |= 1 << p; else high |= 1 << p; lastAct = r; }
-    for (let l = 0; l < 3; l++) if (l !== p && !(mask >> l & 1) && rnd() < 0.1) { if (rnd() < 0.5) low |= 1 << l; else high |= 1 << l; }
+    if (r < 10) { rows.push([0, -1, 0, 0, -1]); continue; } // a calm opening: nothing to dodge for the first few seconds
+    const L = DASH_LV[dashLevel(r)], k = rnd(); if (k < L.shift && r - lastShift >= (r < 100 ? 4 : 2)) { p = Math.min(2, Math.max(0, p + (rnd() < 0.5 ? -1 : 1))); lastShift = r; }
+    let mask = 0, low = 0, high = 0; for (let l = 0; l < 3; l++) if (l !== p && (r >= 100 || r % 2 === 0) && rnd() < L.wall) mask |= 1 << l;
+    if (r >= 25 && r - lastAct >= L.gap && rnd() < L.act) { if (r >= 50 && rnd() < 0.5) high |= 1 << p; else low |= 1 << p; lastAct = r; }
+    for (let l = 0; l < 3; l++) if (l !== p && !(mask >> l & 1) && r >= 40 && rnd() < L.spare) { if (rnd() < 0.5) low |= 1 << l; else high |= 1 << l; }
     const free = [0, 1, 2].filter(l => !(mask >> l & 1) && !(low >> l & 1) && !(high >> l & 1));
-    let pass = -1; if (free.length && rnd() < 0.26) pass = free[Math.floor(rnd() * free.length)];
-    let power = -1; if (r >= 12 && free.length && rnd() < 0.035) power = free[Math.floor(rnd() * free.length)] * 10 + (rnd() < 0.5 ? 1 : 2);
+    let pass = -1; if (free.length && rnd() < L.chip) pass = free[Math.floor(rnd() * free.length)];
+    let power = -1; if (r >= 12 && free.length && rnd() < L.power) power = free[Math.floor(rnd() * free.length)] * 10 + (rnd() < (r < 100 ? 0.3 : 0.5) ? 1 : 2);
     rows.push([mask, pass, low, high, power]);
   }
   return rows;
@@ -681,15 +687,19 @@ function dashReplay(rows, moves, acts) { // -> { dist, passes, powers, shieldUse
   return { dist: DASH_MAX, passes, powers, shieldUsed, crashed: false };
 }
 Object.assign(arcade, {
-  hoopsStart: ctx => tx(() => { const s = { i: 0, score: 0, makes: 0, perfects: 0, streak: 0, s0: now(), shots: [] }; return { ...skillStart(ctx, 'hoops', s), shots: HOOPS_SHOTS, period: hoopsPeriod(0), zone: hoopsZone(0), center: hoopsCenter(hoopsZone(0)) }; }),
+  hoopsStart: ctx => tx(() => { const s = { i: 0, score: 0, makes: 0, perfects: 0, streak: 0, s0: null, shots: [] }; return { ...skillStart(ctx, 'hoops', s), shots: HOOPS_SHOTS, period: hoopsPeriod(0), zone: hoopsZone(0), center: hoopsCenter(hoopsZone(0)) }; }),
+  hoopsReady: ctx => tx(() => { // the meter starts when the player's screen is ready, so the meter they see and the server's copy begin together
+    const { r, st } = live(ctx, 'hoops'); if (st.s0 == null) { st.s0 = now(); save(r, st); } return { ok: true, period: hoopsPeriod(st.i), zone: hoopsZone(st.streak), center: hoopsCenter(hoopsZone(st.streak)) };
+  }),
   hoopsShoot: ctx => tx(() => {
-    const { r, st } = live(ctx, 'hoops'), el = now() - st.s0, period = hoopsPeriod(st.i), zone = hoopsZone(st.streak);
-    const stalled = el > HOOPS_STALL_MS, pos = meterPos(el, period), off = Math.abs(pos - hoopsCenter(zone)), hit = !stalled && off <= zone, perfect = hit && off <= zone / 3;
+    const { r, st } = live(ctx, 'hoops'); if (st.s0 == null) bad('The meter is not ready yet', 409);
+    const lat = Math.min(HOOPS_LAT_MAX, Math.max(0, Number(ctx.body.lat) || 0)), el = Math.max(0, now() - st.s0 - lat), period = hoopsPeriod(st.i), zone = hoopsZone(st.streak); // lat = the player's one-way delay, so what they saw is what counts
+    const grace = HOOPS_GRACE_MS * 2 / period, stalled = el > HOOPS_STALL_MS, pos = meterPos(el, period), off = Math.abs(pos - hoopsCenter(zone)), hit = !stalled && off <= zone + grace, perfect = hit && off <= zone / 3 + grace;
     const pts = !hit ? 0 : (perfect ? 150 : 100) + Math.min(100, 25 * st.streak);
     st.streak = hit ? st.streak + 1 : 0; st.makes += hit ? 1 : 0; st.perfects += perfect ? 1 : 0; st.score += pts; st.i++; st.shots.push(hit ? (perfect ? 2 : 1) : 0);
     const out = { hit, perfect, pts, pos, center: hoopsCenter(zone), zone, stalled, score: st.score, shot: st.i, streak: st.streak, makes: st.makes };
     if (st.i >= HOOPS_SHOTS) return { ...out, ...skillFinish(ctx, r, st, st.score, { makes: st.makes, perfects: st.perfects }) };
-    st.s0 = now(); save(r, st); return { ...out, period: hoopsPeriod(st.i), zone: hoopsZone(st.streak), nextCenter: hoopsCenter(hoopsZone(st.streak)) };
+    st.s0 = null; save(r, st); return { ...out, period: hoopsPeriod(st.i), zone: hoopsZone(st.streak), nextCenter: hoopsCenter(hoopsZone(st.streak)) };
   }),
   mathStart: ctx => tx(() => {
     const q = mathQuestion(0), st = { t0: now(), i: 0, score: 0, right: 0, combo: 0, bestCombo: 0, ans: q.ans, asked: now() };
@@ -1203,6 +1213,7 @@ const routes = {
   'POST /api/arcade/trivia/start': need(arcade.triviaStart),
   'POST /api/arcade/trivia/answer': need(arcade.triviaAnswer),
   'POST /api/arcade/hoops/start': need(arcade.hoopsStart),
+  'POST /api/arcade/hoops/ready': need(arcade.hoopsReady),
   'POST /api/arcade/hoops/shoot': need(arcade.hoopsShoot),
   'POST /api/arcade/math/start': need(arcade.mathStart),
   'POST /api/arcade/math/answer': need(arcade.mathAnswer),

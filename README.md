@@ -1,43 +1,39 @@
 # 🦅 HawkBet
 
-South Lakes pick'em and arcade, played with fake Hawk Bucks only. No real money, not affiliated with South Lakes HS or FCPS.
+South Lakes pick'em and arcade, played with fake Hawk Bucks only. No real money, no prizes, not affiliated with South Lakes HS or FCPS.
 
-## ▶ [Open HawkBet](http://localhost:8622)
+## ▶ [Play HawkBet: playhawkbet.fly.dev](https://playhawkbet.fly.dev)
 
-That link opens HawkBet on your own computer once it's running:
+That link is the live site. Make an account and play. (Running it on your own computer? See [Run it locally](#run-it-locally).)
 
-1. **Mac:** double-click [`HawkBet.command`](HawkBet.command) in this folder. It starts the server and opens the site for you.
-2. **Anywhere else:** run `node server.js`, then click **[Open HawkBet](http://localhost:8622)**.
+## What's in it
+- **18 games.** 11 chance games (Seahawk Drop, Locker Hunt, Seahawk Crossing, Heads or Tails, Scoreboard Roll, Hail Mary, Seahawk Slots, Lakes Roulette, Hallway RPS, Hawk 21, Seahawk Launch) and 7 skill games (Bell Rush, Classroom Memory, Seahawk Trivia, Free Throw Line, Mental Math Sprint, Marching Band, Hallway Dash).
+- **Skill games** have personal bests, top-score boards, and score-tier payouts if you bet.
+  - 🏀 Free Throw Line is NBA 2K style: let go in the green window.
+  - 🏃 Hallway Dash is a lane runner with jump, slide, power-ups and four levels (Freshman to Senior) that get harder every 100 rows.
+- **Scoreboard Roll** is provably fair: you see a fingerprint of the server seed first and can verify any roll in your browser.
+- 🛍️ **Hawk Shop:** a Seahawk avatar with cosmetics. Gear carries luck (up to Luck 10), plus boosters and three Mythic Super Luck items that are gated and wear out.
+- 🎁 **Rewards:** levels and XP, a daily wheel, daily challenges and 24 achievements.
+- 🏫 **Site Mode** (Admin tab): switch between full HawkBet and **Seahawk Arcade** (School Edition: skill games only, no bets, no chance games), with an optional school-hours schedule.
+- 🛠️ **Admin tools:** give or take Hawk Bucks (one player or everyone), items, luck, shop prices and sales, password resets, bans, and an action log.
+- 🏦 The Bank only helps when you're broke (under 100 Hawk Bucks, 1,000 once an hour).
+- The server decides every outcome and is the only thing that changes balances. Hawk Bucks have no cash value.
 
-A public link anyone can click (for example `https://hawkbet-slhs.fly.dev`) comes after deploying. See [DEPLOY.md](DEPLOY.md).
-
+## Run it locally
 Zero-dependency Node server (needs Node 22.5+ for built-in SQLite). No `npm install`.
 
-    node server.js            # http://localhost:8622
-    PORT=3000 node server.js
-    ADMIN_USERNAME=yourname node server.js   # that username becomes admin when it signs up
+1. **Mac:** double-click [`HawkBet.command`](HawkBet.command). It starts the server and opens http://localhost:8622 for you.
+2. **Anywhere else:** run `node server.js`, then open http://localhost:8622.
 
-- Admin: if `ADMIN_USERNAME` is set, only that username is admin (it still has to sign up). If not set, the first account created is admin.
+        PORT=3000 node server.js
+        ADMIN_USERNAME=yourname node server.js   # that username becomes admin when it signs up
+
+- If `ADMIN_USERNAME` isn't set, the first account created is the admin.
 - Data lives in `data/hawkbet.db` (gitignored). Delete the folder to reset everything.
-- Admin tab: add lines, lock them at game time, enter the final result to settle slips and pay winners, or void a cancelled game.
-- The server decides all outcomes (Plinko drops, Mines positions, Crossing hits, slip grading) and is the only thing that changes balances. Mines/Crossing rounds survive a page refresh.
-- Hawk Bucks have no cash value: no buying, no cash-out, no prizes for credits.
-
-## Look and navigation
-- Desktop has a collapsible left sidebar (Casino, HawkBet Originals, Rewards, Sports); phones get a bottom tab bar and a slide-in menu.
-- 🃏 Hawk 21 has a cartoon dealer, Coach, who reacts to every hand.
-- 🎁 Rewards: levels and XP (Freshman → Hall of Fame), a daily wheel, 3 daily challenges and 18 achievements. All progress is computed on the server from the rounds table, and free rewards never count toward leaderboard net winnings.
-
-## Arcade
-- 🎰 Seahawk Slots is a 3×3 machine with 5 paylines, a wild hawk (not for trophies) and a 250x jackpot (97.06% payback). Pull the lever with the mouse, tap it, or press Space.
-- 14 games: 11 classic Hawk Bucks games (including 🚀 Seahawk Launch, a crash game) plus 3 score-only skill games (Bell Rush, Classroom Memory, Seahawk Trivia) with personal bests and top-10 lists.
-- 🔥 Super Luck (×2 / ×5 / ×10) divides your chance to lose and keeps normal payouts. Anything won or lost under Super Luck is excluded from leaderboard net winnings.
-- 🏠 Home is a casino lobby: game carousel, Originals grid, live bets and big wins from real rounds.
-- 🍀 Luck Lab (Normal or 1–10) changes win chances in Seymour Flip, Hallway RPS, Seahawk Crossing, Scoreboard Roll and Hail Mary (×0.6 at 1 up to ×1.5 at 10). Payouts shrink to match, so average payback is the same at every level. Skill games can be played free or for Hawk Bucks, paid by score tier.
-- Sound effects are generated with the Web Audio API (no files). Toggle with the 🔊 button; the choice is saved in the browser.
+- Lost a password (even the admin's)? `node reset-password.js USERNAME NEWPASSWORD`.
 
 ## Tests
     node --test        # spins up the server on a temp database and exercises the API
 
 ## Deploying
-See [DEPLOY.md](DEPLOY.md) (Fly.io, HTTPS, persistent database, invite code, backups).
+The live site runs on Fly.io. See [DEPLOY.md](DEPLOY.md) (HTTPS, persistent database, backups, updating the site).

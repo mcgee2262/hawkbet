@@ -966,8 +966,8 @@ body.out .side,body.out .tabbar,body.out .lvlchip,body.out .menubtn,body.out .sc
 .vmark{position:absolute;left:-6px;right:-6px;height:3px;margin-bottom:-1px;background:#fff;box-shadow:0 0 8px #fff;border-radius:2px;will-change:bottom}
 .vmeter.green{box-shadow:inset 0 0 0 2px #19e58a,0 0 26px #19e58a,0 0 0 4px #19e58a55}.vmeter.green .vfill{background:linear-gradient(0deg,#0fa862,#b8ffd8)}.vmeter.miss{box-shadow:inset 0 0 0 2px #ff5d6c,0 0 16px #ff5d6c}
 .vlabel{position:absolute;left:26px;top:50%;transform:translateY(-50%);font:900 12px/1 system-ui;letter-spacing:.08em;color:#fff;text-shadow:0 2px 6px #000;white-space:nowrap}.vmeter.green .vlabel{color:#19e58a}.vmeter.miss .vlabel{color:#ff8a95}
-.hpop{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%) scale(.4);font:900 clamp(32px,9vw,64px)/1 system-ui;font-style:italic;letter-spacing:.03em;opacity:0;pointer-events:none;z-index:6;text-shadow:0 4px 0 #0007,0 0 28px currentColor;-webkit-text-stroke:2px #0006;white-space:nowrap}
-.hpop.show{animation:popin .95s cubic-bezier(.2,1.5,.4,1) forwards}.hpop.green{color:#19ff8a}.hpop.perfect{color:#c6ff3d;text-shadow:0 4px 0 #0007,0 0 36px #19ff8a,0 0 12px #fff}.hpop.bad{color:#ff5d6c}
+.hpop{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%) scale(.4);font:900 clamp(22px,8vw,46px)/1 system-ui;font-style:italic;letter-spacing:.03em;opacity:0;pointer-events:none;z-index:6;text-shadow:0 4px 0 #0007,0 0 28px currentColor;-webkit-text-stroke:2px #0006;white-space:nowrap}
+.hpop.show{animation:popin .95s cubic-bezier(.2,1.5,.4,1) forwards}.hpop.green{color:#19ff8a}.hpop.perfect{font-size:clamp(18px,6.4vw,34px);color:#c6ff3d;text-shadow:0 4px 0 #0007,0 0 36px #19ff8a,0 0 12px #fff}.hpop.bad{color:#ff5d6c}
 @keyframes popin{0%{opacity:0;transform:translate(-50%,-30%) scale(.4)}25%{opacity:1;transform:translate(-50%,-55%) scale(1.18)}70%{opacity:1;transform:translate(-50%,-60%) scale(1)}100%{opacity:0;transform:translate(-50%,-90%) scale(1)}}
 .hsub{position:absolute;left:50%;top:58%;transform:translateX(-50%);font:800 clamp(12px,3vw,17px)/1 system-ui;color:#fff;text-shadow:0 2px 6px #000;opacity:0;pointer-events:none;z-index:6;letter-spacing:.06em;text-transform:uppercase}.hsub.show{animation:subin .95s ease-out forwards}
 @keyframes subin{0%{opacity:0}20%,70%{opacity:1}100%{opacity:0}}
@@ -978,7 +978,10 @@ body.out .side,body.out .tabbar,body.out .lvlchip,body.out .menubtn,body.out .sc
 .netg.swish{animation:netsw .7s ease-out}@keyframes netsw{0%{transform:scaleY(1)}25%{transform:scaleY(1.28) scaleX(.9)}55%{transform:scaleY(.9) scaleX(1.06)}100%{transform:scaleY(1)}}
 .rimg{transform-box:fill-box;transform-origin:center}.rimg.rimhit{animation:rimsh .5s ease-out}@keyframes rimsh{0%,100%{transform:translateY(0)}20%{transform:translateY(5px) rotate(-3deg)}50%{transform:translateY(-2px) rotate(2deg)}}
 .bboard.bflash{animation:bfl .5s}@keyframes bfl{50%{filter:drop-shadow(0 0 14px #19ff8a) brightness(1.4)}}
-.shooter{transform-box:fill-box;transform-origin:50% 100%}.shooter.jump{animation:shjump .42s ease-out}@keyframes shjump{0%{transform:scale(1,.92)}40%{transform:translateY(-16px) scale(.97,1.04)}100%{transform:none}}
+.shooter{transform-box:fill-box;transform-origin:50% 100%}.shooter.jump{animation:shjump .5s ease-out}@keyframes shjump{0%{transform:scale(1,.9)}30%{transform:translateY(-14px) scale(.97,1.05)}60%{transform:translateY(-6px)}100%{transform:none}}
+.shooter .wingup{transform-box:fill-box;transform-origin:0% 100%}.shooter.jump .wingup{animation:wflick .5s ease-out}@keyframes wflick{0%{transform:rotate(0)}35%{transform:rotate(-26deg)}60%{transform:rotate(14deg)}100%{transform:rotate(0)}}
+.shooter.fist .wingup{animation:wfist .7s ease-out}@keyframes wfist{0%,100%{transform:rotate(0) scale(1)}35%{transform:rotate(-75deg) scale(1.12)}}
+.shooter.shake{animation:shshake .5s}@keyframes shshake{0%,100%{transform:rotate(0)}25%{transform:rotate(-5deg)}60%{transform:rotate(4deg)}}
 .shootbtn{width:100%;font-size:22px;padding:16px;margin-top:14px}
 @media (prefers-reduced-motion:reduce){.hball.fire .flame,.vzone::after{animation:none}}
 

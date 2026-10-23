@@ -368,7 +368,7 @@ async function renderLines(my) {
 let stopFns = [];
 function stopGames() { stopFns.forEach(f => f()); stopFns = []; if (pending) { pending = 0; showBal(); } }
 const GAME_COLOR = { plinko: '#ff4fd8', mines: '#3d8bff', cross: '#ffc542', flip: '#f5a623', dice: '#a855ff', limbo: '#19e58a', slots: '#ff4d5e', roulette: '#12c26a', rps: '#ff7a3c', bj: '#e0284a', rocket: '#ffb21a', bell: '#ffd24a', memory: '#9b5cff', trivia: '#16e0c0', hoops: '#ff8a3c', math: '#4f8bff', band: '#19e58a', dash: '#ffc542' };
-const GAMES = [['plinko', '🔵 Hawk Drop'], ['mines', '🔐 Locker Hunt'], ['cross', '🚌 Seahawk Crossing'], ['flip', '🪙 Heads or Tails'], ['dice', '🎲 Scoreboard Roll'], ['limbo', '🏈 Hail Mary'], ['slots', '🎰 Seahawk Slots'], ['roulette', '🎡 Lakes Roulette'], ['rps', '✊ Hallway RPS'], ['bj', '🃏 Hawk 21'], ['rocket', '🚀 Seahawk Launch'], ['bell', '🔔 Bell Rush'], ['memory', '🧠 Classroom Memory'], ['trivia', '❓ Seahawk Trivia'], ['hoops', '🏀 Free Throw Line'], ['math', '➕ Mental Math Sprint'], ['band', '🥁 Marching Band'], ['dash', '🏃 Hallway Dash']];
+const GAMES = [['plinko', '🔵 Seahawk Drop'], ['mines', '🔐 Locker Hunt'], ['cross', '🚌 Seahawk Crossing'], ['flip', '🪙 Heads or Tails'], ['dice', '🎲 Scoreboard Roll'], ['limbo', '🏈 Hail Mary'], ['slots', '🎰 Seahawk Slots'], ['roulette', '🎡 Lakes Roulette'], ['rps', '✊ Hallway RPS'], ['bj', '🃏 Hawk 21'], ['rocket', '🚀 Seahawk Launch'], ['bell', '🔔 Bell Rush'], ['memory', '🧠 Classroom Memory'], ['trivia', '❓ Seahawk Trivia'], ['hoops', '🏀 Free Throw Line'], ['math', '➕ Mental Math Sprint'], ['band', '🥁 Marching Band'], ['dash', '🏃 Hallway Dash']];
 const GAME_FNS = { plinko, mines, cross, flip, dice, limbo, slots, roulette, rps, bj, rocket, bell, memory, trivia, hoops, math, band, dash }; // every game that can launch
 const CATS = [['all', 'All'], ['featured', '⭐ Featured'], ['recent', '🕘 Recent'], ['classic', '🎰 Classic'], ['skill', '🧠 Skill']];
 const SKILL_IDS = new Set(['bell', 'memory', 'trivia', 'hoops', 'math', 'band', 'dash']);
@@ -637,7 +637,7 @@ async function renderHome(my) {
   stopFns.push(() => clearInterval(t));
 }
 
-/* Plinko: Hawk Drop. The server drops the ball; we animate the path it sends back. */
+/* Plinko: Seahawk Drop. The server drops the ball; we animate the path it sends back. */
 async function plinko(root, my) {
   let rows = 12, risk = 'med', balls = [], flash = {}, raf, M = null;
   const tables = {};
@@ -1511,6 +1511,7 @@ const ARENA_SVG = `<svg viewBox="0 0 400 260" preserveAspectRatio="none" aria-hi
   <linearGradient id="af" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e0a259"/><stop offset=".5" stop-color="#c98a45"/><stop offset="1" stop-color="#8a5622"/></linearGradient>
   <linearGradient id="ab" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
   <linearGradient id="agl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <linearGradient id="jg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#19e58a"/><stop offset="1" stop-color="#0a8f4e"/></linearGradient>
   <linearGradient id="ajt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a1230"/><stop offset="1" stop-color="#050810"/></linearGradient></defs>
   <rect width="400" height="260" fill="url(#aw)"/>
   <g class="beams"><path d="M40 0L90 150L10 150Z"/><path d="M130 0L200 150L110 150Z"/><path d="M270 0L340 150L240 150Z"/><path d="M360 0L420 150L330 150Z"/></g>
@@ -1526,10 +1527,16 @@ const ARENA_SVG = `<svg viewBox="0 0 400 260" preserveAspectRatio="none" aria-hi
   <g class="bboard"><rect x="289" y="54" width="9" height="62" rx="2" fill="#fff" stroke="#c9cfe8" stroke-width="2"/><rect x="286" y="76" width="4" height="22" fill="#e8461a"/></g>
   <g class="rimg"><path d="M246 109H290" stroke="#ff5a1a" stroke-width="5" stroke-linecap="round"/><ellipse cx="268" cy="109" rx="22" ry="4.5" fill="none" stroke="#ff7a3c" stroke-width="2" opacity=".7"/></g>
   <g class="netg" id="net" style="transform-origin:268px 111px"><path d="M248 111L255 144M258 113L262 146M268 114V147M278 113L274 146M288 111L281 144M250 124H286M254 135H282" fill="none" stroke="#fff" stroke-width="1.5" opacity=".85"/></g>
-  <g id="shooter" class="shooter"><ellipse cx="92" cy="228" rx="30" ry="6" fill="#0007"/><image href="hawk.svg" x="54" y="150" width="80" height="80"/>
-    <path d="M70 188Q92 180 114 188L110 214Q92 220 74 214Z" fill="#1b4fd8" stroke="#fff" stroke-width="2"/><text x="92" y="206" text-anchor="middle" font-size="12" font-weight="900" fill="#fff">SL</text><path d="M74 214Q92 220 110 214V219Q92 225 74 219Z" fill="#fff"/></g></svg>`;
+  <g id="shooter" class="shooter"><ellipse cx="92" cy="231" rx="34" ry="6.5" fill="#0007"/><g transform="translate(92 231) scale(1.3) translate(-92 -231)">
+    <g class="legs"><path d="M85 214v12M99 214v12" stroke="#f5a623" stroke-width="5" stroke-linecap="round"/><path d="M79 230q6-7 13 0v3H79zM93 230q6-7 13 0v3H93z" fill="#fff" stroke="#1b4fd8" stroke-width="1.6"/><rect x="79" y="231" width="13" height="3" rx="1.5" fill="#19e58a"/><rect x="93" y="231" width="13" height="3" rx="1.5" fill="#19e58a"/></g>
+    <path d="M74 205h36l3 14H71z" fill="#1b4fd8" stroke="#fff" stroke-width="1.5"/><path d="M92 206v12" stroke="#ffffff55" stroke-width="1.5"/>
+    <g class="wingback"><path d="M76 186q-13 12-7 27q9-8 9-23z" fill="#0b2a6b" stroke="#1b4fd8" stroke-width="1"/></g>
+    <g class="torso"><path d="M75 182q17-9 34 0l2 24H73z" fill="url(#jg)" stroke="#fff" stroke-width="1.6"/><path d="M82 181q10 7 20 0" fill="none" stroke="#fff" stroke-width="2"/><text x="92" y="200" text-anchor="middle" font-size="12" font-weight="900" fill="#fff" stroke="#0b2a6b" stroke-width=".7">23</text></g>
+    <g class="wingup"><path d="M105 186q11-4 17-14q2-4 6-3q1 5-2 9q-6 12-19 14z" fill="#1b4fd8" stroke="#0b2a6b" stroke-width="1.4"/><path d="M122 172l5-6M126 176l6-3" stroke="#fff" stroke-width="2" stroke-linecap="round"/></g>
+    <circle cx="92" cy="166" r="14" fill="#fff"/><path d="M78 164q14-15 28 0z" fill="#0b2a6b"/><path d="M78 162h28v4H78z" fill="#e8461a"/><path d="M104 168l11 4-11 4z" fill="#ffc542" stroke="#b26b00" stroke-width="1"/><circle cx="99" cy="167" r="2.8" fill="#ffd24a"/><circle cx="99.7" cy="167" r="1.4" fill="#0a0e13"/>
+  </g></g></svg>`;
 async function hoops(root) {
-  let st = null, s0 = 0, period = 1700, zone = 0.17, center = 0.8, frozen = false, timer = 0, busy = false, streak = 0, total = 0;
+  let st = null, s0 = 0, period = 1700, zone = 0.17, center = 0.8, frozen = false, timer = 0, busy = false, streak = 0, total = 0, lat = 0;
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> 10 shots, NBA 2K style. A shot meter fills and drains: tap <b>SHOOT</b> (or press Space) when it's in the <b style="color:#19e58a">green window</b> near the top. Dead center is a perfect green (150). Makes in a row add a streak bonus, but the window shrinks and the meter speeds up.</div>
     ${skillBet('hoops')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Shot</small><b id="sn">–</b></div></div>${hsBox()}`,
     `<div class="hoopsw"><div class="court" id="court">${ARENA_SVG}<div class="vmeter" id="vmeter"><i class="vzone" id="vz"><i class="vperf" id="vp"></i></i><i class="vfill" id="vf"></i><i class="vmark" id="vm"></i><b class="vlabel" id="vl"></b></div>
@@ -1541,7 +1548,7 @@ async function hoops(root) {
   const place = pos => { vf.style.transform = `scaleY(${Math.max(0.001, pos)})`; vm.style.bottom = pos * 100 + '%'; };
   const T = (x, y, sc, rot) => `translate(${x}px,${y}px) translate(-50%,-50%) scale(${sc}) rotate(${rot}deg)`;
   const size = () => { const cw = court.clientWidth; ball.style.fontSize = cw * 0.085 + 'px'; return cw; };
-  const rest = () => { const cw = size(), ch = court.clientHeight; ball.getAnimations().forEach(a => a.cancel()); ball.style.transform = T(cw * 0.31, ch * 0.7, 1, 0); hsh.getAnimations().forEach(a => a.cancel()); hsh.style.opacity = 0; ball.classList.toggle('fire', streak >= 3); };
+  const rest = () => { const cw = size(), ch = court.clientHeight; ball.getAnimations().forEach(a => a.cancel()); ball.style.transform = T(cw * 0.345, ch * 0.59, 1, 0); hsh.getAnimations().forEach(a => a.cancel()); hsh.style.opacity = 0; ball.classList.toggle('fire', streak >= 3); };
   function loop() { clearTimeout(timer); if (!root.isConnected || !st) return; if (!frozen) place(tri(performance.now() - s0)); timer = setTimeout(loop, 16); }
   stopFns.push(() => clearTimeout(timer)); paintZone(); place(0.4); setTimeout(rest, 0);
   const ro = new ResizeObserver(() => { if (!ball.getAnimations().length) rest(); }); ro.observe(court); stopFns.push(() => ro.disconnect());
@@ -1550,14 +1557,14 @@ async function hoops(root) {
   const flash = cls => { const f = $('#hflash'); f.className = 'hflash'; void f.offsetWidth; f.className = 'hflash ' + cls; };
   const bump = (el, cls, ms) => { el.classList.remove(cls); void el.getBoundingClientRect(); el.classList.add(cls); setTimeout(() => el.classList.remove(cls), ms); };
   function animShot(r) {
-    const cw = size(), ch = court.clientHeight, X = f => f * cw, Y = f => f * ch, x0 = X(.31), y0 = Y(.7);
+    const cw = size(), ch = court.clientHeight, X = f => f * cw, Y = f => f * ch, x0 = X(.345), y0 = Y(.59);
     const frames = r.hit
       ? [{ transform: T(x0, y0, 1, 0), offset: 0 }, { transform: T(x0 + X(.01), y0 - Y(.04), 1, 40), offset: .13 }, { transform: T(X(.47), Y(.12), .74, 330), offset: .5, easing: 'ease-in' }, { transform: T(X(.675), Y(.405), .62, 520), offset: .7 }, { transform: T(X(.675), Y(.54), .6, 560), offset: .8 }, { transform: T(X(.69), Y(.88), .85, 640), offset: 1 }]
       : [{ transform: T(x0, y0, 1, 0), offset: 0 }, { transform: T(x0 + X(.01), y0 - Y(.04), 1, 40), offset: .13 }, { transform: T(X(.48), Y(.12), .76, 300), offset: .5, easing: 'ease-in' }, { transform: T(X(.705), Y(.39), .66, 430), offset: .68 }, { transform: T(X(.8), Y(.58), .74, 560), offset: .82 }, { transform: T(X(.9), Y(.88), .85, 760), offset: 1 }];
     const dur = calm ? 200 : 1200; ball.animate(frames, { duration: dur, fill: 'forwards', easing: 'linear' });
     hsh.style.opacity = .5; hsh.animate([{ transform: `translate(${x0}px,${Y(.86)}px) translate(-50%,-50%) scale(1)`, opacity: .5 }, { transform: `translate(${X(.5)}px,${Y(.86)}px) translate(-50%,-50%) scale(.6)`, opacity: .2, offset: .5 }, { transform: `translate(${X(r.hit ? .69 : .9)}px,${Y(.86)}px) translate(-50%,-50%) scale(1)`, opacity: .5 }], { duration: dur, fill: 'forwards' });
     bump(shooter, 'jump', 420);
-    setTimeout(() => { if (!root.isConnected) return; if (r.hit) { bump(net, 'swish', 700); sfx.play('swish'); if (r.perfect) bump(court.querySelector('.bboard'), 'bflash', 500); } else { bump(court.querySelector('.rimg'), 'rimhit', 500); sfx.play('rim'); setTimeout(() => sfx.play('brick'), 230); } }, calm ? 0 : 820);
+    setTimeout(() => { if (!root.isConnected) return; if (r.hit) { bump(shooter, 'fist', 700); bump(net, 'swish', 700); sfx.play('swish'); if (r.perfect) bump(court.querySelector('.bboard'), 'bflash', 500); } else { bump(shooter, 'shake', 500); bump(court.querySelector('.rimg'), 'rimhit', 500); sfx.play('rim'); setTimeout(() => sfx.play('brick'), 230); } }, calm ? 0 : 820);
   }
   function release(r) { // 2K-style timing read-out: GREEN when it goes in, early/late otherwise
     if (r.hit) return [r.perfect ? 'PERFECT GREEN!' : 'GREEN!', r.perfect ? 'perfect' : 'green', r.perfect ? 'Perfect release' : 'Good release'];
@@ -1565,11 +1572,18 @@ async function hoops(root) {
     const d = Math.abs(r.pos - r.center), way = r.pos < r.center ? 'early' : 'late', how = d <= r.zone * 1.8 ? 'Slightly' : 'Very';
     return [way === 'early' ? 'EARLY' : 'LATE', 'bad', `${how} ${way}`];
   }
-  function nextShot(r) { s0 = performance.now(); period = r.period; zone = r.zone; center = r.nextCenter ?? r.center; paintZone(); frozen = false; vl.textContent = ''; vmeter.classList.remove('green', 'miss'); rest(); shoot.disabled = false; }
+  // The server starts its copy of the meter the moment it hears 'ready'. We start ours at the midpoint of that round trip, so both match, and we tell the server our one-way delay when we shoot.
+  async function begin(r, send, first) {
+    period = r.period; zone = r.zone; center = r.nextCenter ?? r.center; paintZone(); vl.textContent = ''; vmeter.classList.remove('green', 'miss'); rest(); place(0.0);
+    if (!first) { for (let i = 0; i < 3 && root.isConnected && st; i++) { const t1 = performance.now(); try { const k = await api('POST', '/arcade/hoops/ready'); const t2 = performance.now(); send = t1; lat = (t2 - t1) / 2; period = k.period; zone = k.zone; center = k.center; paintZone(); s0 = (t1 + t2) / 2; break; } catch (e) { if (i === 2) { toast(e.message); return; } await wait(200); } } }
+    else { const t2 = performance.now(); lat = (t2 - send) / 2; s0 = (send + t2) / 2; }
+    if (!root.isConnected || !st) return; frozen = false; shoot.disabled = false;
+  }
+  const nextShot = r => begin(r, 0, false);
   async function fire() {
     if (!st || busy || frozen) return; busy = true; frozen = true; shoot.disabled = true; sfx.play('whoosh');
     try {
-      const r = await api('POST', '/arcade/hoops/shoot'); if (!root.isConnected) return;
+      const r = await api('POST', '/arcade/hoops/shoot', { lat: Math.round(lat) }); if (!root.isConnected) return;
       place(r.pos); streak = r.streak; total = r.score; const pip = $('#pips').children[r.shot - 1], [word, cls, detail] = release(r); animShot(r);
       vl.textContent = word.replace('PERFECT ', ''); vmeter.classList.add(r.hit ? 'green' : 'miss'); sub(detail);
       await wait(calm ? 100 : 820); if (!root.isConnected) return;
@@ -1578,13 +1592,13 @@ async function hoops(root) {
       $('#jtN').textContent = `SHOT ${Math.min(r.shot + 1, 10)}/10`; $('#jtS').textContent = r.score; $('#sn').textContent = `${Math.min(r.shot + 1, 10)} / 10`; countUp($('#sc'), r.score, 300);
       await wait(calm ? 300 : 900); if (!root.isConnected) return;
       if (r.done) { st = null; clearTimeout(timer); lockStart(false); rest(); resMsg(true, `${r.makes}/10 green · ${fmt(r.score)} pts`); skillDone('hoops', r, r.makes >= 7); }
-      else nextShot(r);
+      else { busy = false; await nextShot(r); }
     } catch (e) { toast(e.message); frozen = false; shoot.disabled = false; } finally { busy = false; }
   }
   shoot.onclick = fire;
   skillButtons(bet => act(async () => {
-    const r = await api('POST', '/arcade/hoops/start', { bet }); if (r.bet) setBal(r.balance); st = {}; streak = 0; lockStart(true); $('#sc').textContent = '0'; $('#jtS').textContent = '0'; $('#jtN').textContent = 'SHOT 1/10'; $('#sn').textContent = '1 / 10'; $('#res').textContent = '';
-    [...$('#pips').children].forEach(i => i.className = ''); center = r.center; nextShot({ period: r.period, zone: r.zone, center: r.center }); loop();
+    const sent = 0, r = await api('POST', '/arcade/hoops/start', { bet }); if (r.bet) setBal(r.balance); st = {}; streak = 0; lockStart(true); $('#sc').textContent = '0'; $('#jtS').textContent = '0'; $('#jtN').textContent = 'SHOT 1/10'; $('#sn').textContent = '1 / 10'; $('#res').textContent = '';
+    [...$('#pips').children].forEach(i => i.className = ''); center = r.center; await begin({ period: r.period, zone: r.zone, center: r.center }, sent, false); loop();
   }));
   loadHS('hoops');
 }
@@ -1734,15 +1748,16 @@ function dashHawk(c, x, y, sz, phase, lean, dir, t, pose) { // the Seahawk, seen
   c.fillStyle = '#ffc542'; c.beginPath(); c.moveTo(dir * sz * .15, -sz * .86 + bob); c.lineTo(dir * sz * .3, -sz * .81 + bob); c.lineTo(dir * sz * .15, -sz * .77 + bob); c.closePath(); c.fill();
   c.fillStyle = '#ffd24a'; c.beginPath(); c.arc(dir * sz * .08, -sz * .86 + bob, sz * .04, 0, 7); c.fill(); c.fillStyle = '#0a0e13'; c.beginPath(); c.arc(dir * sz * .09, -sz * .86 + bob, sz * .02, 0, 7); c.fill(); c.restore();
 }
+let dashTips = { low: false, high: false, lane: false, done: false };
 async function dash(root) {
   let st = null, run = null, timer = 0, played = false;
   const W = 400, H = 560, HY = 140, PY = 468, VX = 200, LANE = 122, BW = 94, FL = 212, K = 0.16, AHEAD = 24, PX = 100, AIR = 2, MAGNET = 12;
-  const CPN = ['1ST PERIOD', '2ND PERIOD', 'LUNCH'];
-  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>🎯 Goal:</b> race down the hallway and get to class before the bell. <b>← →</b> switch lanes, <b>↑</b> jump hurdles, <b>↓</b> slide under signs (phones: swipe, or tap a side). Grab 🪙 chips (+50), 🧲 magnet pulls them in, 🛡️ shield saves you from one hit. Every row is 10 points, each checkpoint is +100 and the 🎓 door is a +500 jackpot.</div>
+  const CPN = ['LEVEL 2 · SOPHOMORE', 'LEVEL 3 · JUNIOR', 'LEVEL 4 · SENIOR'], CPS = ['SOPH', 'JUNIOR', 'SENIOR'], LVN = ['FRESHMAN', 'SOPHOMORE', 'JUNIOR', 'SENIOR'], LVC = ['#19e58a', '#5b8cff', '#a855ff', '#ff5d6c'], GR = 0.25; // GR: a lane change counts up to a quarter row late, so near-misses are dodges
+  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>🎯 Goal:</b> race down the hallway and get to class before the bell. <b>← →</b> switch lanes around carts, <b>↑</b> jump the backpacks, <b>↓</b> slide under signs (phones: swipe, or tap a side). Grab 🪙 chips (+50), 🧲 magnet pulls them in, 🛡️ shield saves you from one hit. It starts easy and gets harder every 100 rows (Freshman → Senior). Every row is 10 points, each new level is +100 and the 🎓 door is a +500 jackpot.</div>
     ${skillBet('dash')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Chips</small><b id="ps">0</b></div></div>${hsBox()}`,
     `<div class="dashwrap"><canvas id="dcv" width="${W}" height="${H}" aria-label="Hallway Dash game"></canvas><div class="dashmsg" id="dm"></div>
-      <div class="dashintro" id="dintro"><h3>🎯 GOAL: GET TO CLASS!</h3><p>Race down the hall before the bell and reach the <b>🎓 CLASS door</b> for a <b>+500 jackpot</b>.</p>
-        <ul><li><b>⬅️ ➡️</b> switch lanes around carts</li><li><b>⬆️</b> jump the yellow hurdles</li><li><b>⬇️</b> slide under the hanging signs</li><li><b>🪙</b> grab chips for points</li><li><b>🧲 🛡️</b> magnet and shield power-ups</li></ul><small>Phones: swipe up / down, tap left / right</small><div class="introgo">Press <b>Play</b> to start 🏃</div></div></div>`);
+      <div class="dashintro" id="dintro"><h3>🎯 GOAL: GET TO CLASS!</h3><p>Race down the hall before the bell and reach the <b>🎓 CLASS door</b> for a <b>+500 jackpot</b>. It starts easy and gets harder every 100 rows.</p>
+        <ul><li><b>⬅️ ➡️</b> switch lanes around the carts</li><li><b>⬆️</b> jump over the backpacks</li><li><b>⬇️</b> slide under the hanging signs</li><li><b>🪙</b> grab chips for points</li><li><b>🧲 🛡️</b> magnet and shield power-ups</li></ul><small>Phones: swipe up / down, tap left / right</small><div class="introgo">Press <b>Play</b> to start 🏃</div></div></div>`);
   const cv = $('#dcv'), c = cv.getContext('2d'), tiers = (CFG && CFG.skillTiers && CFG.skillTiers.dash) || [[2500, 3], [1800, 2], [1200, 1.5], [700, 1]];
   const msg = t => { const m = $('#dm'); m.textContent = t; m.classList.toggle('hidden', !t); };
   stopFns.push(() => { clearTimeout(timer); run = null; });
@@ -1760,20 +1775,19 @@ async function dash(root) {
     c.fillStyle = '#ffc542'; c.beginPath(); c.arc(0, 0, sz * .17, 0, 7); c.fill(); c.fillStyle = '#7a4a00'; c.font = `900 ${Math.round(sz * .22)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('★', 0, 1); c.restore();
   }
   function orb(x, y, sz, now, emoji, col) { c.save(); c.translate(x, y - sz * .6 - Math.sin(now / 300) * sz * .08); const g = c.createRadialGradient(0, 0, 0, 0, 0, sz * .62); g.addColorStop(0, col + 'cc'); g.addColorStop(1, col + '00'); c.fillStyle = g; c.fillRect(-sz * .62, -sz * .62, sz * 1.24, sz * 1.24); c.strokeStyle = col; c.lineWidth = Math.max(1.5, sz * .05); c.beginPath(); c.arc(0, 0, sz * .36, 0, 7); c.stroke(); c.font = `${Math.round(sz * .44)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(emoji, 0, 2); c.restore(); }
-  function bulbs(x1, y1, x2, y2, n, now, on) { for (let i = 0; i < n; i++) { const k = i / (n - 1), x = x1 + (x2 - x1) * k, y = y1 + (y2 - y1) * k, lit = on || ((Math.floor(now / 220) + i) & 1); c.fillStyle = lit ? '#ffe9a0' : '#7a5a10'; c.beginPath(); c.arc(x, y, 2.4, 0, 7); c.fill(); if (lit) { c.fillStyle = 'rgba(255,214,74,.25)'; c.beginPath(); c.arc(x, y, 6, 0, 7); c.fill(); } } }
   function vault(d, now) { // the CLASS door: a gold jackpot vault at the end of the hall
     const s = S(d); poly([P(-FL, s, 0), P(FL, s, 0), P(FL, s, 600), P(-FL, s, 600)], '#16246a');
     const dg = c.createLinearGradient(0, P(0, s, 330)[1], 0, P(0, s, 0)[1]); dg.addColorStop(0, '#fff3b0'); dg.addColorStop(.5, '#ffc542'); dg.addColorStop(1, '#c78600'); poly([P(-120, s, 0), P(120, s, 0), P(120, s, 330), P(-120, s, 330)], dg);
     poly([P(-100, s, 20), P(100, s, 20), P(100, s, 310), P(-100, s, 310)], 'rgba(120,70,0,.28)'); const cx = VX, cy = P(0, s, 170)[1], fs = Math.max(6, 74 * s);
     c.fillStyle = '#6b3d00'; c.font = `900 ${fs}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('🎓', cx, cy - fs * .55); c.font = `900 ${fs * .42}px system-ui`; c.fillText('CLASS', cx, cy + fs * .35); c.fillText('JACKPOT +500', cx, cy + fs * .85);
-    const a = P(-120, s, 340), b = P(120, s, 340); bulbs(a[0], a[1], b[0], b[1], 13, now, false);
   }
-  const speedAt = r => 340 / dashTickAt(Math.max(0, Math.floor(r)));
+  const speedAt = r => 420 / dashTickAt(Math.max(0, Math.floor(r)));
   const dashTickAt = r => run.tick[Math.min(r, run.tick.length - 1)];
   const scoreNow = () => Math.floor(run.pos) * 10 + run.passes * 50 + Math.min(3, Math.floor(run.pos / 100)) * 100;
   function scene(rp, now, crashed, tum) {
     c.save(); if (run.shakeUntil > now) c.translate((Math.random() - .5) * run.amp, (Math.random() - .5) * run.amp);
-    c.fillStyle = '#0a1233'; c.fillRect(-20, -20, W + 40, H + 40);
+    c.translate(W / 2, H / 2); c.rotate(Math.max(-1, Math.min(1, (run.target - run.laneX) / 70)) * .018); c.translate(-W / 2, -H / 2); // the camera leans a touch into lane changes
+    c.fillStyle = '#0a1233'; c.fillRect(-30, -30, W + 60, H + 60);
     const sf = S(AHEAD), sn = S(-1.5), cg = c.createLinearGradient(0, 0, 0, HY + 60); cg.addColorStop(0, '#080e2a'); cg.addColorStop(1, '#1a2a66');
     poly([P(-FL, sf, 600), P(FL, sf, 600), P(FL, sn, 600), P(-FL, sn, 600)], cg);
     const fg = c.createLinearGradient(0, P(0, sf, 0)[1], 0, H); fg.addColorStop(0, '#1a2a63'); fg.addColorStop(1, '#101a45'); poly([P(-FL, sf, 0), P(FL, sf, 0), P(FL, sn, 0), P(-FL, sn, 0)], fg);
@@ -1790,21 +1804,21 @@ async function dash(root) {
         for (const back of [1, 2, 3]) { if (r - back < 0) continue; const e1 = S(r - back - rp), e2 = S(r - back + 1 - rp); poly([P(ox - 53, e2, 0), P(ox + 53, e2, 0), P(ox + 53, e1, 0), P(ox - 53, e1, 0)], kind === 'b' ? 'rgba(255,60,80,.16)' : kind === 'l' ? 'rgba(255,200,40,.17)' : 'rgba(60,200,255,.17)'); }
         const gy = P(0, S(r - 2 - rp + .5), 0)[1], gs = S(r - 2 - rp + .5); if (r - 2 - rp > -.3) { c.font = `900 ${Math.round(34 * gs)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = kind === 'b' ? '#ff5d6c' : kind === 'l' ? '#ffd24a' : '#5bd0ff'; c.fillText(kind === 'b' ? '✕' : kind === 'l' ? '▲' : '▼', LX(l, gs), gy); } }
       for (const sd of [-1, 1]) { wall(sd, s1, s2, 0, 30, '#0a1233'); wall(sd, s1, s2, 30, 290, par ? '#2850c4' : '#2f5bd8'); wall(sd, s1, s2, 290, 600, '#18276a'); wall(sd, S(d1 + .08), S(d1 + .92), 46, 276, par ? '#3563e0' : '#3c6cf0'); wall(sd, S(d1 + .78), S(d1 + .84), 150, 190, '#ffd24a');
-        const b = P(sd * FL, S(d1 + .5), 300); c.fillStyle = (Math.floor(now / 220) + r + (sd > 0 ? 1 : 0)) & 1 || run.flashUntil > now ? '#ffe9a0' : '#7a5a10'; c.beginPath(); c.arc(b[0], b[1], Math.max(1.4, 3.4 * S(d1 + .5)), 0, 7); c.fill(); }
-      if (r % 3 === 0) poly([P(-58, S(d1 + .25), 598), P(58, S(d1 + .25), 598), P(58, S(d1 + .75), 598), P(-58, S(d1 + .75), 598)], 'rgba(255,255,235,.85)');
+        wall(sd, S(d1 + .49), S(d1 + .51), 46, 276, 'rgba(8,16,60,.55)'); wall(sd, S(d1 + .42), S(d1 + .46), 150, 186, '#ffd24a'); wall(sd, S(d1 + .54), S(d1 + .58), 150, 186, '#ffd24a'); wall(sd, S(d1 + .1), S(d1 + .4), 238, 246, 'rgba(8,16,60,.5)'); wall(sd, S(d1 + .6), S(d1 + .9), 238, 246, 'rgba(8,16,60,.5)'); }
+      if (r % 3 === 0) { poly([P(-58, S(d1 + .25), 598), P(58, S(d1 + .25), 598), P(58, S(d1 + .75), 598), P(-58, S(d1 + .75), 598)], 'rgba(255,255,235,.8)'); for (let l = 0; l < 3; l++) poly([P(OX(l) - 40, S(d1 + .78), 0), P(OX(l) + 40, S(d1 + .78), 0), P(OX(l) + 40, S(d1 + .22), 0), P(OX(l) - 40, S(d1 + .22), 0)], 'rgba(255,255,255,.07)'); }
       if (r === 100 || r === 200 || r === 300) { // checkpoint arch
-        const sa = S(d1 + .5), a = P(-FL + 8, sa, 330), b = P(FL - 8, sa, 330); poly([P(-FL + 8, sa, 300), P(FL - 8, sa, 300), P(FL - 8, sa, 360), P(-FL + 8, sa, 360)], '#0b1236'); bulbs(a[0], a[1], b[0], b[1], 17, now, run.flashUntil > now);
+        const sa = S(d1 + .5), a = P(-FL + 8, sa, 330), b = P(FL - 8, sa, 330); poly([P(-FL + 8, sa, 300), P(FL - 8, sa, 300), P(FL - 8, sa, 360), P(-FL + 8, sa, 360)], '#0b1236');
         c.fillStyle = '#ffd24a'; c.font = `900 ${Math.max(7, 40 * sa)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(CPN[r / 100 - 1], VX, P(0, sa, 330)[1]); }
     }
     if (toEnd < AHEAD - .5 && toEnd > -.5) vault(Math.max(0.05, toEnd), now);
-    const fog = c.createLinearGradient(0, P(0, sf, 600)[1] - 10, 0, P(0, sf, 0)[1] + 90); fog.addColorStop(0, 'rgba(8,14,42,.6)'); fog.addColorStop(1, 'rgba(8,14,42,0)'); c.fillStyle = fog; c.fillRect(0, 0, W, P(0, sf, 0)[1] + 90);
+    const fog = c.createLinearGradient(0, P(0, sf, 600)[1] - 10, 0, P(0, sf, 0)[1] + 90); fog.addColorStop(0, 'rgba(8,14,42,.78)'); fog.addColorStop(1, 'rgba(8,14,42,0)'); c.fillStyle = fog; c.fillRect(0, 0, W, P(0, sf, 0)[1] + 90);
     for (let r = Math.min(r1, run.max); r >= Math.floor(rp) - 1; r--) { // objects, far to near
-      const d = r - rp, row = run.rows[r]; if (d < -.8 || d > AHEAD - .5 || !row) continue; const s = S(d), y = P(0, s, 0)[1]; c.globalAlpha = Math.min(1, (AHEAD - 1 - d) / 5);
-      for (let l = 0; l < 3; l++) { const ox = OX(l), x = LX(l, s), v = (r * 7 + l * 13) % 2;
-        if (row[0] >> l & 1) { if (v) { box(ox, d, .7, BW, 150, '#2f5bd8', '#7fa1ff', '#1b3a9a', (a, b, yt, yb, ss) => { c.fillStyle = '#12286e'; for (let i = 0; i < 4; i++) c.fillRect(a + (b - a) * .14, yt + (yb - yt) * (.12 + i * .1), (b - a) * .72, Math.max(1, 3 * ss)); c.fillStyle = '#ffd24a'; c.fillRect(a, yb - (yb - yt) * .22, b - a, (yb - yt) * .1); c.fillStyle = '#000'; c.beginPath(); c.arc(a + (b - a) * .18, yb, 6 * ss, 0, 7); c.arc(b - (b - a) * .18, yb, 6 * ss, 0, 7); c.fill(); }); } else { dashBag(c, x, y, 190 * s, '#ff5a6e', '#a3182e'); } }
-        if (row[2] >> l & 1) box(ox, d, .45, BW, 46, '#ffd24a', '#fff3b0', '#c78600', (a, b, yt, yb) => { c.save(); c.beginPath(); c.rect(a, yt, b - a, yb - yt); c.clip(); c.fillStyle = '#1b1b1b'; const sw = (b - a) / 6; for (let i = -2; i < 9; i += 2) { c.beginPath(); c.moveTo(a + i * sw, yb); c.lineTo(a + (i + 1) * sw, yb); c.lineTo(a + (i + 3) * sw, yt); c.lineTo(a + (i + 2) * sw, yt); c.fill(); } c.restore(); });
-        if (row[3] >> l & 1) { const pa = P(ox - BW / 2 + 4, s, 330), pb = P(ox + BW / 2 - 4, s, 330); c.strokeStyle = '#8a93b8'; c.lineWidth = Math.max(1.5, 4 * s); c.beginPath(); c.moveTo(P(ox - BW / 2 + 6, s, 70)[0], P(0, s, 70)[1]); c.lineTo(pa[0], pa[1]); c.moveTo(P(ox + BW / 2 - 6, s, 70)[0], P(0, s, 70)[1]); c.lineTo(pb[0], pb[1]); c.stroke();
-          box(ox, d, .12, BW, 128, '#d8203a', '#ff7a8a', '#8a1224', null, 72); const bb = P(ox, s, 100); c.fillStyle = '#fff'; c.font = `900 ${Math.max(6, 18 * s)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('HALL CLOSED', bb[0], bb[1]); c.fillStyle = 'rgba(0,0,0,.28)'; c.beginPath(); c.ellipse(x, y, BW * .45 * s, 8 * s, 0, 0, 7); c.fill(); }
+      const d = r - rp, row = run.rows[r]; if (d < -.8 || d > AHEAD - .5 || !row) continue; const s = S(d), y = P(0, s, 0)[1]; c.globalAlpha = Math.min(1, (AHEAD - 1 - d) / 5) * (d < 1.2 ? Math.max(.35, (d + .8) / 2) : 1);
+      for (let l = 0; l < 3; l++) { const ox = OX(l), x = LX(l, s), v = (r * 7 + l * 13) % 3, sh = (w, op) => { c.fillStyle = `rgba(0,0,0,${op})`; c.beginPath(); c.ellipse(x, y, w * s, w * .16 * s, 0, 0, 7); c.fill(); };
+        if (row[0] >> l & 1) { sh(58, .3); box(ox, d, .7, BW, 104, v ? '#2f5bd8' : '#d8203a', v ? '#9ab6ff' : '#ff8a96', v ? '#1b3a9a' : '#8a1224', (a, b, yt, yb, ss) => { c.fillStyle = 'rgba(8,16,60,.55)'; for (let i = 0; i < 3; i++) c.fillRect(a + (b - a) * .14, yt + (yb - yt) * (.14 + i * .12), (b - a) * .72, Math.max(1, 3 * ss)); c.fillStyle = '#ffd24a'; c.fillRect(a, yb - (yb - yt) * .2, b - a, (yb - yt) * .09); c.fillStyle = '#111'; c.beginPath(); c.arc(a + (b - a) * .17, yb, 5 * ss, 0, 7); c.arc(b - (b - a) * .17, yb, 5 * ss, 0, 7); c.fill(); }); }
+        if (row[2] >> l & 1) dashBag(c, x, y, 78 * s, v ? '#3d8bff' : '#ff5a6e', v ? '#16379a' : '#a3182e');
+        if (row[3] >> l & 1) { const pa = P(ox - BW / 2 + 4, s, 330), pb = P(ox + BW / 2 - 4, s, 330); c.strokeStyle = '#8a93b8'; c.lineWidth = Math.max(1.5, 4 * s); c.beginPath(); c.moveTo(P(ox - BW / 2 + 6, s, 72)[0], P(0, s, 72)[1]); c.lineTo(pa[0], pa[1]); c.moveTo(P(ox + BW / 2 - 6, s, 72)[0], P(0, s, 72)[1]); c.lineTo(pb[0], pb[1]); c.stroke();
+          box(ox, d, .12, BW, 128, '#d8203a', '#ff7a8a', '#8a1224', null, 72); const bb = P(ox, s, 100); c.fillStyle = '#fff'; c.font = `900 ${Math.max(6, 18 * s)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('HALL CLOSED', bb[0], bb[1]); sh(46, .25); }
         if (row[1] === l && !run.got.has(r)) chip(x, y, 82 * s, now, r);
         if (row[4] >= 0 && Math.floor(row[4] / 10) === l && !run.got.has(-r)) orb(x, y, 96 * s, now, row[4] % 10 === 1 ? '🧲' : '🛡️', row[4] % 10 === 1 ? '#ff5d6c' : '#5bd0ff'); }
       c.globalAlpha = 1;
@@ -1819,26 +1833,28 @@ async function dash(root) {
     const vg = c.createRadialGradient(VX, H * .5, H * .3, VX, H * .5, H * .78); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,10,.5)'); c.fillStyle = vg; c.fillRect(0, 0, W, H);
     hud(rp, now); c.restore();
   }
-  function hud(rp, now) { // casino marquee, multiplier plate, checkpoint track, hints
-    c.fillStyle = 'rgba(5,8,22,.78)'; c.fillRect(0, 0, W, 26); bulbs(10, 6, W - 10, 6, 21, now, run.flashUntil > now); bulbs(10, 20, W - 10, 20, 21, now + 220, run.flashUntil > now);
-    const sc = run.t0 ? scoreNow() : 0, cur = tiers.find(([m]) => sc >= m), nxt = [...tiers].reverse().find(([m]) => m > sc), lab = m => SCHOOL() ? `+${Math.round(SCHOOLR.each * m)}🪙` : `${m}x`;
-    c.save(); c.translate(10, 32); const pg = c.createLinearGradient(0, 0, 0, 52); pg.addColorStop(0, '#fff1a0'); pg.addColorStop(1, '#c78600'); c.fillStyle = pg; rrPath(c, 0, 0, 86, 50, 10); c.fill(); c.strokeStyle = '#7a4a00'; c.lineWidth = 2; c.stroke(); c.fillStyle = '#5a3200'; c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.font = '900 10px system-ui'; c.fillText(SCHOOL() ? 'REWARD' : 'PAYOUT', 43, 11); c.font = `900 ${cur ? 28 : 15}px system-ui`; c.fillText(cur ? lab(cur[1]) : `${fmt(tiers[tiers.length - 1][0])} to win`, 43, 32); c.restore();
-    c.textAlign = 'left'; c.fillStyle = '#fff'; c.font = '900 22px ui-monospace,Menlo,monospace'; c.fillText(fmt(sc), 108, 62); c.font = '800 10px system-ui'; c.fillStyle = '#8fb0ff'; c.fillText('SCORE', 108, 46);
-    c.textAlign = 'right'; c.fillStyle = '#ffd24a'; c.font = '900 16px system-ui'; c.fillText(`🪙 ${run.passes}`, W - 12, 60);
-    const bx = 24, bw = W - 52, by = 96; c.fillStyle = 'rgba(5,8,16,.75)'; rrPath(c, bx, by, bw, 12, 6); c.fill(); const pr = Math.min(1, rp / run.max), pgr = c.createLinearGradient(bx, 0, bx + bw, 0); pgr.addColorStop(0, '#19e58a'); pgr.addColorStop(1, '#ffc542'); c.fillStyle = pgr; if (pr > 0) { rrPath(c, bx, by, Math.max(12, bw * pr), 12, 6); c.fill(); }
-    for (let i = 1; i <= 3; i++) { const x = bx + bw * i / 4; c.fillStyle = rp >= i * 100 ? '#fff' : '#ffffff55'; c.fillRect(x - 1, by - 3, 2, 18); c.font = '700 8px system-ui'; c.textAlign = 'center'; c.fillStyle = rp >= i * 100 ? '#ffd24a' : '#8fb0ff'; c.fillText(CPN[i - 1], x, by + 25); }
-    c.font = '15px system-ui'; c.textAlign = 'center'; c.fillText('🎓', bx + bw + 12, by + 7); const dpos = bx + Math.max(6, bw * pr); c.fillText('🦅', dpos, by - 7);
-    c.font = '800 11px system-ui'; c.fillStyle = '#ffffffcc'; c.textAlign = 'center'; c.fillText(Math.max(0, Math.round(run.max - rp)) > 0 ? `🎓 ${Math.round(run.max - rp)} rows to class${nxt ? ` · next: ${fmt(nxt[0])} pts → ${lab(nxt[1])}` : ''}` : 'CLASS!', W / 2, 134);
-    c.textAlign = 'left'; c.font = '900 13px system-ui'; c.fillStyle = '#fff'; c.fillText(`×${Math.min(2.3, speedAt(rp)).toFixed(1)} speed`, 12, 548);
-    if (run.chain >= 2) { c.textAlign = 'right'; c.fillStyle = '#ffd24a'; c.font = '900 18px system-ui'; c.fillText(`🪙 combo ×${run.chain}`, W - 12, 548); }
-    if (run.magnetUntil >= Math.floor(rp)) { c.textAlign = 'center'; c.font = '800 12px system-ui'; c.fillStyle = '#ff9aa5'; c.fillText(`🧲 ${Math.max(0, Math.ceil(run.magnetUntil - rp))}`, W / 2 - 40, 548); }
-    if (run.shield) { c.textAlign = 'center'; c.font = '800 12px system-ui'; c.fillStyle = '#8fe0ff'; c.fillText('🛡️ READY', W / 2 + 40, 548); }
-    if (run.pop && now - run.pop.t0 < 900) { const k = (now - run.pop.t0) / 900; c.save(); c.globalAlpha = 1 - k * k; c.translate(VX, 190 - k * 34); const sc2 = .7 + Math.min(1, k * 4) * .5; c.scale(sc2, sc2); c.font = '900 32px system-ui'; c.textAlign = 'center'; c.lineWidth = 6; c.strokeStyle = 'rgba(0,0,0,.65)'; c.strokeText(run.pop.text, 0, 0); c.fillStyle = run.pop.col; c.fillText(run.pop.text, 0, 0); c.restore(); }
+  function hud(rp, now) { // one slim bar: score, level, chips; a thin progress line; small hints
+    const sc = run.t0 ? scoreNow() : 0, cur = tiers.find(([m]) => sc >= m), nxt = [...tiers].reverse().find(([m]) => m > sc), lab = m => SCHOOL() ? `+${Math.round(SCHOOLR.each * m)}🪙` : `${m}x`, lv = Math.min(3, Math.floor(rp / 100));
+    if (run.flashUntil > now) { const k = (run.flashUntil - now) / 1200, g = c.createRadialGradient(VX, H * .45, 40, VX, H * .45, H * .7); g.addColorStop(0, `rgba(255,214,74,${.28 * k})`); g.addColorStop(1, 'rgba(255,214,74,0)'); c.fillStyle = g; c.fillRect(0, 0, W, H); }
+    c.fillStyle = 'rgba(6,10,28,.72)'; rrPath(c, 8, 8, W - 16, 32, 12); c.fill(); c.textBaseline = 'middle';
+    c.textAlign = 'left'; c.fillStyle = '#8fb0ff'; c.font = '800 9px system-ui'; c.fillText('SCORE', 20, 17); c.fillStyle = '#fff'; c.font = '900 17px ui-monospace,Menlo,monospace'; c.fillText(fmt(sc), 20, 31);
+    c.fillStyle = LVC[lv] + '33'; rrPath(c, W / 2 - 78, 14, 156, 20, 10); c.fill(); c.strokeStyle = LVC[lv]; c.lineWidth = 1.5; c.stroke(); c.fillStyle = LVC[lv]; c.textAlign = 'center'; c.font = '900 11px system-ui'; c.fillText(`LEVEL ${lv + 1} · ${LVN[lv]}`, W / 2, 24.5);
+    c.textAlign = 'right'; c.fillStyle = '#ffd24a'; c.font = '900 15px system-ui'; c.fillText(`🪙 ${run.passes}`, W - 20, 25);
+    const bx = 24, bw = W - 48, by = 52, pr = Math.min(1, rp / run.max); c.fillStyle = 'rgba(255,255,255,.14)'; rrPath(c, bx, by, bw, 5, 3); c.fill(); const pg = c.createLinearGradient(bx, 0, bx + bw, 0); pg.addColorStop(0, '#19e58a'); pg.addColorStop(.5, '#5b8cff'); pg.addColorStop(1, '#ff5d6c'); c.fillStyle = pg; if (pr > 0) { rrPath(c, bx, by, Math.max(5, bw * pr), 5, 3); c.fill(); }
+    for (let i = 1; i <= 3; i++) { const x = bx + bw * i / 4; c.fillStyle = rp >= i * 100 ? '#fff' : '#ffffff66'; c.beginPath(); c.arc(x, by + 2.5, 3.2, 0, 7); c.fill(); c.font = '700 8px system-ui'; c.textAlign = 'center'; c.fillStyle = rp >= i * 100 ? LVC[i] : '#8fb0ff'; c.fillText(CPS[i - 1], x, by + 14); }
+    c.font = '14px system-ui'; c.textAlign = 'center'; c.fillText('🎓', bx + bw + 4, by + 2); c.fillText('🦅', bx + Math.max(4, bw * pr), by - 8);
+    c.textAlign = 'left'; c.font = '800 10px system-ui'; c.fillStyle = '#ffd24acc'; c.fillText(cur ? `PAYOUT ${lab(cur[1])}` : `${fmt(tiers[tiers.length - 1][0])} pts to win`, 20, 80); c.textAlign = 'right'; c.fillStyle = '#ffffffaa'; c.fillText(`🎓 ${Math.max(0, Math.round(run.max - rp))} rows to class`, W - 20, 80);
+    c.textAlign = 'left'; c.font = '900 12px system-ui'; c.fillStyle = '#ffffffcc'; c.fillText(`×${Math.min(3, speedAt(rp)).toFixed(1)} speed`, 12, 548);
+    if (nxt) { c.textAlign = 'center'; c.font = '700 10px system-ui'; c.fillStyle = '#ffffff99'; c.fillText(`next: ${fmt(nxt[0])} pts → ${lab(nxt[1])}`, W / 2, 548); }
+    if (run.chain >= 2) { c.textAlign = 'right'; c.fillStyle = '#ffd24a'; c.font = '900 16px system-ui'; c.fillText(`🪙 combo ×${run.chain}`, W - 12, 548); }
+    if (run.magnetUntil >= Math.floor(rp)) { c.textAlign = 'left'; c.font = '800 12px system-ui'; c.fillStyle = '#ff9aa5'; c.fillText(`🧲 ${Math.max(0, Math.ceil(run.magnetUntil - rp))}`, 12, 528); }
+    if (run.shield) { c.textAlign = 'left'; c.font = '800 12px system-ui'; c.fillStyle = '#8fe0ff'; c.fillText('🛡️ ready', 62, 528); }
+    if (run.pop && now - run.pop.t0 < (run.pop.dur || 900)) { const dur = run.pop.dur || 900, k = (now - run.pop.t0) / dur; c.save(); c.globalAlpha = k < .8 ? 1 : 1 - (k - .8) * 5; c.translate(VX, (run.pop.y || 190) - k * 26); const sc2 = .7 + Math.min(1, k * 6) * .5; c.scale(sc2, sc2); c.font = `900 ${run.pop.size || 30}px system-ui`; c.textAlign = 'center'; c.lineWidth = 6; c.strokeStyle = 'rgba(0,0,0,.65)'; c.strokeText(run.pop.text, 0, 0); c.fillStyle = run.pop.col; c.fillText(run.pop.text, 0, 0); c.restore(); }
   }
   const cum = t => { const a = [0]; t.forEach(x => a.push(a[a.length - 1] + x)); return a; };
   function rowPosAt(el) { const T = run.tick, C = run.cum; let lo = 0, hi = T.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (C[mid] <= el) lo = mid; else hi = mid - 1; } return lo + Math.min(1, (el - C[lo]) / T[lo]); }
-  const popup = (text, col) => { run.pop = { text, col, t0: performance.now() }; };
+  const popup = (text, col, extra) => { run.pop = { text, col, t0: performance.now(), ...extra }; };
+  const tipOf = text => popup(text, '#fff', { dur: 2000, y: 215, size: 22 });
   const puff = (n, x, y, col, spd = 1) => { for (let i = 0; i < n; i++) run.parts.push({ x: x + (Math.random() - .5) * 20, y, vx: (Math.random() - .5) * 2.2 * spd, vy: -Math.random() * 2.5 * spd - .5, r: 2 + Math.random() * 3, life: 26 + Math.random() * 14, max: 40, col }); };
   const blank = () => ({ rows: Array.from({ length: 60 }, () => [0, -1, 0, 0, -1]), tick: Array(80).fill(340), max: 400, moves: [], acts: [], lane: 1, next: 1, from: 1, dir: 1, laneX: LX(1), target: LX(1), lastRow: -1, lastAct: -9, checked: -1, passes: 0, chain: 0, sinceGot: 0, pos: 0, queued: 0, qAct: null, over: false, parts: [], lastPuff: 0, shakeUntil: 0, amp: 0, pop: null, t0: 0, got: new Set(), air: 0, slide: 0, shield: false, shieldUsed: 0, magnetUntil: -1, flashUntil: 0, jump: null, slideT: null, cp: 0, cum: cum(Array(80).fill(340)) });
   function turn(d) { if (run && !run.over && run.t0) run.queued = d; }
@@ -1857,10 +1873,10 @@ async function dash(root) {
   const setScore = (el, v) => { const t = fmt(v); if (el && el.textContent !== t) el.textContent = t; };
   let last = 0;
   function tickLoop() {
-    if (!run || run.over || !root.isConnected) return; const now = performance.now(), el = now - run.t0, rp = rowPosAt(el); run.pos = rp; const dt = Math.min(50, now - last) / 16, nr = Math.floor(rp) + 1; last = now;
+    if (!run || run.over || !root.isConnected) return; const now = performance.now(), el = now - run.t0, rp = rowPosAt(el); run.pos = rp; const dt = Math.min(50, now - last) / 16, nr = Math.floor(rp - GR) + 1; last = now;
     if (run.queued) { const nl = run.next + run.queued; if (nl >= 0 && nl <= 2 && nr > run.lastRow) { run.moves.push({ row: nr, lane: nl }); run.lastRow = nr; run.from = run.next; run.next = nl; run.dir = run.queued; sfx.play('whoosh'); } run.queued = 0; }
     if (run.qAct && nr >= run.lastAct + 3) { run.acts.push({ row: nr, kind: run.qAct }); run.lastAct = nr; const dur = Math.max(260, run.cum[Math.min(run.cum.length - 1, nr + AIR)] - el); if (run.qAct === 'j') { run.jump = { t0: now, dur }; sfx.play('tap'); } else { run.slideT = { t0: now, dur }; sfx.play('whoosh'); } run.qAct = null; }
-    while (run.checked + 1 <= rp) {
+    while (run.checked + 1 + GR <= rp) {
       run.checked++; const r = run.checked, mv = run.moves.find(m => m.row === r); if (mv) run.lane = mv.lane; if (r > run.max) return over(false); const row = run.rows[r]; if (!row) break;
       const air = run.acts.some(a => a.kind === 'j' && a.row <= r && r < a.row + AIR), slide = run.acts.some(a => a.kind === 's' && a.row <= r && r < a.row + AIR), L = run.lane, [mask, pass, low, high, power] = row;
       const blocked = (mask >> L & 1) || ((low >> L & 1) && !air) || ((high >> L & 1) && !slide);
@@ -1869,8 +1885,9 @@ async function dash(root) {
       else if (mv && (row[0] >> run.from & 1)) { popup('NEAR MISS!', '#ffd24a'); sfx.play('near'); run.shakeUntil = now + 160; run.amp = 5; }
       if (pass >= 0 && (pass === L || (run.magnetUntil >= r && Math.abs(pass - L) <= 1))) { run.passes++; run.chain++; run.sinceGot = 0; run.got.add(r); sfx.play('coin'); puff(10, run.laneX, PY - 50, '#ffd24a', 1.3); if (run.chain >= 3) popup(`CHIPS ×${run.chain}!`, '#19e58a'); } else if (++run.sinceGot > 14) run.chain = 0;
       if (power >= 0 && Math.floor(power / 10) === L) { run.got.add(-r); if (power % 10 === 1) { run.magnetUntil = r + MAGNET; popup('🧲 MAGNET!', '#ff9aa5'); } else { run.shield = true; popup('🛡️ SHIELD!', '#8fe0ff'); } sfx.play('clear'); puff(14, run.laneX, PY - 60, '#ffffff', 1.4); }
-      if (r === 100 || r === 200 || r === 300) { run.flashUntil = now + 1200; popup(`${CPN[r / 100 - 1]}! +100`, '#19e58a'); sfx.play('clear'); fx.burst(50, innerWidth / 2, innerHeight / 3); run.cp++; }
+      if (r === 100 || r === 200 || r === 300) { run.flashUntil = now + 1200; popup(`${CPN[r / 100 - 1]}! +100`, LVC[r / 100], { dur: 1500, size: 24 }); sfx.play('clear'); fx.burst(50, innerWidth / 2, innerHeight / 3); run.cp++; }
     }
+    if (!dashTips.done) { for (let k = 3; k <= 8; k++) { const nx = run.rows[nr + k]; if (!nx) break; if (!dashTips.low && nx[2]) { dashTips.low = true; tipOf('⬆️ JUMP the backpacks!'); break; } if (!dashTips.high && nx[3]) { dashTips.high = true; tipOf('⬇️ SLIDE under the sign!'); break; } } if (!dashTips.lane && rp > 3) { dashTips.lane = true; tipOf('⬅️ ➡️ change lanes around the carts'); } if (dashTips.low && dashTips.high && dashTips.lane) dashTips.done = true; }
     run.target = LX(run.next ?? run.lane); run.laneX += (run.target - run.laneX) * Math.min(1, .3 * dt);
     run.air = 0; if (run.jump) { const kk = (now - run.jump.t0) / run.jump.dur; run.air = kk < 1 ? Math.sin(kk * Math.PI) * 78 : 0; if (kk >= 1) run.jump = null; }
     run.slide = 0; if (run.slideT) { const kk = (now - run.slideT.t0) / run.slideT.dur; run.slide = kk < 1 ? Math.max(0, Math.min(1, kk * 6, (1 - kk) * 6)) : 0; if (kk >= 1) run.slideT = null; }
@@ -2046,7 +2063,7 @@ async function renderLuck() {
   $('#app').innerHTML = `<h1>🍀 Luck Lab <small class="mutecell">admin only</small></h1><div class="panel luckinfo">This sets <b>your own</b> luck override. To set a player's luck, open <a href="#admin">Admin → Players</a>. Everyone else earns luck from gear in the <a href="#shop">Hawk Shop</a>.</div>
     <div class="panel luckinfo"><b>Luck really changes your odds</b> in 5 arcade games: 🪙 Heads or Tails, ✊ Hallway RPS, 🚌 Seahawk Crossing, 🎲 Scoreboard Roll and 🏈 Hail Mary.
       <br><br><b>Levels 1–10:</b> higher luck = you <b>win more often</b>, but each win pays less. Lower luck = fewer wins, bigger payouts. The <b>average payback stays the same</b> at every level. Level 1 ×0.6 … level 5 ×1.0 … level 10 ×1.5 win chance. Example: Heads or Tails is 50/50 on Normal, 75% at level 10 (pays 1.32x a call), 30% at level 1 (pays 3.30x).
-      <br><br>Your luck is locked in when a round starts. It doesn't touch Hawk Drop, Locker Hunt, Slots, Roulette, Hawk 21, Seahawk Launch, skill games or sports picks. It also changes your confetti and win sounds. Hawk Bucks are pretend: no real money, ever.</div>
+      <br><br>Your luck is locked in when a round starts. It doesn't touch Seahawk Drop, Locker Hunt, Slots, Roulette, Hawk 21, Seahawk Launch, skill games or sports picks. It also changes your confetti and win sounds. Hawk Bucks are pretend: no real money, ever.</div>
     <div class="luckgrid">${reg.map(card).join('')}</div>
     <div class="superhead"><h2>🔥 Super Luck</h2><p>Your chance to <b>lose</b> is divided by 2, 5 or 10 and payouts stay at <b>normal</b> prices, so you win a lot more money. Heads or Tails at <b>×2</b> wins 75% of calls, <b>×5</b> wins 90%, <b>×10</b> wins 95% (Hail Mary gives you the best of 2, 5 or 10 throws).</p>
       <p class="supnote">⚠️ Because this is so strong, <b>anything you win or lose while Super Luck is on does not count toward your Leaderboard net winnings.</b> You can still use the Hawk Bucks. Switch back to Normal or a level to climb the ranks.</p></div>

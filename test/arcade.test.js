@@ -84,7 +84,7 @@ test('Super Luck x2/x5/x10 divides your chance to lose, keeps payouts, and is ex
   assert.equal((await api('GET', '/arcade/config')).luck.sup, 0);
 });
 
-test('Hawk Drop pays big jackpots at 99% payback', async () => {
+test('Seahawk Drop pays big jackpots at 99% payback', async () => {
   const api = await newUser('plinkopro');
   for (const risk of ['low', 'med', 'high']) for (const rows of [8, 12, 16]) {
     const m = (await api('GET', `/arcade/plinko-table?rows=${rows}&risk=${risk}`)).mults;
@@ -338,16 +338,24 @@ test('admin tools: players, money for one or everyone, balance, shop prices and 
 });
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-test('Free Throw Line: the server runs the meter clock, the green window is at the top, 10 shots end the game', async () => {
+test('Free Throw Line: the meter starts when the player is ready, the green window is at the top, and a shot at the center of the green always counts', async () => {
   const api = await newUser('hoopster'), s = await api('POST', '/arcade/hoops/start', { bet: 0 });
   assert.equal(s.shots, 10); assert.ok(s.zone > 0.1); assert.ok(Math.abs(s.center - (0.97 - s.zone)) < 1e-9, 'green window sits at the top of the meter');
-  let r = await api('POST', '/arcade/hoops/shoot'); assert.equal(r.hit, false, 'shooting at once (meter empty) misses'); assert.equal(r.pts, 0);
+  assert.equal((await api('POST', '/arcade/hoops/shoot')).status, 409, 'cannot shoot before the meter is ready');
+  await api('POST', '/arcade/hoops/ready'); let r = await api('POST', '/arcade/hoops/shoot'); assert.equal(r.hit, false, 'shooting at once (meter empty) misses'); assert.equal(r.pts, 0);
+  assert.equal((await api('POST', '/arcade/hoops/shoot')).status, 409, 'cannot shoot again until the meter is ready');
   let period = r.period, zone = r.zone, makes = 0;
-  // the meter rises from one end, so the green window (near the top) is reached at center * period / 2
-  for (let i = 1; i < 10; i++) { await sleep(((0.97 - zone) * period) / 2); r = await api('POST', '/arcade/hoops/shoot'); period = r.period; zone = r.zone; makes += r.hit ? 1 : 0; }
-  assert.ok(r.done, 'game ends after 10 shots'); assert.ok(makes >= 3, `timed shots at the green window should often go in (${makes}/9)`); // the window shrinks to +-40ms late in a game, so a slow moment on a busy machine can miss
+  for (let i = 1; i < 10; i++) {
+    const ready = await api('POST', '/arcade/hoops/ready'); assert.equal(ready.period, period); assert.ok(Math.abs(ready.zone - zone) < 1e-9);
+    await sleep(((0.97 - zone) * period) / 2 + 12); // the meter rises from the bottom, so the green window is reached at center * period / 2 after it starts
+    r = await api('POST', '/arcade/hoops/shoot'); assert.equal(r.status, 200, JSON.stringify(r)); period = r.period; zone = r.zone; makes += r.hit ? 1 : 0;
+  }
+  assert.ok(r.done, 'game ends after 10 shots'); assert.ok(makes >= 8, `shots timed at the green should go in (${makes}/9)`);
   assert.equal(r.score, (await api('GET', '/arcade/highscores?game=hoops')).top[0].best);
   assert.equal((await api('POST', '/arcade/hoops/shoot')).status, 409, 'no shots after the game');
+  // the player's own delay is taken off, so a slow connection does not cost a green
+  const g = await newUser('lagger'); const st0 = await g('POST', '/arcade/hoops/start', { bet: 0 }); await g('POST', '/arcade/hoops/ready'); await sleep(((0.97 - st0.zone) * st0.period) / 2 + 100);
+  const late = await g('POST', '/arcade/hoops/shoot', { lat: 100 }); assert.equal(late.hit, true, 'a shot that arrived 100ms late but was tapped on the green counts');
 });
 
 test('Mental Math Sprint: questions come from the server, wrong answers score 0, the sprint ends on the server clock', async () => {
@@ -374,6 +382,8 @@ test('Hallway Dash: server builds the hallway, replays moves, jumps and slides; 
   assert.equal(s.rows.length, 120); assert.ok(s.rows.slice(0, 5).every(r => r[0] === 0 && r[1] === -1 && r[2] === 0 && r[3] === 0 && r[4] === -1), 'a free stretch to start');
   assert.ok(s.rows.every(r => r.length === 5), 'rows are [blocked, pass, low, high, power]');
   assert.equal((await api('POST', '/arcade/dash/rows', { from: 390 })).status, 400, 'cannot peek far ahead of the clock');
+  assert.ok(s.rows.slice(0, 10).every(r => !r[0] && !r[2] && !r[3]), 'a calm opening with nothing to dodge');
+  assert.ok(s.tick[0] >= 440 && s.tick[399] <= 160, 'starts slow, ends fast'); assert.ok(s.tick.every((v, i) => i === 0 || v <= s.tick[i - 1]), 'only ever speeds up'); assert.ok(s.rows.slice(0, 25).every(r => !r[2] && !r[3]), 'no hurdles or signs in the first stretch');
   assert.equal((await api('POST', '/arcade/dash/end', { moves: [{ row: 5, lane: 1 }] })).status, 400, 'moves must change lane by one');
   assert.equal((await api('POST', '/arcade/dash/end', { moves: [{ row: 9, lane: 0 }, { row: 8, lane: 1 }] })).status, 400, 'rows must increase');
   assert.equal((await api('POST', '/arcade/dash/end', { moves: [], acts: [{ row: 9, kind: 'x' }] })).status, 400, 'unknown action');
