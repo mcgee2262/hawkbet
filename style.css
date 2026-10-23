@@ -1041,6 +1041,20 @@ body.out .side,body.out .tabbar,body.out .lvlchip,body.out .menubtn,body.out .sc
 @media (max-width:520px){.top{flex-wrap:nowrap}.wordmark{display:none}#logout{max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 8px;font-size:12px;flex:none}.bal{padding:5px 8px}.meav .av{--s:30px!important}.sndbtn{padding:6px 8px}}
 
 /* Hallway Dash: intro card */
-.dashintro{position:absolute;left:8%;right:8%;top:16%;padding:16px 16px 14px;border-radius:18px;background:linear-gradient(160deg,#16246aee,#0a1131ee);border:2px solid #ffc542;box-shadow:0 0 28px #ffc54255,0 10px 30px #000a;color:#fff;text-align:left;z-index:5}
-.dashintro.hidden{display:none}.dashintro h3{margin:0 0 6px;font-size:20px;color:#ffd24a;letter-spacing:.02em}.dashintro p{margin:0 0 8px;font-size:13px;color:#cfe0f3}
-.dashintro ul{margin:0 0 8px;padding:0;list-style:none;display:grid;gap:5px;font-size:13px}.dashintro small{color:#8fb0ff}.dashintro .introgo{margin-top:10px;text-align:center;font-weight:800;color:#19e58a}
+/* Hallway Dash: one-line goal banner (first visit only) and a How to play button */
+.dashintro{position:absolute;left:6%;right:6%;top:12px;padding:9px 12px;border-radius:12px;background:#0a1131ee;border:1px solid #ffc542;color:#fff;text-align:center;font-weight:700;font-size:13px;z-index:5;opacity:1;animation:dintroOut .5s 2.5s forwards}
+.dashintro.hidden{display:none}
+@keyframes dintroOut{to{opacity:0}}
+.dashinfo{position:absolute;right:8px;bottom:8px;z-index:4;padding:5px 10px;border-radius:99px;border:1px solid #ffffff44;background:#0a1131cc;color:#cfe0f3;font-size:12px;cursor:pointer}
+.dashinfo:hover{border-color:#ffc542;color:#fff}
+.dashrules{margin:0 0 8px;padding:0;list-style:none;display:grid;gap:5px;font-size:14px}
+/* Football picks */
+.matchup{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 12px;padding:12px 16px;border-radius:14px;background:linear-gradient(135deg,#0f2a6b,#12301f);border:1px solid #2f6bff66;font-size:16px;font-weight:800}
+.matchup i{font-style:normal;color:var(--mut);font-weight:600}.matchup b{color:var(--gold)}
+h1 .fb{font-size:13px;color:var(--mut);font-weight:600;margin-left:8px}
+.card .logo.numb{font-size:20px;color:#fff;background:linear-gradient(135deg,#1b4fd8,#12c26a);box-shadow:0 0 0 2px #ffc54266}
+.card .proj{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--mut);margin:-4px 0 10px}.card .proj b{color:var(--gold)}
+.pgrid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+.pcard .pnum{font-size:34px;font-weight:900;color:var(--gold);line-height:1}
+.pstats{width:100%;border-collapse:collapse;font-size:12px;text-align:left;margin-top:8px}.pstats td{padding:3px 0;border-top:1px solid #ffffff14}.pstats td:last-child{text-align:right}
+.addf textarea{grid-column:1/-1;background:#0d141b;color:#fff;border:1px solid var(--line);border-radius:8px;padding:8px;font:inherit}

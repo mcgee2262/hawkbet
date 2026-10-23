@@ -186,12 +186,11 @@ const act = fn => async (...a) => { if (act.busy) return; act.busy = true; try {
 const POWER = { 2: 3, 3: 5, 4: 10, 5: 20, 6: 37.5 };
 const FLEX = { 3: { 3: 2.25 }, 4: { 4: 5 }, 5: { 5: 10 }, 6: { 6: 25 } };
 const topPayout = (mode, n) => mode === 'power' ? POWER[n] : FLEX[n] && FLEX[n][n];
-const SPORTS = [['All', '🦅'], ['Football', '🏈'], ['Volleyball', '🏐'], ['Field Hockey', '🏑'], ['Flag Football', '🚩']];
 const propById = id => PROPS.find(p => String(p.id) === String(id));
 const pick = {}; let mode = 'power', entry = 25, slipOpen = false;
 
 /* ---------- router ---------- */
-let view = 'home', sport = 'All', stat = 'All', lineTab = 'open', game = 'plinko', nav = 0;
+let view = 'home', boardTab = 'picks', GAME = null, stat = 'All', lineTab = 'open', game = 'plinko', nav = 0;
 async function go() {
   const my = ++nav; stopGames();
   try { const m = await api('GET', '/me'); U = m.user; INVITE = m.inviteRequired; if (m.schoolReward) SCHOOLR = m.schoolReward; setMode(m.mode); } catch (e) {} if (my !== nav) return;
@@ -234,29 +233,42 @@ function renderAuth(signup = false) {
 }
 
 /* ---------- board ---------- */
-async function loadProps() { PROPS = (await api('GET', '/props')).props; }
+async function loadProps() { const r = await api('GET', '/props'); PROPS = r.props; GAME = r.game; }
+const fmtStat = v => typeof v === 'number' ? String(v) : String(v);
+const arrow = t => t === 'up' ? ' ⬆️' : t === 'down' ? ' ⬇️' : '';
+const banner = () => `<div class="matchup"><span>🦅 South Lakes <i>vs</i> ${esc(GAME.opp)}</span><b>${esc(GAME.when)}${GAME.home === true ? ' · Home' : GAME.home === false ? ' · Away' : ''}</b></div>`;
 async function renderBoard(my, keep) {
   await loadProps(); if (my !== nav) return;
   const live = PROPS.filter(p => p.status === 'open' || p.status === 'locked');
-  const types = ['All', ...new Set(live.filter(p => sport === 'All' || p.sport === sport).map(p => p.type))];
+  const types = ['All', ...new Set(live.map(p => p.type))];
   if (!types.includes(stat)) stat = 'All';
-  const list = live.filter(p => (sport === 'All' || p.sport === sport) && (stat === 'All' || p.type === stat));
+  const list = live.filter(p => stat === 'All' || p.type === stat);
   if (!keep || !$('#picksArea')) $('#app').innerHTML = '<div id="picksArea"></div>';
-  $('#picksArea').innerHTML = `<h1>Seahawk Picks</h1>
-    <div class="sports">${SPORTS.map(([s, i]) => `<button class="sport ${s === sport ? 'on' : ''}" data-sport="${s}"><span>${i}</span>${s}</button>`).join('')}</div>
-    <div class="pills">${types.map(t => `<button class="pill ${t === stat ? 'on' : ''}" data-stat="${t}">${t}</button>`).join('')}</div>
+  let body;
+  if (boardTab === 'players') {
+    const { players } = await api('GET', '/players'); if (my !== nav) return;
+    body = `<div class="grid pgrid">${players.map(profile).join('')}</div>`;
+  } else body = `<div class="pills">${types.map(t => `<button class="pill ${t === stat ? 'on' : ''}" data-stat="${esc(t)}">${esc(t)}</button>`).join('')}</div>
     <div class="grid">${list.map(card).join('') || '<div class="empty">No lines right now. Check back before game day.</div>'}</div>`;
+  $('#picksArea').innerHTML = `<h1>Seahawk Picks <small class="fb">🏈 Football</small></h1>${banner()}
+    <div class="sub"><button class="pill ${boardTab === 'picks' ? 'on' : ''}" data-bt="picks">Tonight’s props</button><button class="pill ${boardTab === 'players' ? 'on' : ''}" data-bt="players">Player profiles</button></div>${body}`;
+}
+function profile(p) {
+  const rows = Object.entries(p.stats);
+  return `<div class="card pcard"><div class="pnum">#${p.number == null ? '–' : p.number}</div><div class="who">${esc(p.name)}</div><div class="vs">${esc(p.positions)}</div>
+    <table class="pstats">${rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td><b>${esc(fmtStat(v))}</b></td></tr>`).join('') || '<tr><td colspan="2">No stats yet</td></tr>'}</table></div>`;
 }
 function card(p) {
-  const c = pick[p.id], lock = p.status !== 'open';
-  return `<div class="card ${c ? 'sel' : ''} ${lock ? 'locked' : ''}"><span class="lvl">${lock ? '🔒 Locked' : esc(p.lvl)}</span>
-    <div class="logo">${esc(p.init)}</div><div class="who">${esc(p.who)}</div><div class="vs">${esc(p.vs)}</div>
+  const c = pick[p.id], lock = p.status !== 'open', team = p.playerId == null;
+  return `<div class="card ${c ? 'sel' : ''} ${lock ? 'locked' : ''}"><span class="lvl">${lock ? '🔒 Locked' : esc(p.type)}</span>
+    ${team ? `<div class="logo">${esc(p.init)}</div>` : `<div class="logo numb">#${p.number == null ? '' : p.number}</div>`}<div class="who">${esc(p.who)}</div><div class="vs">${esc(p.vs)}</div>
     <div class="num">${p.line}</div><div class="stat">${esc(p.stat)}</div>
+    ${p.proj != null ? `<div class="proj"><span>HawkBet projection <b>${p.proj}${arrow(p.trend)}</b></span>${p.avg != null ? `<span>Season avg <b>${p.avg}</b></span>` : ''}</div>` : ''}
     <div class="mm"><button class="${c === 'less' ? 'on' : ''}" ${lock ? 'disabled' : ''} data-pick="${p.id}" data-d="less">▼ Less</button><button class="${c === 'more' ? 'on' : ''}" ${lock ? 'disabled' : ''} data-pick="${p.id}" data-d="more">▲ More</button></div></div>`;
 }
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-sport],[data-stat],[data-pick]'); if (!t) return;
-  if (t.dataset.sport) { sport = t.dataset.sport; renderBoard(nav, true); }
+  const t = e.target.closest('[data-bt],[data-stat],[data-pick]'); if (!t) return;
+  if (t.dataset.bt) { boardTab = t.dataset.bt; renderBoard(nav, true); }
   else if (t.dataset.stat) { stat = t.dataset.stat; renderBoard(nav, true); }
   else {
     const id = t.dataset.pick, d = t.dataset.d;
@@ -343,19 +355,31 @@ async function renderLeaders(my) {
 
 /* ---------- admin ---------- */
 async function renderLines(my) {
-  await loadProps(); if (my !== nav) return;
-  $('#app').innerHTML = `<div class="panel adm"><h2>Add a line</h2><form id="pf" class="addf">
-      <select name="sport"><option>Football</option><option>Volleyball</option><option>Field Hockey</option><option>Flag Football</option></select>
-      <input name="who" placeholder="Team (SL Varsity)" required><input name="lvl" placeholder="Level (Varsity)"><input name="vs" placeholder="vs Westfield · Fri 7 PM · Home">
-      <input name="stat" placeholder="Stat (Points scored)" required><input name="type" placeholder="Filter (Points)"><input name="line" type="number" step="0.5" placeholder="Line (34.5)" required>
+  const [pr, pl] = await Promise.all([api('GET', '/admin/props'), api('GET', '/admin/players')]); if (my !== nav) return;
+  const props = pr.props, players = pl.players, g = pl.game;
+  $('#app').innerHTML = `<div class="panel adm"><h2>Tonight’s game</h2><form id="gf" class="addf"><input name="opp" value="${esc(g.opp)}" placeholder="Opponent"><input name="when" value="${esc(g.when)}" placeholder="Tonight · 7:00 PM">
+      <select name="home"><option value="" ${g.home === null ? 'selected' : ''}>Home/away not set</option><option value="true" ${g.home === true ? 'selected' : ''}>Home</option><option value="false" ${g.home === false ? 'selected' : ''}>Away</option></select>
+      <button class="btn" type="submit">Save game</button></form><div class="note">Updates the banner and every open football line.</div></div>
+    <div class="panel adm" style="margin-top:14px"><h2>Players</h2>${players.map(p => `<div class="row"><div class="g"><b>#${p.number == null ? '–' : p.number} ${esc(p.name)}</b> <small style="color:var(--mut)">${esc(p.positions)}${p.hidden ? ' · HIDDEN' : ''}</small></div>
+      <button class="pill" data-pe="${p.id}">Edit</button><button class="pill" data-ph="${p.id}" data-h="${p.hidden ? 0 : 1}">${p.hidden ? 'Show' : 'Hide'}</button></div>`).join('')}
+    <form id="plf" class="addf" style="margin-top:10px"><input type="hidden" name="id"><input name="name" placeholder="Name" required><input name="number" type="number" min="0" max="99" placeholder="#"><input name="positions" placeholder="QB, CB">
+      <textarea name="stats" rows="4" placeholder="One per line, like:&#10;Rushing yds/game: 46.3"></textarea><button class="btn" type="submit">Save player</button></form>
+    <div class="note">Hiding a player removes them and all their props from the site. Nothing is deleted; Show brings them back.</div></div>
+    <div class="panel adm" style="margin-top:14px"><h2>Add a line</h2><form id="pf" class="addf">
+      <select name="playerId"><option value="">Team line (no player)</option>${players.map(p => `<option value="${p.id}">#${p.number == null ? '–' : p.number} ${esc(p.name)}</option>`).join('')}</select>
+      <input name="who" placeholder="Team name (if no player)"><input name="stat" placeholder="Stat (Rushing yards)" required><input name="type" placeholder="Filter (Rushing)"><input name="line" type="number" step="0.5" placeholder="Line (45.5)" required>
+      <input name="proj" type="number" step="any" placeholder="Projection"><input name="avg" type="number" step="any" placeholder="Season avg"><select name="trend"><option value="">No arrow</option><option value="up">⬆️ Up</option><option value="down">⬇️ Down</option></select>
       <button class="btn" type="submit">Add line</button></form></div>
-    <div class="panel adm" style="margin-top:14px"><h2>Lines</h2>${PROPS.map(p => `<div class="row"><div class="g"><b>${esc(p.who)}</b> · ${esc(p.stat)} <b>${p.line}</b><br><small style="color:var(--mut)">${esc(p.vs)}</small></div>
+    <div class="panel adm" style="margin-top:14px"><h2>Lines</h2>${props.map(p => `<div class="row"><div class="g"><b>${esc(p.who)}</b> · ${esc(p.stat)} <b>${p.line}</b>${p.hidden ? ' <small style="color:var(--mut)">(old/hidden)</small>' : ''}<br><small style="color:var(--mut)">${esc(p.vs)}</small></div>
       <span class="st ${p.status}">${p.status}${p.status === 'graded' ? ' · ' + p.actual : ''}</span>
       ${p.status === 'open' ? `<button class="pill" data-ad="lock" data-id="${p.id}">Lock</button>` : ''}
       ${p.status === 'open' || p.status === 'locked' ? `<input type="number" step="any" placeholder="Result" id="r${p.id}"><button class="pill" data-ad="grade" data-id="${p.id}">Grade</button><button class="pill" data-ad="void" data-id="${p.id}">Void</button>` : ''}</div>`).join('')}
-    <div class="note">Locking stops new picks. Grading settles every slip that depends on the line and pays winners instantly. Void refunds picks on a cancelled game.</div></div>`;
-  $('#pf').onsubmit = act(async e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); f.line = Number(f.line); await api('POST', '/admin/props', f); toast('Line added'); renderAdmin(nav); });
-  $('#pf').addEventListener('submit', e => e.preventDefault());
+    <div class="note">After the game, type each real stat in Result and press Grade. That settles every slip and pays winners. Void refunds picks on a cancelled line. For "wins by 7+" enter 1 for yes, 0 for no.</div></div>`;
+  $('#gf').onsubmit = act(async e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); await api('POST', '/admin/game', { opp: f.opp, when: f.when, home: f.home === '' ? null : f.home === 'true' }); toast('Game saved'); renderAdmin(nav); });
+  $('#pf').onsubmit = act(async e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); f.line = Number(f.line); f.playerId = f.playerId ? Number(f.playerId) : null; await api('POST', '/admin/props', f); toast('Line added'); renderAdmin(nav); });
+  $('#plf').onsubmit = act(async e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); if (!f.id) delete f.id; await api('POST', '/admin/player', f); toast('Player saved'); renderAdmin(nav); });
+  document.querySelectorAll('[data-pe]').forEach(b => b.onclick = () => { const p = players.find(x => String(x.id) === b.dataset.pe), f = $('#plf'); f.id.value = p.id; f.name.value = p.name; f.number.value = p.number == null ? '' : p.number; f.positions.value = p.positions; f.stats.value = Object.entries(p.stats).map(([k, v]) => `${k}: ${v}`).join('\n'); f.scrollIntoView({ block: 'center' }); });
+  document.querySelectorAll('[data-ph]').forEach(b => b.onclick = act(async () => { await api('POST', '/admin/player-hide', { id: Number(b.dataset.ph), hidden: b.dataset.h === '1' }); toast(b.dataset.h === '1' ? 'Player hidden' : 'Player shown'); renderAdmin(nav); }));
   document.querySelectorAll('[data-ad]').forEach(b => b.onclick = act(async () => {
     const id = Number(b.dataset.id), k = b.dataset.ad;
     if (k === 'grade') { const v = $('#r' + id).value; await api('POST', '/admin/grade', { propId: id, actual: v === '' ? null : Number(v) }); }
@@ -1756,8 +1780,12 @@ async function dash(root) {
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>🎯 Goal:</b> race down the hallway and get to class before the bell. <b>← →</b> switch lanes around carts, <b>↑</b> jump the backpacks, <b>↓</b> slide under signs (phones: swipe, or tap a side). Grab 🪙 chips (+50), 🧲 magnet pulls them in, 🛡️ shield saves you from one hit. It starts easy and gets harder every 100 rows (Freshman → Senior). Every row is 10 points, each new level is +100 and the 🎓 door is a +500 jackpot.</div>
     ${skillBet('dash')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Chips</small><b id="ps">0</b></div></div>${hsBox()}`,
     `<div class="dashwrap"><canvas id="dcv" width="${W}" height="${H}" aria-label="Hallway Dash game"></canvas><div class="dashmsg" id="dm"></div>
-      <div class="dashintro" id="dintro"><h3>🎯 GOAL: GET TO CLASS!</h3><p>Race down the hall before the bell and reach the <b>🎓 CLASS door</b> for a <b>+500 jackpot</b>. It starts easy and gets harder every 100 rows.</p>
-        <ul><li><b>⬅️ ➡️</b> switch lanes around the carts</li><li><b>⬆️</b> jump over the backpacks</li><li><b>⬇️</b> slide under the hanging signs</li><li><b>🪙</b> grab chips for points</li><li><b>🧲 🛡️</b> magnet and shield power-ups</li></ul><small>Phones: swipe up / down, tap left / right</small><div class="introgo">Press <b>Play</b> to start 🏃</div></div></div>`);
+      <div class="dashintro" id="dintro">🎓 Reach class! ← → lanes · ↑ jump · ↓ slide</div><button class="dashinfo" id="dinfo" aria-label="How to play">ⓘ How to play</button></div>`);
+  const hideIntro = () => { const d = $('#dintro'); if (d) d.classList.add('hidden'); };
+  let firstVisit = true; try { firstVisit = !localStorage.getItem('hb_dash_seen'); localStorage.setItem('hb_dash_seen', '1'); } catch (e) {}
+  if (firstVisit) { const t = setTimeout(hideIntro, 3000); const kd = () => { hideIntro(); document.removeEventListener('keydown', kd); }; document.addEventListener('keydown', kd); stopFns.push(() => { clearTimeout(t); document.removeEventListener('keydown', kd); }); } else hideIntro();
+  $('#dinfo').onclick = () => showModal(`<h3>🎯 How to play</h3><p>Race down the hall before the bell and reach the <b>🎓 CLASS door</b> for a <b>+500 jackpot</b>. It starts easy and gets harder every 100 rows.</p>
+    <ul class="dashrules"><li><b>⬅️ ➡️</b> switch lanes around the carts</li><li><b>⬆️</b> jump over the backpacks</li><li><b>⬇️</b> slide under the hanging signs</li><li><b>🪙</b> grab chips for points</li><li><b>🧲 🛡️</b> magnet and shield power-ups</li></ul><p><small>Phones: swipe up / down, tap left / right</small></p><button class="btn" data-close>Got it</button>`);
   const cv = $('#dcv'), c = cv.getContext('2d'), tiers = (CFG && CFG.skillTiers && CFG.skillTiers.dash) || [[2500, 3], [1800, 2], [1200, 1.5], [700, 1]];
   const msg = t => { const m = $('#dm'); m.textContent = t; m.classList.toggle('hidden', !t); };
   stopFns.push(() => { clearTimeout(timer); run = null; });
@@ -1901,7 +1929,7 @@ async function dash(root) {
   let sx = 0, sy = 0; cv.addEventListener('pointerdown', e => { sx = e.clientX; sy = e.clientY; }); cv.addEventListener('pointerup', e => { const dx = e.clientX - sx, dy = e.clientY - sy, r = cv.getBoundingClientRect(); if (Math.abs(dy) > 24 && Math.abs(dy) > Math.abs(dx)) act2(dy < 0 ? 'j' : 's'); else turn(Math.abs(dx) > 24 ? Math.sign(dx) : e.clientX < r.left + r.width / 2 ? -1 : 1); });
   const idle = blank(); const drawIdle = () => { if (run || !root.isConnected) return; run = idle; scene(0, performance.now(), true, null); run = null; }; setTimeout(drawIdle, 60);
   skillButtons(bet => act(async () => {
-    const r = await api('POST', '/arcade/dash/start', { bet }); if (r.bet) setBal(r.balance); st = {}; played = true; $('#dintro').classList.add('hidden'); lockStart(true); $('#sc').textContent = '0'; $('#ps').textContent = '0'; $('#res').textContent = '';
+    const r = await api('POST', '/arcade/dash/start', { bet }); if (r.bet) setBal(r.balance); st = {}; played = true; hideIntro(); lockStart(true); $('#sc').textContent = '0'; $('#ps').textContent = '0'; $('#res').textContent = '';
     run = { ...blank(), rows: r.rows, tick: r.tick, cum: cum(r.tick), max: r.max };
     scene(0, performance.now(), false, null); for (const n of [3, 2, 1]) { msg(String(n)); sfx.play('tick'); await wait(calm ? 200 : 650); if (!root.isConnected || !run) return; } msg('GO!'); sfx.play('whoosh'); setTimeout(() => { if (run && !run.over) msg(''); }, 500);
     run.t0 = performance.now(); last = run.t0; tickLoop();
@@ -2144,7 +2172,7 @@ setInterval(() => { if (!document.hidden) checkNotes(); }, 20000);
 let admTab = 'players', admSel = null;
 async function renderAdmin(my) {
   if (!U.isAdmin) { location.hash = '#home'; return; }
-  const tabs = `<div class="sub">${[['players', '👥 Players'], ['mode', '🏫 Site mode'], ['shop', '🛍️ Shop'], ['log', '📜 Log'], ['lines', '🏈 Sports lines']].map(([k, l]) => `<button class="pill ${admTab === k ? 'on' : ''}" data-at="${k}">${l}</button>`).join('')}</div>`;
+  const tabs = `<div class="sub">${[['players', '👥 Players'], ['mode', '🏫 Site mode'], ['shop', '🛍️ Shop'], ['log', '📜 Log'], ['lines', '🏈 Football']].map(([k, l]) => `<button class="pill ${admTab === k ? 'on' : ''}" data-at="${k}">${l}</button>`).join('')}</div>`;
   const wire = () => document.querySelectorAll('[data-at]').forEach(b => b.onclick = () => { admTab = b.dataset.at; renderAdmin(nav); });
   if (admTab === 'lines') { await renderLines(my); if (my !== nav) return; $('#app').insertAdjacentHTML('afterbegin', `<h1>🛠️ Admin</h1>${tabs}`); return wire(); }
   if (admTab === 'mode') {

@@ -247,7 +247,8 @@ test('Seahawk Launch: crash point stays secret, cash-outs and auto cash-outs pay
 test('existing flows still work: slips, bank and a chance game', async () => {
   const api = await newUser('regress');
   const me = (await api('GET', '/me')).user;
-  const slip = await api('POST', '/slips', { mode: 'power', entry: 10, picks: [{ propId: 1, dir: 'more' }, { propId: 2, dir: 'less' }] });
+  const lines = (await api('GET', '/props')).props;
+  const slip = await api('POST', '/slips', { mode: 'power', entry: 10, picks: [{ propId: lines[0].id, dir: 'more' }, { propId: lines[1].id, dir: 'less' }] });
   assert.equal(slip.balance, me.balance - 10);
   assert.equal((await api('POST', '/bank')).status, 400, 'the Bank only helps when you are broke');
   const d = await api('POST', '/arcade/dice', { bet: 10, target: 50, over: true });
@@ -418,4 +419,50 @@ test('Site Mode: School Edition hides chance games on the server, turns bets int
   assert.equal((await boss('POST', '/admin/mode', { schedule: { start: '15:00', end: '08:00' } })).status, 400, 'end must be after start');
   await boss('POST', '/admin/mode', { mode: 'full', schedule: { on: false } }); assert.equal((await api('GET', '/me')).mode, 'full');
   assert.ok((await boss('GET', '/admin/log')).log.some(l => l.action === 'site_mode'));
+});
+
+test('football picks: 15 players seeded once, football-only props, hidden players vanish, grading settles slips', async () => {
+  const api = await newUser('fan');
+  const { props, game } = await api('GET', '/props');
+  assert.equal(game.opp, 'Madison'); assert.match(game.line, /Madison/);
+  assert.ok(props.every(p => p.sport === 'Football'), 'football only');
+  assert.equal(props.filter(p => p.playerId).length, 10, '10 player props'); assert.equal(props.filter(p => !p.playerId).length, 4, '4 team props');
+  assert.deepEqual([...new Set(props.filter(p => p.playerId).map(p => p.who))].sort(), ['Christian Wyatt', 'Joshua-Benjamin Dagbe', 'Nick Picarelli', 'Sebastian "Sebi" Valencia']);
+  const pl = (await api('GET', '/players')).players; assert.equal(pl.length, 15);
+  assert.equal(pl.find(p => p.name === 'Christian Wyatt').stats['Passing TD'], 10);
+  // admin only
+  assert.equal((await api('POST', '/admin/player', { name: 'X' })).status, 403); assert.equal((await api('POST', '/admin/player-hide', { id: 1 })).status, 403); assert.equal((await api('POST', '/admin/game', { opp: 'Z' })).status, 403);
+  assert.equal((await api('GET', '/admin/players')).status, 403);
+  // CRUD
+  const made = await boss('POST', '/admin/player', { name: 'Test Guy', number: 99, positions: 'K', stats: 'Field goals: 4\nLong: 41' }); assert.equal(made.status, 200);
+  assert.equal((await boss('GET', '/admin/players')).players.find(p => p.id === made.id).stats.Long, '41');
+  await boss('POST', '/admin/player', { id: made.id, name: 'Test Guy II', number: 98, positions: 'K, P', stats: { 'Field goals': 5 } });
+  assert.equal((await api('GET', '/players')).players.find(p => p.id === made.id).name, 'Test Guy II');
+  // hide a player: profile and props disappear and can't be picked
+  const wy = pl.find(p => p.name === 'Christian Wyatt'), wyProps = props.filter(p => p.playerId === wy.id);
+  assert.equal(wyProps.length, 3);
+  assert.equal((await boss('POST', '/admin/player-hide', { id: wy.id })).hidden, true);
+  assert.ok(!(await api('GET', '/props')).props.some(p => p.playerId === wy.id)); assert.ok(!(await api('GET', '/players')).players.some(p => p.id === wy.id));
+  assert.equal((await api('POST', '/slips', { mode: 'power', entry: 5, picks: [{ propId: wyProps[0].id, dir: 'more' }, { propId: props.find(p => !p.playerId).id, dir: 'more' }] })).status, 400);
+  await boss('POST', '/admin/player-hide', { id: wy.id, hidden: false });
+  assert.equal((await api('GET', '/props')).props.filter(p => p.playerId === wy.id).length, 3);
+  // game banner updates open lines
+  const g = await boss('POST', '/admin/game', { when: 'Fri 7:00 PM', home: true }); assert.match(g.line, /vs Madison · Fri 7:00 PM · Home/);
+  assert.match((await api('GET', '/props')).props[0].vs, /Fri 7:00 PM/);
+  // place and grade
+  const a = props.find(p => p.stat === 'Receiving yards' && p.who.startsWith('Joshua')), b = props.find(p => p.stat === 'Sacks');
+  const before = (await api('GET', '/me')).user.balance;
+  assert.equal((await api('POST', '/slips', { mode: 'power', entry: 10, picks: [{ propId: a.id, dir: 'more' }, { propId: b.id, dir: 'more' }] })).status, 200);
+  await boss('POST', '/admin/grade', { propId: a.id, actual: 120 }); await boss('POST', '/admin/grade', { propId: b.id, actual: 2 });
+  assert.equal((await api('GET', '/me')).user.balance, before - 10 + 30, 'power 2-pick pays 3x');
+  // a new line can link to a player
+  assert.equal((await boss('POST', '/admin/props', { playerId: made.id, stat: 'Field goals', line: 1.5, type: 'Kicking' })).status, 200);
+  assert.ok((await api('GET', '/props')).props.some(p => p.playerId === made.id && p.who === 'Test Guy II'));
+});
+
+test('football migration runs once: old demo lines are hidden but still reachable by admin', async () => {
+  const all = (await boss('GET', '/admin/props')).props;
+  assert.ok(all.some(p => p.hidden && p.sport !== 'Football'), 'old demo lines kept, hidden');
+  assert.equal(all.filter(p => !p.hidden && p.playerId == null && p.sport === 'Football').length >= 4, true);
+  assert.equal((await boss('GET', '/players')).players.filter(p => p.name === 'Christian Wyatt').length, 1, 'players seeded once');
 });

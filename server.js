@@ -134,7 +134,8 @@ function placeSlip(ctx) {
     const rows = picks.map(p => {
       if (!['more', 'less'].includes(p.dir)) bad('Bad pick direction');
       const pr = db.prepare('SELECT * FROM props WHERE id=?').get(p.propId);
-      if (!pr) bad('Unknown line'); if (pr.status !== 'open') bad(`${pr.who} (${pr.stat}) is locked`);
+      if (!pr || pr.hidden || (pr.player_id && db.prepare('SELECT hidden FROM players WHERE id=?').get(pr.player_id)?.hidden)) bad('Unknown line');
+      if (pr.status !== 'open') bad(`${pr.who} (${pr.stat}) is locked`);
       return { pr, dir: p.dir };
     });
     const sid = Number(db.prepare('INSERT INTO slips(user_id,mode,entry,created) VALUES(?,?,?,?)').run(ctx.user.id, mode, entry, now()).lastInsertRowid);
@@ -177,8 +178,12 @@ function mySlips(ctx) {
 const admin = fn => ctx => { if (!ctx.user.is_admin) bad('Admins only', 403); return fn(ctx); };
 function addProp(ctx) {
   const b = ctx.body, line = Number(b.line), t = k => String(b[k] || '').trim().slice(0, 80);
-  if (!t('who') || !t('stat') || !Number.isFinite(line)) bad('Need who, stat and a numeric line');
-  db.prepare('INSERT INTO props(sport,who,lvl,vs,stat,type,line,init,created) VALUES(?,?,?,?,?,?,?,?,?)').run(t('sport') || 'Football', t('who'), t('lvl') || 'Varsity', t('vs'), t('stat'), t('type') || 'Points', line, (t('init') || 'SL').slice(0, 3), now());
+  if ((!t('who') && !b.playerId) || !t('stat') || !Number.isFinite(line)) bad('Need who, stat and a numeric line');
+  const pid = b.playerId ? int(b.playerId, 1, 1e9, 'playerId') : null, pl = pid && db.prepare('SELECT * FROM players WHERE id=?').get(pid); if (pid && !pl) bad('Unknown player', 404);
+  const num = k => b[k] === undefined || b[k] === null || b[k] === '' ? null : (Number.isFinite(Number(b[k])) ? Number(b[k]) : bad(`${k} must be a number`));
+  const trend = ['up', 'down'].includes(b.trend) ? b.trend : null;
+  db.prepare('INSERT INTO props(sport,who,lvl,vs,stat,type,line,init,created,player_id,proj,avg,trend) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(t('sport') || 'Football', pl ? pl.name : t('who'), t('lvl') || 'Varsity', t('vs') || gameLine(), t('stat'), t('type') || 'Points', line, (t('init') || 'SL').slice(0, 3), now(), pid, num('proj'), num('avg'), trend);
+  alog(ctx, 'add_prop', pl ? pl.name : t('who'), `${t('stat')} ${line}`);
   return { ok: true };
 }
 function setProp(ctx, kind) {
@@ -778,6 +783,71 @@ for (const [col, def] of [['gear', "TEXT NOT NULL DEFAULT '{}'"], ['spent', 'INT
 const getSetting = (k, d = null) => { const r = db.prepare('SELECT value FROM settings WHERE key=?').get(k); return r ? JSON.parse(r.value) : d; };
 const putSetting = (k, v) => db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k, JSON.stringify(v));
 if (!getSetting('luck_reset_v1')) { db.exec("UPDATE users SET luck='normal' WHERE is_admin=0"); putSetting('luck_reset_v1', true); } // luck is earned in the shop now
+
+/* ---------- football: player profiles, tonight's game and props. Hidden players (and their props) vanish from the site. ---------- */
+db.exec(`CREATE TABLE IF NOT EXISTS players(id INTEGER PRIMARY KEY, name TEXT NOT NULL, number INTEGER, positions TEXT NOT NULL DEFAULT '', stats TEXT NOT NULL DEFAULT '{}', hidden INTEGER NOT NULL DEFAULT 0, sort INTEGER NOT NULL DEFAULT 0);`);
+for (const [col, def] of [['player_id', 'INTEGER'], ['hidden', 'INTEGER NOT NULL DEFAULT 0'], ['proj', 'REAL'], ['avg', 'REAL'], ['trend', 'TEXT']]) if (!db.prepare("SELECT 1 FROM pragma_table_info('props') WHERE name=?").get(col)) db.exec(`ALTER TABLE props ADD COLUMN ${col} ${def}`);
+const GAME_DEFAULT = { opp: 'Madison', when: 'Tonight', home: null }; // home: true = home, false = away, null = not set yet
+const gameInfo = () => ({ ...GAME_DEFAULT, ...getSetting('game_info', {}) });
+const gameLine = () => { const g = gameInfo(); return `${g.home === false ? '@' : 'vs'} ${g.opp} · ${g.when}${g.home === true ? ' · Home' : g.home === false ? ' · Away' : ''}`; };
+const PLAYERS_SEED = [ // [name, number, positions, stats]
+  ['Christian Wyatt', 1, 'QB', { 'Rushing yds/game': 46.3, 'Passing TD': 10, 'Rushing TD': 3, 'Completion %': '.643', 'QB rating': 104.0 }],
+  ['James Smith', 8, 'RB', { 'Rushing yds/game': 94.2, 'Total TD': 8, 'Rushing TD': 8 }],
+  ['Joshua-Benjamin Dagbe', 10, 'CB, WR', { 'Receiving yds/game': 92.0, 'Total TD': 11, 'Receiving TD': 9, 'INT': 2, 'Fumble recoveries': 1 }],
+  ['Nick Picarelli', 6, 'WR, SB', { 'Receiving yds/game': 55.8, 'Total TD': 4, 'Receiving TD': 2, 'Rushing TD': 2 }],
+  ['Joey Kister', 13, 'WR', { 'Receiving yds/game': 22.0 }],
+  ['Sean Ventura', 30, 'RB, WR', { 'Rushing yds/game': 20.0 }],
+  ['Sebastian "Sebi" Valencia', 4, 'OLB, DE', { 'Tackles/game': 6.5, 'Sacks': 9.0, 'QB hurries': 8 }],
+  ['Cameron Soto', 29, 'FS, WR', { 'Tackles/game': 5.6, 'INT': 3 }],
+  ['Lucien Cheng', 26, 'SS, LS', { 'Tackles/game': 4.4 }],
+  ['Dominic Covington', 9, 'OLB, MLB', { 'Sacks': 5.0, 'Caused fumbles': 1 }],
+  ['Michael Baxter', 54, 'DT, DE', { 'Sacks': 3.0, 'QB hurries': 5 }],
+  ['Yusef Atiya', 11, 'MLB', { 'INT': 1, 'Fumble recoveries': 1, 'QB hurries': 5 }],
+  ['Gavin Satterfield', 12, 'QB', { 'Passing TD': 2 }],
+  ['Riggins Legler', 24, 'OLB, MLB', { 'Caused fumbles': 1, 'Fumble recoveries': 1 }],
+  ['Angel Serrano', 84, 'DE, TE', { 'Caused fumbles': 1 }],
+];
+const PROPS_SEED = [ // [player name or null for team, stat, type, line, projection, season avg, trend]  (TD/sack projections assume 8 games played)
+  ['Christian Wyatt', 'Rushing yards', 'Rushing', 45.5, 48, 46.3, 'up'], ['Christian Wyatt', 'Passing TDs', 'Passing', 1.5, 1.4, 1.25, null], ['Christian Wyatt', 'Completion %', 'Passing', 64.5, 63, 64.3, null],
+  ['Joshua-Benjamin Dagbe', 'Receiving yards', 'Receiving', 89.5, 94, 92.0, 'up'], ['Joshua-Benjamin Dagbe', 'Receiving TDs', 'Touchdowns', 0.5, 1.1, 1.1, 'up'], ['Joshua-Benjamin Dagbe', 'Interceptions', 'Defense', 0.5, 0.3, 0.25, 'down'],
+  ['Nick Picarelli', 'Receiving yards', 'Receiving', 54.5, 56, 55.8, 'up'], ['Nick Picarelli', 'Total TDs (rush + catch)', 'Touchdowns', 0.5, 0.5, 0.5, null],
+  ['Sebastian "Sebi" Valencia', 'Tackles', 'Defense', 6.5, 6.7, 6.5, null], ['Sebastian "Sebi" Valencia', 'Sacks', 'Defense', 0.5, 1.1, 1.1, 'up'],
+  [null, 'South Lakes points', 'Team', 27.5, null, null, null], [null, 'Madison points', 'Team', 17.5, null, null, null],
+  [null, 'Total points', 'Team', 44.5, null, null, null], [null, 'South Lakes wins by 7+ (1 = yes, 0 = no)', 'Team', 0.5, null, null, null],
+];
+if (!getSetting('football_v1')) tx(() => { // runs once, live DB included; old demo lines are hidden, never deleted, so existing slips keep working
+  db.exec('UPDATE props SET hidden=1');
+  const pi = db.prepare('INSERT INTO players(name,number,positions,stats,sort) VALUES(?,?,?,?,?)'), ids = {};
+  PLAYERS_SEED.forEach((p, i) => { ids[p[0]] = Number(pi.run(p[0], p[1], p[2], JSON.stringify(p[3]), i).lastInsertRowid); });
+  const vs = gameLine(), pr = db.prepare('INSERT INTO props(sport,who,lvl,vs,stat,type,line,init,created,player_id,proj,avg,trend) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  for (const [who, stat, type, line, proj, avg, trend] of PROPS_SEED) pr.run('Football', who || (stat.startsWith('Madison') ? 'Madison' : 'South Lakes'), 'Varsity', vs, stat, type, line, who ? who.split(' ').map(w => w[0]).join('').slice(0, 3) : 'SL', now(), who ? ids[who] : null, proj, avg, trend);
+  putSetting('game_info', GAME_DEFAULT); putSetting('football_v1', true);
+});
+const visibleProp = "p.hidden=0 AND (p.player_id IS NULL OR p.player_id IN (SELECT id FROM players WHERE hidden=0))";
+const playerOut = r => ({ id: r.id, name: r.name, number: r.number, positions: r.positions, stats: JSON.parse(r.stats || '{}'), hidden: !!r.hidden });
+function adminPlayer(ctx) { // create or edit a player
+  const b = ctx.body, name = String(b.name || '').trim().slice(0, 60); if (!name) bad('Need a name');
+  const number = b.number === '' || b.number == null ? null : int(Number(b.number), 0, 99, 'Number'), positions = String(b.positions || '').trim().slice(0, 30);
+  let stats = b.stats; if (typeof stats === 'string') { stats = {}; for (const ln of b.stats.split('\n')) { const i = ln.lastIndexOf(':'); if (i > 0 && ln.slice(0, i).trim()) stats[ln.slice(0, i).trim().slice(0, 30)] = ln.slice(i + 1).trim().slice(0, 20); } }
+  if (!stats || typeof stats !== 'object' || Array.isArray(stats)) bad('Stats must be label: value lines');
+  const js = JSON.stringify(Object.fromEntries(Object.entries(stats).slice(0, 20)));
+  if (b.id) { const id = int(b.id, 1, 1e9, 'id'); if (!db.prepare('SELECT 1 FROM players WHERE id=?').get(id)) bad('Unknown player', 404); db.prepare('UPDATE players SET name=?, number=?, positions=?, stats=? WHERE id=?').run(name, number, positions, js, id); alog(ctx, 'edit_player', name, null); return { id }; }
+  const id = Number(db.prepare('INSERT INTO players(name,number,positions,stats,sort) VALUES(?,?,?,?,COALESCE((SELECT MAX(sort)+1 FROM players),0))').run(name, number, positions, js).lastInsertRowid); alog(ctx, 'add_player', name, null); return { id };
+}
+function hidePlayer(ctx) {
+  const id = int(ctx.body.id, 1, 1e9, 'id'), p = db.prepare('SELECT * FROM players WHERE id=?').get(id); if (!p) bad('Unknown player', 404);
+  const hidden = ctx.body.hidden === false ? 0 : 1; db.prepare('UPDATE players SET hidden=? WHERE id=?').run(hidden, id); alog(ctx, hidden ? 'hide_player' : 'show_player', p.name, null); return { ok: true, hidden: !!hidden };
+}
+function adminGame(ctx) {
+  const g = gameInfo(), b = ctx.body;
+  if (b.opp !== undefined) g.opp = String(b.opp).trim().slice(0, 40) || g.opp;
+  if (b.when !== undefined) g.when = String(b.when).trim().slice(0, 40) || g.when;
+  if (b.home !== undefined) { if (![true, false, null].includes(b.home)) bad('home must be true, false or null'); g.home = b.home; }
+  putSetting('game_info', g); const vs = gameLine();
+  db.prepare("UPDATE props SET vs=? WHERE status IN ('open','locked') AND hidden=0 AND sport='Football'").run(vs); // keep open lines in sync with the banner
+  db.prepare("UPDATE props SET who=?, stat=? WHERE player_id IS NULL AND hidden=0 AND type='Team' AND stat LIKE '% points' AND stat NOT LIKE 'South Lakes%' AND stat NOT LIKE 'Total%' AND status IN ('open','locked')").run(g.opp, g.opp + ' points');
+  alog(ctx, 'game_info', null, JSON.stringify(g)); return { game: g, line: vs };
+}
 // net winnings for the leaderboard: free money (added) and Super Luck results don't count; shop spending doesn't hurt you
 const NET_SQL = `balance-${START_BAL}-added-super_net+spent`;
 const LUCK_GAMES = new Set(['flip', 'rps', 'cross', 'dice', 'limbo']);
@@ -976,7 +1046,7 @@ const SCHOOL_REWARD = 50, SCHOOL_DAILY_CAP = 1000;
 function blockedInSchool(key) {
   const m = /^(?:GET|POST) \/api\/arcade\/([a-z-]+)/.exec(key);
   if (m) return !['config', 'stats', 'highscores', 'active'].includes(m[1]) && !SKILL_GAMES.includes(m[1]);
-  return /^(?:GET|POST) \/api\/(?:slips|props|fair|tournament|feed|shop\/booster)/.test(key);
+  return /^(?:GET|POST) \/api\/(?:slips|props|players|fair|tournament|feed|shop\/booster)/.test(key);
 }
 function refundBlocked(uid) { // bets still on the table when school mode starts go back to the player
   const rows = db.prepare("SELECT id, bet, game FROM rounds WHERE user_id=? AND status='active'").all(uid).filter(r => !SKILL_GAMES.includes(r.game) || r.bet > 0);
@@ -1134,7 +1204,15 @@ const routes = {
   'POST /api/login': ctx => { limit(ctx.ip); return login(ctx); },
   'POST /api/logout': ctx => { const m = /sp_sid=([a-f0-9]{64})/.exec(ctx.req.headers.cookie || ''); if (m) db.prepare('DELETE FROM sessions WHERE token_hash=?').run(sha(m[1])); ctx.res.setHeader('Set-Cookie', `sp_sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${PROD ? '; Secure' : ''}`); return { ok: true }; },
   'POST /api/claim': need(bank),
-  'GET /api/props': need(() => ({ props: db.prepare("SELECT id,sport,who,lvl,vs,stat,type,line,init,status,actual FROM props ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'locked' THEN 1 ELSE 2 END, id").all() })),
+  'GET /api/props': need(() => ({
+    props: db.prepare(`SELECT p.id,p.sport,p.who,p.lvl,p.vs,p.stat,p.type,p.line,p.init,p.status,p.actual,p.player_id AS playerId,p.proj,p.avg,p.trend,pl.number FROM props p LEFT JOIN players pl ON pl.id=p.player_id WHERE p.sport='Football' AND ${visibleProp} ORDER BY CASE p.status WHEN 'open' THEN 0 WHEN 'locked' THEN 1 ELSE 2 END, p.id`).all(),
+    game: { ...gameInfo(), line: gameLine() } })),
+  'GET /api/players': need(() => ({ players: db.prepare('SELECT * FROM players WHERE hidden=0 ORDER BY sort, id').all().map(playerOut), game: { ...gameInfo(), line: gameLine() } })),
+  'GET /api/admin/players': need(admin(() => ({ players: db.prepare('SELECT * FROM players ORDER BY sort, id').all().map(playerOut), game: { ...gameInfo(), line: gameLine() } }))),
+  'GET /api/admin/props': need(admin(() => ({ props: db.prepare("SELECT p.id,p.sport,p.who,p.vs,p.stat,p.line,p.status,p.actual,p.hidden,p.player_id AS playerId,p.proj,p.avg,p.trend FROM props p ORDER BY p.hidden, CASE p.status WHEN 'open' THEN 0 WHEN 'locked' THEN 1 ELSE 2 END, p.id").all() }))),
+  'POST /api/admin/player': need(admin(adminPlayer)),
+  'POST /api/admin/player-hide': need(admin(hidePlayer)),
+  'POST /api/admin/game': need(admin(adminGame)),
   'POST /api/slips': need(placeSlip),
   'GET /api/slips': need(mySlips),
   'GET /api/leaderboard': need(ctx => {
