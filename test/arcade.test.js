@@ -391,12 +391,14 @@ test('Hallway Dash: server builds the hallway, replays moves, jumps and slides; 
   // standing still in the middle lane: the first cell in lane 1 that needs a lane change, jump or slide is where the run ends
   const hit = r => (r[0] | r[2] | r[3]) & 2, first = s.rows.findIndex(hit), row = s.rows[first], kind = row[0] & 2 ? 'block' : row[2] & 2 ? 'low' : 'high';
   const endRun = async body => { for (let i = 0; i < 40; i++) { const r = await api('POST', '/arcade/dash/end', body); if (r.status !== 400 || !/Too fast/.test(r.error)) return r; await sleep(150); } throw new Error('run never became possible'); };
-  const r = await endRun({ moves: [], acts: [] }); assert.equal(r.done, true); assert.equal(r.rows, first); assert.equal(r.crashed, true); assert.equal(r.score, first * 10 + r.passes * 50 + Math.min(3, Math.floor(first / 100)) * 100);
+  const shielded = rows => rows.some(c => c[4] >= 0 && Math.floor(c[4] / 10) === 1 && c[4] % 10 === 2); // a shield picked up in lane 1 absorbs the first hit
+  const r = await endRun({ moves: [], acts: [] }); assert.equal(r.done, true); if (shielded(s.rows.slice(0, first))) assert.ok(r.rows > first, 'a shield absorbs the first hit'); else { assert.equal(r.rows, first); assert.equal(r.crashed, true); }
+  if (!shielded(s.rows.slice(0, first))) assert.equal(r.score, first * 10 + r.passes * 50 + Math.min(3, Math.floor(first / 100)) * 100);
   // a jump clears a low hurdle and a slide clears a high sign, but nothing clears a full block
   const s2 = await api('POST', '/arcade/dash/start', { bet: 0 }), f2 = s2.rows.findIndex(hit), c2 = s2.rows[f2], k2 = c2[0] & 2 ? 'block' : c2[2] & 2 ? 'low' : 'high';
   const acts = k2 === 'low' ? [{ row: f2 - 1, kind: 'j' }] : k2 === 'high' ? [{ row: f2 - 1, kind: 's' }] : [];
   const r2 = await endRun({ moves: [], acts }); assert.equal(r2.done, true);
-  if (k2 === 'block') assert.equal(r2.rows, f2, 'a full block ends the run'); else assert.ok(r2.rows > f2, `${k2} obstacle at ${f2} should be cleared, run ended at ${r2.rows}`);
+  if (k2 === 'block') { if (shielded(s2.rows.slice(0, f2))) assert.ok(r2.rows > f2, 'a shield absorbs the first hit'); else assert.equal(r2.rows, f2, 'a full block ends the run'); } else assert.ok(r2.rows > f2, `${k2} obstacle at ${f2} should be cleared, run ended at ${r2.rows}`);
 });
 
 test('Site Mode: School Edition hides chance games on the server, turns bets into daily-capped rewards, and refunds open rounds', async () => {
