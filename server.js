@@ -94,7 +94,7 @@ function userFrom(req) {
 }
 const publicUser = u => ({ username: u.username, balance: u.balance, added: u.added || 0, lvl: levelInfo(u.xp), luck: luckOut(effLuck(u)), override: hasOverride(u), gear: gearOf(u), isAdmin: !!u.is_admin, canClaim: u.balance < CLAIM_BELOW && now() - u.last_claim >= CLAIM_EVERY_MS, nextClaim: Math.max(0, u.last_claim + CLAIM_EVERY_MS - now()) });
 const hits = new Map(); // crude per-IP limiter for auth routes
-function limit(ip) { const t = now(), a = (hits.get(ip) || []).filter(x => t - x < 600e3); a.push(t); hits.set(ip, a); if (a.length > 30) bad('Too many attempts, try again in a few minutes', 429); }
+function limit(ip) { const t = now(), a = (hits.get(ip) || []).filter(x => t - x < 600e3); a.push(t); hits.set(ip, a); if (a.length > (+process.env.AUTH_LIMIT || 30)) bad('Too many attempts, try again in a few minutes', 429); }
 
 function register(ctx) {
   if (INVITE_CODE) {
@@ -253,7 +253,7 @@ const live = (ctx, game) => { const r = activeRound(ctx.user.id, game); if (!r) 
 const save = (r, st) => db.prepare('UPDATE rounds SET state=? WHERE id=?').run(JSON.stringify(st), r.id);
 
 const arcade = {
-  config: ctx => ({ maxBet: null, cross: Object.fromEntries(Object.keys(CROSS_P).map(d => [d, Array.from({ length: LANES }, (_, i) => crossMult(i + 1, crossP(d, luckInfo(ctx.user).pk)))])) }),
+  config: ctx => ({ maxBet: null, hoopsMax: hoopsCap().on ? hoopsCap().max : null, cross: Object.fromEntries(Object.keys(CROSS_P).map(d => [d, Array.from({ length: LANES }, (_, i) => crossMult(i + 1, crossP(d, luckInfo(ctx.user).pk)))])) }),
   plinkoTable: ctx => { const rows = int(+ctx.url.searchParams.get('rows'), 8, 16, 'rows'), risk = ctx.url.searchParams.get('risk'); if (!PLINKO_RISK[risk]) bad('Bad risk'); return { mults: plinkoMults(rows, risk) }; },
   plinko: ctx => tx(() => {
     const rows = int(ctx.body.rows, 8, 16, 'Rows'), risk = ctx.body.risk; if (!PLINKO_RISK[risk]) bad('Bad risk');
@@ -521,8 +521,10 @@ const SKILL_GAMES = ['bell', 'memory', 'trivia', 'hoops', 'math', 'band', 'dash'
 const SKILL_TIERS = { bell: [[4100, 3], [3800, 2], [3500, 1.5], [3000, 1]], memory: [[2600, 3], [2300, 2], [2000, 1.5], [1700, 1]], trivia: [[900, 3], [750, 2], [600, 1.5], [450, 1]],
   hoops: [[1900, 3], [1500, 2], [1100, 1.5], [700, 1]], math: [[3600, 3], [3000, 2], [2400, 1.5], [1800, 1]], band: [[2000, 3], [1400, 2], [900, 1.5], [500, 1]], dash: [[2500, 3], [1800, 2], [1200, 1.5], [700, 1]] };
 const skillMult = (game, score) => (SKILL_TIERS[game].find(([min]) => score >= min) || [0, 0])[1];
+const hoopsCap = () => ({ on: true, max: 5000, ...getSetting('hoops_cap', {}) }); // Free Throw Line pays too well, so the admin can cap its bet
 function skillStart(ctx, game, state) {
   const bet = ctx.body.bet == null || ctx.body.bet === 0 || isSchool() ? 0 : stake(ctx.body.bet); // 0 = free practice (and no betting in school mode)
+  const cap = hoopsCap(); if (game === 'hoops' && cap.on && bet > cap.max) bad(`Max bet on Free Throw Line is ${cap.max.toLocaleString('en-US')} Hawk Bucks`);
   db.prepare("UPDATE rounds SET status='abandoned' WHERE user_id=? AND game=? AND status='active'").run(ctx.user.id, game); // restarting forfeits an unfinished round
   const id = Number(db.prepare('INSERT INTO rounds(user_id,game,bet,state,created) VALUES(?,?,?,?,?)').run(ctx.user.id, game, bet, JSON.stringify(state), now()).lastInsertRowid);
   return { id, bet, balance: bet ? adjust(ctx.user.id, -bet, game + '_bet', id) : balanceOf(ctx.user.id) };
@@ -1146,6 +1148,8 @@ function refundBlocked(uid) { // bets still on the table when school mode starts
 function adminMode(ctx) {
   const c = modeCfg();
   if (ctx.body.mode !== undefined) { if (!['full', 'school'].includes(ctx.body.mode)) bad('Mode must be full or school'); c.mode = ctx.body.mode; }
+  const hc = ctx.body.hoopsCap;
+  if (hc) { const cur = hoopsCap(), nx = { on: typeof hc.on === 'boolean' ? hc.on : cur.on, max: hc.max === undefined ? cur.max : int(hc.max, 1, 1e9, 'Max bet') }; putSetting('hoops_cap', nx); alog(ctx, 'hoops_cap', null, JSON.stringify(nx)); }
   const s = ctx.body.schedule;
   if (s) {
     if (typeof s.on === 'boolean') c.schedule.on = s.on;
@@ -1153,7 +1157,7 @@ function adminMode(ctx) {
     for (const k of ['start', 'end']) if (s[k] !== undefined) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s[k])) bad('Times look like 07:30'); c.schedule[k] = s[k]; }
     if (hm(c.schedule.start) >= hm(c.schedule.end)) bad('School should end after it starts');
   }
-  putSetting('site_mode', c); alog(ctx, 'site_mode', null, JSON.stringify(c)); return { ...c, now: siteMode() };
+  putSetting('site_mode', c); alog(ctx, 'site_mode', null, JSON.stringify(c)); return { ...c, now: siteMode(), hoopsCap: hoopsCap() };
 }
 
 /* ---------- rewards: XP and levels, daily challenges, the daily wheel, achievements, weekly tournament ----------
@@ -1393,7 +1397,7 @@ const routes = {
   'POST /api/arcade/dash/start': need(arcade.dashStart),
   'POST /api/arcade/dash/rows': need(arcade.dashRows),
   'POST /api/arcade/dash/end': need(arcade.dashEnd),
-  'GET /api/admin/mode': need(admin(() => ({ ...modeCfg(), now: siteMode() }))),
+  'GET /api/admin/mode': need(admin(() => ({ ...modeCfg(), now: siteMode(), hoopsCap: hoopsCap() }))),
   'POST /api/admin/mode': need(admin(adminMode)),
   'POST /api/arcade/rocket/start': need(arcade.rocketStart),
   'POST /api/arcade/rocket/cashout': need(arcade.rocketCash),

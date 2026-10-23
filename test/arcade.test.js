@@ -13,7 +13,7 @@ let srv, boss; // boss = the first account, which makes it the admin
 
 before(async () => {
   srv = spawn(process.execPath, ['--no-warnings', path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT: String(PORT), DB_PATH: path.join(DIR, 'test.db'), BELL_DELAY_SCALE: '0.05', ROCKET_RATE: '0.002', HB_TEST_CHALLENGES: 'play10,games3,win5', SKILL_TIME_SCALE: '0.05', NODE_ENV: 'test' }, stdio: 'ignore',
+    env: { ...process.env, PORT: String(PORT), DB_PATH: path.join(DIR, 'test.db'), BELL_DELAY_SCALE: '0.05', ROCKET_RATE: '0.002', HB_TEST_CHALLENGES: 'play10,games3,win5', SKILL_TIME_SCALE: '0.05', AUTH_LIMIT: '1000', NODE_ENV: 'test' }, stdio: 'ignore',
   });
   for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/healthz')).ok) { boss = client(); assert.equal((await boss('POST', '/register', { username: 'boss', password: 'testpass1' })).user.isAdmin, true); return; } } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
   throw new Error('server did not start');
@@ -500,4 +500,21 @@ test('football kickoff auto-locks lines, a pasted box score fills results, grade
   assert.equal(after.game.gp, 9); assert.equal(after.game.applied, true);
   assert.equal((await boss('POST', '/admin/grade-all', { grades: [{ propId: a.id, actual: 1 }], updateStats: true })).status, 400, 'already settled lines cannot be graded again');
   assert.equal(wy.stats['Passing TD'], 10, 'stats before the update were untouched');
+});
+
+test('Free Throw max bet: capped at 5,000 by default, admin can change or turn it off, practice and other games are unaffected', async () => {
+  const api = await newUser('shooter'); await give(api, 20000);
+  assert.equal((await api('GET', '/arcade/config')).hoopsMax, 5000);
+  const over = await api('POST', '/arcade/hoops/start', { bet: 5001 }); assert.equal(over.status, 400); assert.match(over.error, /Max bet on Free Throw Line is 5,000/);
+  assert.equal((await api('POST', '/arcade/hoops/start', { bet: 5000 })).bet, 5000);
+  assert.equal((await api('POST', '/arcade/hoops/start', { bet: 0 })).bet, 0, 'practice is free');
+  assert.equal((await api('POST', '/arcade/math/start', { bet: 6000 })).bet, 6000, 'other skill games are not capped');
+  assert.equal((await api('POST', '/admin/mode', { hoopsCap: { on: false } })).status, 403, 'admin only');
+  assert.equal((await boss('POST', '/admin/mode', { hoopsCap: { max: 0 } })).status, 400);
+  assert.equal((await boss('POST', '/admin/mode', { hoopsCap: { max: 100 } })).hoopsCap.max, 100);
+  assert.equal((await api('POST', '/arcade/hoops/start', { bet: 101 })).status, 400);
+  assert.equal((await boss('POST', '/admin/mode', { hoopsCap: { on: false } })).hoopsCap.on, false);
+  assert.equal((await api('GET', '/arcade/config')).hoopsMax, null);
+  assert.equal((await api('POST', '/arcade/hoops/start', { bet: 9000 })).bet, 9000, 'no limit when off');
+  await boss('POST', '/admin/mode', { hoopsCap: { on: true, max: 5000 } });
 });

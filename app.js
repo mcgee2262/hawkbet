@@ -943,7 +943,7 @@ async function dice(root) {
     `<div class="dstage"><div class="board" id="board"><div class="bbulbs" aria-hidden="true">${Array.from({ length: 18 }, (_, k) => `<i style="--k:${k}"></i>`).join('')}</div>
       <div class="bhead"><span>🦅 SEAHAWKS</span><span id="rollno">ROLL #1</span><span id="fire" class="fire hidden">🔥 HOT</span></div>
       <div class="dnum" id="dnum" aria-live="polite">${[0, 1, '.', 2, 3].map(d => d === '.' ? '<i class="pt">.</i>' : `<i class="dd">5</i>`).join('')}</div></div>
-      <div class="dbar" id="dbar"><div class="dclip"><div class="turf"></div><div class="dz lose" id="dzl"></div><div class="dz win" id="dzw"></div></div><div class="dball" id="dball" aria-hidden="true"><i>🏈</i></div><input type="range" id="tg" class="dslider" min="2" max="98" step="0.01" value="50" aria-label="Dice target"><div class="dmark hidden" id="dmark"><span id="dmv"></span></div></div>
+      <div class="dbar" id="dbar"><div class="dclip"><div class="turf"></div><div class="dz lose" id="dzl"></div><div class="dz win" id="dzw"></div></div><div class="dball" id="dball" aria-hidden="true"><i>🏈</i></div><input type="range" id="tg" class="dslider" min="0" max="100" step="0.01" value="50" aria-label="Dice target"><div class="dmark hidden" id="dmark"><span id="dmv"></span></div></div>
       <div class="dticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
       <div class="dhist" id="dh" aria-label="Recent rolls"></div><div class="ddet" id="ddet"></div>
       <div class="dstats" id="dstats"></div><svg class="dgraph" id="dgraph" viewBox="0 0 300 70" preserveAspectRatio="none" aria-label="Session profit"></svg>
@@ -1429,7 +1429,7 @@ function countUp(el, to, ms = 900) {
 }
 const skillBet = id => SCHOOL() ? `<div class="tiers" aria-label="Hawk Bucks by score">${CFG.skillTiers[id].map(([min, m]) => `<span>${fmt(min)}+ <b>+${Math.round(SCHOOLR.each * m)} 🪙</b></span>`).join('')}</div>
   <div class="duo"><button class="btn bjbig" id="start">▶ Play <kbd>Space</kbd></button></div>
-  <div class="note">Your score earns Hawk Bucks (up to ${fmt(SCHOOLR.cap)} a day). Scores go on the top-scores board and count toward challenges and achievements.</div>` : `${betBox()}<div class="tiers" aria-label="Payout by score">${CFG.skillTiers[id].map(([min, m]) => `<span>${fmt(min)}+ <b>${m}x</b></span>`).join('')}<span>lower <b>0</b></span></div>
+  <div class="note">Your score earns Hawk Bucks (up to ${fmt(SCHOOLR.cap)} a day). Scores go on the top-scores board and count toward challenges and achievements.</div>` : `${betBox()}${id === 'hoops' && CFG.hoopsMax ? `<div class="note" style="margin:4px 0 8px">Max bet on this game: <b>${fmt(CFG.hoopsMax)}</b> 🪙</div>` : ''}<div class="tiers" aria-label="Payout by score">${CFG.skillTiers[id].map(([min, m]) => `<span>${fmt(min)}+ <b>${m}x</b></span>`).join('')}<span>lower <b>0</b></span></div>
   <div class="duo"><button class="btn" id="start">🪙 Play for Hawk Bucks</button><button class="btn alt" id="practice">Practice (free)</button></div>
   <div class="note">Your score sets the payout, and luck doesn't apply here. Starting over or leaving a paid game early forfeits the bet.</div>`;
 const lockStart = on => { $('#start').disabled = on; const p = $('#practice'); if (p) p.disabled = on; };
@@ -2198,12 +2198,16 @@ async function renderAdmin(my) {
       <div class="modecards"><button class="modecard ${c.mode === 'full' ? 'on' : ''}" data-mode="full"><b>🎰 HawkBet</b><span>Everything: all games, sports picks, luck, bets.</span></button>
         <button class="modecard ${c.mode === 'school' ? 'on' : ''}" data-mode="school"><b>🏫 Seahawk Arcade</b><span>School Edition: only the 7 skill games. No bets, no chance games, no sports picks. Skill scores earn Hawk Bucks (up to ${fmt(SCHOOLR.cap)} a day). The server blocks everything else.</span></button></div>
       <div class="note">Right now the site is in <b>${c.now.mode === 'school' ? '🏫 School Edition' : '🎰 HawkBet'}</b> mode${c.now.source === 'schedule' ? ' (set by the schedule)' : ''}. Balances and items carry over when you switch. Bets still open in chance games are refunded when School mode starts.</div></div>
+    <div class="panel adm"><h2>🏀 Free Throw max bet</h2><label class="chk"><input type="checkbox" id="hcon" ${c.hoopsCap.on ? 'checked' : ''}> Limit bets on Free Throw Line</label>
+      <div class="admrow"><label>Max bet <input type="number" id="hcmax" min="1" value="${c.hoopsCap.max}"></label><button class="btn" id="hcsave">Save</button></div>
+      <div class="note">Free Throw pays so well that big bets print money. With this on, the server refuses any bet above the max. Turn it off for no limit. Practice is always free.</div></div>
     <div class="panel adm"><h2>⏰ Auto-schedule</h2><label class="chk"><input type="checkbox" id="son" ${sc.on ? 'checked' : ''}> Switch to School Edition automatically during school hours (Eastern time). Off by default.</label>
       <div class="admrow">${D.map((d, i) => `<button class="pill ${sc.days.includes(i) ? 'on' : ''}" data-day="${i}">${d}</button>`).join('')}</div>
       <div class="admrow"><label>From <input type="time" id="sst" value="${sc.start}"></label><label>Until <input type="time" id="sen" value="${sc.end}"></label><button class="btn" id="ssave">Save schedule</button></div>
       <div class="note">With the schedule on, the manual setting above is used outside school hours. Every change is written to the admin log. If a teacher or IT approved the site, tell them this switch exists.</div></div>`;
     wire();
     document.querySelectorAll('[data-mode]').forEach(b => b.onclick = act(async () => { if (!confirm(b.dataset.mode === 'school' ? 'Switch to Seahawk Arcade (School Edition)?' : 'Switch to full HawkBet?')) return; await api('POST', '/admin/mode', { mode: b.dataset.mode }); toast('Mode saved'); await go(); }));
+    $('#hcsave').onclick = act(async () => { await api('POST', '/admin/mode', { hoopsCap: { on: $('#hcon').checked, max: Math.floor(+$('#hcmax').value) } }); CFG = null; toast('Free Throw limit saved'); await go(); });
     const days = new Set(sc.days); document.querySelectorAll('[data-day]').forEach(b => b.onclick = () => { const d = +b.dataset.day; days.has(d) ? days.delete(d) : days.add(d); b.classList.toggle('on', days.has(d)); });
     $('#ssave').onclick = act(async () => { await api('POST', '/admin/mode', { schedule: { on: $('#son').checked, days: [...days], start: $('#sst').value, end: $('#sen').value } }); toast('Schedule saved'); await go(); });
     return;
