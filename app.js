@@ -1362,11 +1362,13 @@ const COACH_LINES = {
 };
 
 /* Blackjack: Hawk 21 */
+let bjHist = [], bjLast = 0; // this visit's recent results and the last bet
 async function bj(root, my) {
   const RK = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' }, SU = ['♠', '♥', '♦', '♣']; let v = null, shown = { player: 0, dealer: 0 };
-  root.innerHTML = gameShell(`${betBox()}<div style="height:14px"></div><button class="btn bjbig" id="deal">🃏 Deal <kbd>Space</kbd></button>
-    <div class="note">Beat Coach to 21. Blackjack pays 3:2, Coach stands on 17, and you can double on your first two cards.</div>`,
-    `<div class="coachrow"><div class="coach idle" id="coach" role="img" aria-label="Coach, the dealer">${coachSvg()}</div><div class="cbub" id="cbub"></div></div><div class="felt"><div class="who2">Coach <b id="dt"></b></div><div class="hand2" id="dealer"></div><div class="feltlogo"><img src="logo.svg" alt="">HAWK 21</div><div class="hand2" id="player"></div><div class="who2">You <b id="pt"></b></div></div>
+  root.innerHTML = gameShell(`${betBox()}<div class="qchips" id="qchips" aria-label="Quick bet chips">${[[5, '#d83a4a'], [25, '#12c26a'], [100, '#2a2f3a'], [500, '#12a8c9'], [1000, '#7b4cff']].map(([n, c]) => `<button class="qc" data-q="${n}" style="--c:${c}">${n}</button>`).join('')}<button class="qc last" data-q="0" title="Use your last bet">↺ Last</button></div><div style="height:10px"></div><button class="btn bjbig" id="deal">🃏 Deal <kbd>Space</kbd></button>
+    <div class="note">Beat Coach to 21. Blackjack pays 3:2, Coach stands on 17, and you can double on your first two cards.</div>
+    <div class="bjhist" id="bjhist" aria-label="Recent hands"></div>`,
+    `<div class="coachrow"><div class="coach idle" id="coach" role="img" aria-label="Coach, the dealer">${coachSvg()}</div><div class="cbub" id="cbub"></div></div><div class="bjtable"><div class="felt" id="felt"><div class="shoe" aria-hidden="true"><i></i><i></i><i></i></div><div class="who2">Coach <b id="dt" class="tot"></b></div><div class="hand2" id="dealer"></div><div class="midrow"><div class="feltlogo"><img src="logo.svg" alt="">HAWK 21</div><div class="bets" id="bets" aria-live="polite"></div></div><div class="hand2" id="player"></div><div class="who2">You <b id="pt" class="tot"></b></div></div></div>
     <div class="bjacts hidden" id="acts"><button class="btn blue" id="hit"><span>👊</span>Hit<kbd>H</kbd></button><button class="btn" id="stand"><span>✋</span>Stand<kbd>S</kbd></button><button class="btn gold" id="dbl"><span>💰</span>Double<kbd>D</kbd></button></div>
     <button class="btn bjbig bjdeal2 hidden" id="deal2">🃏 Deal again <kbd>Space</kbd></button>`);
   let coachT = 0;
@@ -1376,20 +1378,30 @@ async function bj(root, my) {
     clearTimeout(coachT); coachT = setTimeout(() => { if (c.isConnected) c.className = 'coach idle'; }, hold);
   }
   stopFns.push(() => clearTimeout(coachT)); setTimeout(() => coachSay('hello', 'idle', 6000), 300);
-  const cardHtml = (c, i, isNew, hidden) => hidden ? `<div class="pc back ${isNew ? 'new' : ''}" style="--d:${i * 0.12}s"><img src="logo.svg" alt=""></div>`
-    : `<div class="pc s${c.s} ${isNew ? 'new' : ''}" style="--d:${i * 0.12}s"><b>${RK[c.r] || c.r}</b><span>${SU[c.s]}</span></div>`;
+  const back = '<div class="bk"><img src="logo.svg" alt=""></div>';
+  const cardHtml = (c, i, isNew, reveal) => !c ? `<div class="pc down ${isNew ? 'new' : ''}" style="--d:${i * 0.12}s"><div class="f"></div>${back}</div>`
+    : `<div class="pc s${c.s} ${reveal ? 'flip' : isNew ? 'new' : ''}" style="--d:${reveal ? 0.15 : i * 0.12}s"><div class="f"><b>${RK[c.r] || c.r}</b><i>${SU[c.s]}</i><em>${SU[c.s]}</em></div>${back}</div>`;
+  const CHIPS = [[1000, '#7b4cff'], [500, '#12a8c9'], [100, '#2a2f3a'], [25, '#12c26a'], [5, '#d83a4a'], [1, '#e8edf5']];
+  const chipStack = amt => { const out = []; let left = amt; for (const [d, c] of CHIPS) { while (left >= d && out.length < 12) { out.push(c); left -= d; } } if (left > 0 && out.length < 12) out.push('#e8edf5'); return `<div class="stack">${out.reverse().map((c, k) => `<i class="chip3" style="--c:${c};--k:${k}"></i>`).join('')}</div><b class="betamt">${fmt(amt)} 🪙</b>`; };
+  const HIST = { blackjack: ['BJ', 'bj'], win: ['W', 'w'], push: ['P', 'p'], lose: ['L', 'l'], bust: ['B', 'l'] };
+  const paintHist = () => { const h = $('#bjhist'); if (h) h.innerHTML = bjHist.length ? `<small>Recent</small>${bjHist.map(x => `<span class="${HIST[x][1]}" title="${x}">${HIST[x][0]}</span>`).join('')}` : ''; };
   function paint(fresh) {
     if (fresh) shown = { player: 0, dealer: 0 };
     const live = v && !v.done, pl = v ? v.player : [], dl = v ? (v.done ? v.dealer : [v.dealer[0], null]) : [];
     $('#player').innerHTML = pl.map((c, i) => cardHtml(c, i - shown.player, i >= shown.player)).join('');
-    $('#dealer').innerHTML = dl.map((c, i) => cardHtml(c, i - shown.dealer, i >= shown.dealer || (v.done && i === 1), !c)).join('');
+    const hole = v && v.done && shown.dealer === 1; // Coach's face-down card turns over
+    $('#dealer').innerHTML = dl.map((c, i) => cardHtml(c, i - shown.dealer, c ? (i >= shown.dealer && !(hole && i === 1)) : i >= shown.dealer, hole && i === 1)).join('');
     shown = { player: pl.length, dealer: v && v.done ? dl.length : 1 };
-    $('#pt').textContent = v ? v.pt : ''; $('#dt').textContent = v ? (v.done ? v.dt : v.dt + ' + ?') : '';
+    const tot = (el, n, txt) => { el.textContent = txt; el.className = 'tot' + (n > 21 ? ' bust' : n === 21 ? ' tw' : ''); };
+    tot($('#pt'), v ? v.pt : 0, v ? v.pt : ''); tot($('#dt'), v && v.done ? v.dt : 0, v ? (v.done ? v.dt : v.dt + ' + ?') : '');
+    if (!v) { $('#bets').className = 'bets'; $('#bets').innerHTML = ''; $('#felt').className = 'felt'; } else if (!$('#bets').firstChild || !$('#bets').className.includes('pay-')) $('#bets').innerHTML = chipStack(v.bet);
     $('#deal').classList.toggle('hidden', !!live); $('#acts').classList.toggle('hidden', !live); $('#dbl').disabled = !(live && v.canDouble);
-    $('#deal2').classList.toggle('hidden', !(v && v.done));
+    $('#deal2').classList.toggle('hidden', !(v && v.done)); if (v && v.done) $('#deal2').innerHTML = `🃏 Deal again · ${fmt(v.bet)} 🪙 <kbd>Space</kbd>`;
   }
   function done(r) {
     v = r; paint(); setBal(r.balance);
+    const pay = r.payout > r.bet ? 'win' : r.payout === r.bet ? 'push' : 'lose'; $('#bets').className = 'bets pay-' + pay; $('#felt').className = 'felt ' + (r.result === 'blackjack' ? 'glow-bj' : pay === 'win' ? 'glow-win' : '');
+    bjHist = [r.result, ...bjHist].slice(0, 12); paintHist();
     const msg = { blackjack: `Blackjack! +${fmt(r.payout - r.bet)} 🪙`, win: `You beat Coach! +${fmt(r.payout - r.bet)} 🪙`, push: 'Push · bet back', lose: `Coach wins · −${fmt(r.bet)} 🪙`, bust: `Bust! · −${fmt(r.bet)} 🪙` }[r.result];
     resMsg(r.payout >= r.bet, msg); if (r.payout > r.bet) fx.win(r.result === 'blackjack'); else if (r.payout < r.bet) fx.lose();
     setTimeout(() => coachSay({ blackjack: 'natural', win: 'win', push: 'push', lose: 'lose', bust: 'bust' }[r.result], { blackjack: 'shock', win: 'sad', push: 'shrug', lose: 'smug', bust: 'smug' }[r.result], 4500), calm ? 0 : 450);
@@ -1397,7 +1409,9 @@ async function bj(root, my) {
   const a = (await api('GET', '/arcade/active?game=bj')).round; if (my !== nav) return;
   if (a) { v = a; $('#res').textContent = 'Hand restored'; }
   const step = path => act(async () => { coachSay({ hit: 'hit', stand: 'stand', double: 'dbl' }[path], path === 'double' ? 'smug' : 'think', 2600); const r = await api('POST', '/arcade/bj/' + path); if (!root.isConnected) return setBal(r.balance); if (r.done) done(r); else { v = r; paint(); } });
-  $('#deal').onclick = act(async () => { $('#res').textContent = ''; coachSay('deal', 'deal', 2400); const r = await api('POST', '/arcade/bj/start', { bet: readBet() }); v = null; paint(true); if (r.done) { await wait(calm ? 0 : 300); if (!root.isConnected) return setBal(r.balance); done(r); } else { v = r; setBal(r.balance); paint(); } });
+  $('#deal').onclick = act(async () => { $('#res').textContent = ''; coachSay('deal', 'deal', 2400); const r = await api('POST', '/arcade/bj/start', { bet: readBet() }); bjLast = readBet(); v = null; paint(true); if (r.done) { await wait(calm ? 0 : 300); if (!root.isConnected) return setBal(r.balance); done(r); } else { v = r; setBal(r.balance); paint(); } });
+  $('#qchips').onclick = e => { const b = e.target.closest('[data-q]'); if (!b) return; sfx.play('tap'); const q = +b.dataset.q; $('#bet').value = q ? Math.min(U.balance, (readBet() || 0) + q) : (bjLast || 10); };
+  paintHist();
   $('#hit').onclick = step('hit'); $('#stand').onclick = step('stand'); $('#dbl').onclick = step('double'); $('#deal2').onclick = () => $('#deal').click();
   paint();
 }
