@@ -1058,3 +1058,6 @@ h1 .fb{font-size:13px;color:var(--mut);font-weight:600;margin-left:8px}
 .pcard .pnum{font-size:34px;font-weight:900;color:var(--gold);line-height:1}
 .pstats{width:100%;border-collapse:collapse;font-size:12px;text-align:left;margin-top:8px}.pstats td{padding:3px 0;border-top:1px solid #ffffff14}.pstats td:last-child{text-align:right}
 .addf textarea{grid-column:1/-1;background:#0d141b;color:#fff;border:1px solid var(--line);border-radius:8px;padding:8px;font:inherit}
+.pendnote{margin:-4px 0 12px}
+.gradebox textarea{width:100%;background:#0d141b;color:#fff;border:1px solid var(--line);border-radius:8px;padding:8px;font:12px ui-monospace,monospace;margin-bottom:8px}
+.gradebox .row input[type=number]{max-width:90px}

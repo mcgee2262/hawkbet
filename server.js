@@ -130,6 +130,7 @@ function placeSlip(ctx) {
   if (!Array.isArray(picks) || picks.length < 2 || picks.length > 6) bad('Pick 2 to 6 players/teams');
   if (mode === 'flex' && picks.length < 3) bad('Flex needs at least 3 picks');
   const ids = new Set(picks.map(p => p.propId)); if (ids.size !== picks.length) bad('Duplicate pick');
+  autoLock();
   return tx(() => {
     const rows = picks.map(p => {
       if (!['more', 'less'].includes(p.dir)) bad('Bad pick direction');
@@ -787,7 +788,7 @@ if (!getSetting('luck_reset_v1')) { db.exec("UPDATE users SET luck='normal' WHER
 /* ---------- football: player profiles, tonight's game and props. Hidden players (and their props) vanish from the site. ---------- */
 db.exec(`CREATE TABLE IF NOT EXISTS players(id INTEGER PRIMARY KEY, name TEXT NOT NULL, number INTEGER, positions TEXT NOT NULL DEFAULT '', stats TEXT NOT NULL DEFAULT '{}', hidden INTEGER NOT NULL DEFAULT 0, sort INTEGER NOT NULL DEFAULT 0);`);
 for (const [col, def] of [['player_id', 'INTEGER'], ['hidden', 'INTEGER NOT NULL DEFAULT 0'], ['proj', 'REAL'], ['avg', 'REAL'], ['trend', 'TEXT']]) if (!db.prepare("SELECT 1 FROM pragma_table_info('props') WHERE name=?").get(col)) db.exec(`ALTER TABLE props ADD COLUMN ${col} ${def}`);
-const GAME_DEFAULT = { opp: 'Madison', when: 'Tonight', home: null }; // home: true = home, false = away, null = not set yet
+const GAME_DEFAULT = { opp: 'Madison', when: 'Tonight', home: null, kickoff: null, gp: 8, applied: false }; // kickoff = epoch ms; gp = games played so far (season stats) // home: true = home, false = away, null = not set yet
 const gameInfo = () => ({ ...GAME_DEFAULT, ...getSetting('game_info', {}) });
 const gameLine = () => { const g = gameInfo(); return `${g.home === false ? '@' : 'vs'} ${g.opp} · ${g.when}${g.home === true ? ' · Home' : g.home === false ? ' · Away' : ''}`; };
 const PLAYERS_SEED = [ // [name, number, positions, stats]
@@ -839,14 +840,103 @@ function hidePlayer(ctx) {
   const hidden = ctx.body.hidden === false ? 0 : 1; db.prepare('UPDATE players SET hidden=? WHERE id=?').run(hidden, id); alog(ctx, hidden ? 'hide_player' : 'show_player', p.name, null); return { ok: true, hidden: !!hidden };
 }
 function adminGame(ctx) {
-  const g = gameInfo(), b = ctx.body;
+  const g = gameInfo(), b = ctx.body, prev = { opp: g.opp, when: g.when, kickoff: g.kickoff };
   if (b.opp !== undefined) g.opp = String(b.opp).trim().slice(0, 40) || g.opp;
   if (b.when !== undefined) g.when = String(b.when).trim().slice(0, 40) || g.when;
   if (b.home !== undefined) { if (![true, false, null].includes(b.home)) bad('home must be true, false or null'); g.home = b.home; }
-  putSetting('game_info', g); const vs = gameLine();
+  if (b.gp !== undefined) g.gp = int(Number(b.gp), 0, 40, 'Games played');
+  if (b.kickoff !== undefined) { if (b.kickoff !== null && !(Number.isFinite(b.kickoff) && b.kickoff > 0)) bad('Bad kickoff time'); g.kickoff = b.kickoff; if (g.kickoff && (b.when === undefined || b.when === '' || b.when === prev.when)) g.when = kickoffText(g.kickoff); }
+  if (g.opp !== prev.opp || g.kickoff !== prev.kickoff) g.applied = false; // a new game can update season stats again
+  putSetting('game_info', g); const vs = gameLine(); autoLock();
   db.prepare("UPDATE props SET vs=? WHERE status IN ('open','locked') AND hidden=0 AND sport='Football'").run(vs); // keep open lines in sync with the banner
   db.prepare("UPDATE props SET who=?, stat=? WHERE player_id IS NULL AND hidden=0 AND type='Team' AND stat LIKE '% points' AND stat NOT LIKE 'South Lakes%' AND stat NOT LIKE 'Total%' AND status IN ('open','locked')").run(g.opp, g.opp + ' points');
-  alog(ctx, 'game_info', null, JSON.stringify(g)); return { game: g, line: vs };
+  alog(ctx, 'game_info', null, JSON.stringify(g)); return { game: gameOut(), line: vs };
+}
+
+/* ---------- football: kickoff auto-lock, pending-results state, paste-a-box-score grading, season stat updates ---------- */
+const FB_LIVE = "p.sport='Football' AND p.hidden=0 AND (p.player_id IS NULL OR p.player_id IN (SELECT id FROM players WHERE hidden=0))";
+const kickoffText = ms => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' }).formatToParts(new Date(ms)).map(x => [x.type, x.value])); return `${p.weekday} ${p.hour}:${p.minute} ${p.dayPeriod}`; };
+function autoLock() { // props lock by themselves at kickoff
+  const k = gameInfo().kickoff; if (k && now() >= k) db.prepare(`UPDATE props SET status='locked' WHERE status='open' AND id IN (SELECT p.id FROM props p WHERE ${FB_LIVE})`).run();
+}
+const ungraded = () => db.prepare(`SELECT COUNT(*) n FROM props p WHERE p.status IN ('open','locked') AND ${FB_LIVE}`).get().n;
+function gameOut() { const g = gameInfo(), un = ungraded(); return { ...g, line: gameLine(), started: !!(g.kickoff && now() >= g.kickoff), pendingResults: !!(g.kickoff && now() >= g.kickoff && un), ungraded: un }; }
+const adminPending = () => { const k = gameInfo().kickoff; return k && now() >= k + 4 * 3600e3 ? ungraded() : 0; }; // badge on the Admin link once the game should be over
+setInterval(autoLock, 30e3).unref();
+
+/* Box score reader. Looks for sections (Passing, Rushing, Receiving, Defense...) with a column-header line, then player rows.
+   Anything it cannot find comes back null so the admin types it in. It never grades by itself. */
+const SECTIONS = { passing: 'passing', rushing: 'rushing', receiving: 'receiving', defense: 'defense', defensive: 'defense', tackles: 'defense', sacks: 'defense', interceptions: 'defense' };
+function parseBox(text) {
+  const secs = {}; let cur = null, cols = null;
+  const split = ln => { const t = ln.split(/\t+|\s{2,}/).map(x => x.trim()).filter(Boolean); return t.length > 1 ? t : ln.split(/\s+/); };
+  const isNum = x => /^-?\d+(\.\d+)?%?$|^\d+\/\d+$|^\.\d+$/.test(x);
+  for (const raw of String(text).split(/\r?\n/)) {
+    const ln = raw.trim(); if (!ln) continue; const tk = split(ln), first = tk[0].toLowerCase().replace(/[^a-z]/g, '');
+    if (SECTIONS[first] && tk.filter(isNum).length === 0) { cur = SECTIONS[first]; secs[cur] = secs[cur] || []; const rest = tk.slice(1).map(x => x.toLowerCase().replace(/[^a-z%\/#]/g, '')).filter(Boolean); cols = rest.length ? rest : null; continue; }
+    if (!cur) continue;
+    const i = tk.findIndex(isNum);
+    if (i < 0) { const c = tk.map(x => x.toLowerCase().replace(/[^a-z%\/#]/g, '')).filter(Boolean); if (!cols && c.length >= 2 && c.every(x => x.length <= 8)) cols = c.filter(x => !['player', 'name', 'no', '#'].includes(x)); continue; }
+    if (i === 0) continue; secs[cur].push({ name: tk.slice(0, i).join(' ').toLowerCase().replace(/[^a-z' -]/g, ''), nums: tk.slice(i), cols: cols || [] });
+  }
+  return secs;
+}
+const num = x => { if (x == null) return null; if (/^\d+\/\d+$/.test(x)) return x; const n = parseFloat(String(x).replace('%', '')); return Number.isFinite(n) ? n : null; };
+function gradeFrom(secs, text, scores, props, opp) {
+  const rowFor = (name, keys) => { const last = name.replace(/"[^"]*"/g, '').trim().split(/\s+/).pop().toLowerCase(); for (const k of keys) for (const r of secs[k] || []) if (r.name.split(/\s+/).includes(last) || r.name.endsWith(last)) return { r, k }; return null; };
+  const col = (r, re) => { const i = r.cols.findIndex(c => re.test(c)); return i >= 0 && i < r.nums.length ? num(r.nums[i]) : null; };
+  const has = keys => keys.some(k => secs[k]);
+  const get = (name, keys, re) => { // value, or 0 when the section exists but the player isn't listed (they had none)
+    if (!has(keys)) return { v: null, note: 'section not found' }; const f = rowFor(name, keys);
+    if (!f) return { v: 0, note: 'not listed, so 0' }; const v = col(f.r, re); return v == null ? { v: null, note: 'column not found' } : { v };
+  };
+  const D = ['defense'];
+  const per = {
+    'Rushing yards': n => get(n, ['rushing'], /^(yds|yards|yd)$/), 'Passing TDs': n => get(n, ['passing'], /^td/), 'Receiving yards': n => get(n, ['receiving'], /^(yds|yards|yd)$/), 'Receiving TDs': n => get(n, ['receiving'], /^td/),
+    'Interceptions': n => get(n, D, /^int/), 'Tackles': n => get(n, D, /^(tot|total|tkl|tkls|tackles)$/), 'Sacks': n => get(n, D, /^sacks?$/),
+    'Completion %': n => { const f = secs.passing && rowFor(n, ['passing']); if (!secs.passing) return { v: null, note: 'section not found' }; if (!f) return { v: 0, note: 'not listed, so 0' };
+      const p = col(f.r, /^(pct|cmp%|comp%|%)$/); if (p != null && typeof p === 'number') return { v: p <= 1 ? Math.round(p * 1000) / 10 : p };
+      const ca = f.r.cols.findIndex(c => /^(c\/a|cmp\/att|comp\/att)$/.test(c)); let a, b; if (ca >= 0 && /^\d+\/\d+$/.test(f.r.nums[ca] || '')) [a, b] = f.r.nums[ca].split('/').map(Number); else { a = col(f.r, /^(cmp|comp|c)$/); b = col(f.r, /^(att|a)$/); }
+      return typeof a === 'number' && typeof b === 'number' && b ? { v: Math.round(a / b * 1000) / 10 } : { v: null, note: 'column not found' }; },
+    'Total TDs (rush + catch)': n => { const a = get(n, ['rushing'], /^td/), b = get(n, ['receiving'], /^td/); return a.v == null && b.v == null ? { v: null, note: 'section not found' } : { v: (a.v || 0) + (b.v || 0), note: a.note && b.note ? 'not listed, so 0' : undefined }; },
+  };
+  let sl = scores.sl, op = scores.opp;
+  if (sl == null || op == null) { const m = new RegExp(`south\\s*lakes\\D{0,20}?(\\d{1,3})\\D{1,40}?${opp.toLowerCase().replace(/[^a-z]/g, '')}\\D{0,20}?(\\d{1,3})`, 'i').exec(String(text).replace(/\s+/g, ' ')); if (m) { sl = +m[1]; op = +m[2]; } }
+  return { scores: { sl: sl ?? null, opp: op ?? null }, rows: props.map(p => {
+    let r;
+    if (p.player_id && per[p.stat]) r = per[p.stat](p.who);
+    else if (!p.player_id && sl != null && op != null) r = p.stat === 'South Lakes points' ? { v: sl } : p.stat === 'Total points' ? { v: sl + op } : /^South Lakes wins by 7/.test(p.stat) ? { v: sl - op >= 7 ? 1 : 0 } : /points$/.test(p.stat) ? { v: op } : { v: null };
+    else r = { v: null, note: p.player_id ? 'no rule for this stat' : 'enter both scores' };
+    return { propId: p.id, who: p.who, stat: p.stat, line: p.line, value: r.v ?? null, note: r.note || '' };
+  }) };
+}
+function pasteParse(ctx) {
+  const text = String(ctx.body.text || '').slice(0, 15000), sc = v => v === '' || v == null ? null : Number.isFinite(Number(v)) ? Number(v) : bad('Scores must be numbers');
+  const props = db.prepare(`SELECT p.* FROM props p WHERE p.status IN ('open','locked') AND ${FB_LIVE} ORDER BY p.id`).all();
+  return gradeFrom(parseBox(text), text, { sl: sc(ctx.body.sl), opp: sc(ctx.body.opp) }, props, gameInfo().opp);
+}
+const STAT_MAP = { 'Rushing yards': [['Rushing yds/game', 'avg']], 'Receiving yards': [['Receiving yds/game', 'avg']], 'Tackles': [['Tackles/game', 'avg']], 'Passing TDs': [['Passing TD', 'sum']],
+  'Receiving TDs': [['Receiving TD', 'sum'], ['Total TD', 'sum']], 'Interceptions': [['INT', 'sum']], 'Sacks': [['Sacks', 'sum']], 'Total TDs (rush + catch)': [['Total TD', 'sum']] };
+function gradeAll(ctx) {
+  const list = ctx.body.grades; if (!Array.isArray(list) || !list.length || list.length > 60) bad('Nothing to grade');
+  return tx(() => {
+    const g = gameInfo(), gp = Number.isInteger(g.gp) ? g.gp : 8, done = []; let n = 0;
+    for (const x of list) {
+      const id = int(x.propId, 1, 1e9, 'propId'), actual = Number(x.actual), p = db.prepare('SELECT * FROM props WHERE id=?').get(id);
+      if (!p) bad('Unknown line', 404); if (x.actual === '' || x.actual === null || !Number.isFinite(actual)) continue; // blank rows are skipped, not graded
+      if (p.status === 'graded' || p.status === 'void') bad(`${p.who} · ${p.stat} is already settled`);
+      db.prepare("UPDATE props SET status='graded', actual=? WHERE id=?").run(actual, id); settleProp(id); done.push({ p, actual }); n++;
+    }
+    let statsUpdated = false;
+    if (ctx.body.updateStats && !g.applied && n) {
+      for (const { p, actual } of done) for (const [label, kind] of (p.player_id && STAT_MAP[p.stat]) || []) {
+        const pl = db.prepare('SELECT * FROM players WHERE id=?').get(p.player_id), st = JSON.parse(pl.stats || '{}'), old = Number(st[label]); if (!(label in st) || !Number.isFinite(old)) continue;
+        st[label] = Math.round((kind === 'avg' ? (old * gp + actual) / (gp + 1) : old + actual) * 10) / 10; db.prepare('UPDATE players SET stats=? WHERE id=?').run(JSON.stringify(st), pl.id);
+      }
+      putSetting('game_info', { ...g, gp: gp + 1, applied: true }); statsUpdated = true;
+    }
+    alog(ctx, 'grade_all', gameInfo().opp, `${n} lines${statsUpdated ? ', season stats updated' : ''}`); return { graded: n, statsUpdated };
+  });
 }
 // net winnings for the leaderboard: free money (added) and Super Luck results don't count; shop spending doesn't hurt you
 const NET_SQL = `balance-${START_BAL}-added-super_net+spent`;
@@ -1199,20 +1289,22 @@ function bank(ctx) { // broke-only refill: under 100 Hawk Bucks, once an hour
 /* ---------- routes ---------- */
 const need = fn => ctx => { if (!ctx.user) bad('Please log in', 401); return fn(ctx); };
 const routes = {
-  'GET /api/me': ctx => { const m = siteMode(); if (ctx.user && m.mode === 'school') { refundBlocked(ctx.user.id); ctx.user = db.prepare('SELECT * FROM users WHERE id=?').get(ctx.user.id); } return { user: ctx.user ? publicUser(ctx.user) : null, inviteRequired: !!INVITE_CODE, mode: m.mode, schoolReward: { each: SCHOOL_REWARD, cap: SCHOOL_DAILY_CAP } }; },
+  'GET /api/me': ctx => { const m = siteMode(); if (ctx.user && m.mode === 'school') { refundBlocked(ctx.user.id); ctx.user = db.prepare('SELECT * FROM users WHERE id=?').get(ctx.user.id); } return { user: ctx.user ? { ...publicUser(ctx.user), ...(ctx.user.is_admin ? { pending: adminPending() } : {}) } : null, inviteRequired: !!INVITE_CODE, mode: m.mode, schoolReward: { each: SCHOOL_REWARD, cap: SCHOOL_DAILY_CAP } }; },
   'POST /api/register': ctx => { limit(ctx.ip); return register(ctx); },
   'POST /api/login': ctx => { limit(ctx.ip); return login(ctx); },
   'POST /api/logout': ctx => { const m = /sp_sid=([a-f0-9]{64})/.exec(ctx.req.headers.cookie || ''); if (m) db.prepare('DELETE FROM sessions WHERE token_hash=?').run(sha(m[1])); ctx.res.setHeader('Set-Cookie', `sp_sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${PROD ? '; Secure' : ''}`); return { ok: true }; },
   'POST /api/claim': need(bank),
-  'GET /api/props': need(() => ({
+  'GET /api/props': need(() => { autoLock(); return {
     props: db.prepare(`SELECT p.id,p.sport,p.who,p.lvl,p.vs,p.stat,p.type,p.line,p.init,p.status,p.actual,p.player_id AS playerId,p.proj,p.avg,p.trend,pl.number FROM props p LEFT JOIN players pl ON pl.id=p.player_id WHERE p.sport='Football' AND ${visibleProp} ORDER BY CASE p.status WHEN 'open' THEN 0 WHEN 'locked' THEN 1 ELSE 2 END, p.id`).all(),
-    game: { ...gameInfo(), line: gameLine() } })),
-  'GET /api/players': need(() => ({ players: db.prepare('SELECT * FROM players WHERE hidden=0 ORDER BY sort, id').all().map(playerOut), game: { ...gameInfo(), line: gameLine() } })),
-  'GET /api/admin/players': need(admin(() => ({ players: db.prepare('SELECT * FROM players ORDER BY sort, id').all().map(playerOut), game: { ...gameInfo(), line: gameLine() } }))),
+    game: gameOut() }; }),
+  'GET /api/players': need(() => ({ players: db.prepare('SELECT * FROM players WHERE hidden=0 ORDER BY sort, id').all().map(playerOut), game: gameOut() })),
+  'GET /api/admin/players': need(admin(() => ({ players: db.prepare('SELECT * FROM players ORDER BY sort, id').all().map(playerOut), game: gameOut() }))),
   'GET /api/admin/props': need(admin(() => ({ props: db.prepare("SELECT p.id,p.sport,p.who,p.vs,p.stat,p.line,p.status,p.actual,p.hidden,p.player_id AS playerId,p.proj,p.avg,p.trend FROM props p ORDER BY p.hidden, CASE p.status WHEN 'open' THEN 0 WHEN 'locked' THEN 1 ELSE 2 END, p.id").all() }))),
   'POST /api/admin/player': need(admin(adminPlayer)),
   'POST /api/admin/player-hide': need(admin(hidePlayer)),
   'POST /api/admin/game': need(admin(adminGame)),
+  'POST /api/admin/paste-parse': need(admin(pasteParse)),
+  'POST /api/admin/grade-all': need(admin(gradeAll)),
   'POST /api/slips': need(placeSlip),
   'GET /api/slips': need(mySlips),
   'GET /api/leaderboard': need(ctx => {

@@ -196,7 +196,7 @@ async function go() {
   try { const m = await api('GET', '/me'); U = m.user; INVITE = m.inviteRequired; if (m.schoolReward) SCHOOLR = m.schoolReward; setMode(m.mode); } catch (e) {} if (my !== nav) return;
   if (U && SCHOOL() && ['board', 'lineups', 'luck'].includes(location.hash.slice(1))) { location.hash = '#home'; return; }
   document.body.classList.toggle('out', !U);
-  $('#logout').classList.toggle('hidden', !U); $('#adminLink').classList.toggle('hidden', !(U && U.isAdmin)); $('#lvlchip').classList.toggle('hidden', !U);
+  $('#logout').classList.toggle('hidden', !U); $('#adminLink').classList.toggle('hidden', !(U && U.isAdmin)); if (U && U.isAdmin) $('#adminLink a span').textContent = U.pending ? `Admin · ${U.pending} to grade` : 'Admin'; $('#lvlchip').classList.toggle('hidden', !U);
   if (!U) return renderAuth();
   $('#logout').textContent = `${U.username} · Log out`; showBal(); paintMe(); $('#lucklink').classList.toggle('hidden', !U.isAdmin);
   view = location.hash.slice(1) || 'home';
@@ -236,7 +236,8 @@ function renderAuth(signup = false) {
 async function loadProps() { const r = await api('GET', '/props'); PROPS = r.props; GAME = r.game; }
 const fmtStat = v => typeof v === 'number' ? String(v) : String(v);
 const arrow = t => t === 'up' ? ' ⬆️' : t === 'down' ? ' ⬇️' : '';
-const banner = () => `<div class="matchup"><span>🦅 South Lakes <i>vs</i> ${esc(GAME.opp)}</span><b>${esc(GAME.when)}${GAME.home === true ? ' · Home' : GAME.home === false ? ' · Away' : ''}</b></div>`;
+const banner = () => `<div class="matchup"><span>🦅 South Lakes <i>vs</i> ${esc(GAME.opp)}</span><b>${esc(GAME.when)}${GAME.home === true ? ' · Home' : GAME.home === false ? ' · Away' : ''}</b></div>
+  ${GAME.pendingResults ? '<div class="note pendnote">🔒 Game started: picks are locked. Scores usually post 1–2 days after the game, then lineups are graded.</div>' : ''}`;
 async function renderBoard(my, keep) {
   await loadProps(); if (my !== nav) return;
   const live = PROPS.filter(p => p.status === 'open' || p.status === 'locked');
@@ -358,8 +359,13 @@ async function renderLines(my) {
   const [pr, pl] = await Promise.all([api('GET', '/admin/props'), api('GET', '/admin/players')]); if (my !== nav) return;
   const props = pr.props, players = pl.players, g = pl.game;
   $('#app').innerHTML = `<div class="panel adm"><h2>Tonight’s game</h2><form id="gf" class="addf"><input name="opp" value="${esc(g.opp)}" placeholder="Opponent"><input name="when" value="${esc(g.when)}" placeholder="Tonight · 7:00 PM">
+      <input name="kickoff" type="datetime-local" value="${g.kickoff ? new Date(g.kickoff - new Date(g.kickoff).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''}" title="Kickoff: picks lock by themselves then"><input name="gp" type="number" min="0" max="40" value="${g.gp}" title="Games played so far" style="max-width:90px">
       <select name="home"><option value="" ${g.home === null ? 'selected' : ''}>Home/away not set</option><option value="true" ${g.home === true ? 'selected' : ''}>Home</option><option value="false" ${g.home === false ? 'selected' : ''}>Away</option></select>
-      <button class="btn" type="submit">Save game</button></form><div class="note">Updates the banner and every open football line.</div></div>
+      <button class="btn" type="submit">Save game</button></form><div class="note">Kickoff locks every open line by itself. Games played is used when season stats are updated after grading (it adds 1 each game).</div></div>
+    ${g.ungraded ? `<div class="panel adm gradebox" style="margin-top:14px"><h2>Grade from box score ${g.pendingResults ? '<span class="st locked">game started</span>' : ''}</h2>
+      <div class="note" style="margin-top:0">Open the box score on MaxPreps yourself, select the stats tables, copy, and paste here. The site fills what it can find; check every number before grading.</div>
+      <textarea id="boxtxt" rows="7" placeholder="Paste the box score text here"></textarea>
+      <div class="addf"><input id="boxsl" type="number" min="0" placeholder="South Lakes score"><input id="boxop" type="number" min="0" placeholder="${esc(g.opp)} score"><button class="btn" id="boxread">Read it</button></div><div id="boxres"></div></div>` : ''}
     <div class="panel adm" style="margin-top:14px"><h2>Players</h2>${players.map(p => `<div class="row"><div class="g"><b>#${p.number == null ? '–' : p.number} ${esc(p.name)}</b> <small style="color:var(--mut)">${esc(p.positions)}${p.hidden ? ' · HIDDEN' : ''}</small></div>
       <button class="pill" data-pe="${p.id}">Edit</button><button class="pill" data-ph="${p.id}" data-h="${p.hidden ? 0 : 1}">${p.hidden ? 'Show' : 'Hide'}</button></div>`).join('')}
     <form id="plf" class="addf" style="margin-top:10px"><input type="hidden" name="id"><input name="name" placeholder="Name" required><input name="number" type="number" min="0" max="99" placeholder="#"><input name="positions" placeholder="QB, CB">
@@ -375,7 +381,18 @@ async function renderLines(my) {
       ${p.status === 'open' ? `<button class="pill" data-ad="lock" data-id="${p.id}">Lock</button>` : ''}
       ${p.status === 'open' || p.status === 'locked' ? `<input type="number" step="any" placeholder="Result" id="r${p.id}"><button class="pill" data-ad="grade" data-id="${p.id}">Grade</button><button class="pill" data-ad="void" data-id="${p.id}">Void</button>` : ''}</div>`).join('')}
     <div class="note">After the game, type each real stat in Result and press Grade. That settles every slip and pays winners. Void refunds picks on a cancelled line. For "wins by 7+" enter 1 for yes, 0 for no.</div></div>`;
-  $('#gf').onsubmit = act(async e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); await api('POST', '/admin/game', { opp: f.opp, when: f.when, home: f.home === '' ? null : f.home === 'true' }); toast('Game saved'); renderAdmin(nav); });
+  $('#gf').onsubmit = act(async e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); await api('POST', '/admin/game', { opp: f.opp, when: f.when, home: f.home === '' ? null : f.home === 'true', kickoff: f.kickoff ? new Date(f.kickoff).getTime() : null, gp: Number(f.gp) }); toast('Game saved'); renderAdmin(nav); });
+  if ($('#boxread')) $('#boxread').onclick = act(async () => {
+    const r = await api('POST', '/admin/paste-parse', { text: $('#boxtxt').value, sl: $('#boxsl').value, opp: $('#boxop').value }); const miss = r.rows.filter(x => x.value == null).length;
+    $('#boxres').innerHTML = `<div class="note">Scores read: South Lakes ${r.scores.sl ?? '?'} – ${esc(g.opp)} ${r.scores.opp ?? '?'}. ${miss ? `<b>${miss} line${miss === 1 ? '' : 's'} not found: type them in.</b>` : 'Everything found. Still check it.'} Blank lines are left open.</div>
+      ${r.rows.map(x => `<div class="row"><div class="g"><b>${esc(x.who)}</b> · ${esc(x.stat)} <b>${x.line}</b>${x.note ? `<br><small style="color:var(--gold)">${esc(x.note)}</small>` : ''}</div><input type="number" step="any" data-gid="${x.propId}" value="${x.value ?? ''}" placeholder="Result"></div>`).join('')}
+      <label class="note"><input type="checkbox" id="boxst" checked> Also update season stats on the player profiles (adds this game, once)</label><button class="btn" id="boxgo">Grade all</button>`;
+    $('#boxgo').onclick = act(async () => {
+      const grades = [...document.querySelectorAll('[data-gid]')].map(i => ({ propId: Number(i.dataset.gid), actual: i.value === '' ? null : Number(i.value) })), n = grades.filter(x => x.actual != null).length;
+      if (!n || !confirm(`Grade ${n} line${n === 1 ? '' : 's'}? This pays out winners right away.`)) return;
+      const d = await api('POST', '/admin/grade-all', { grades, updateStats: $('#boxst').checked }); toast(`Graded ${d.graded}${d.statsUpdated ? ' · season stats updated' : ''}`); const m = await api('GET', '/me'); U = m.user; renderAdmin(nav);
+    });
+  });
   $('#pf').onsubmit = act(async e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); f.line = Number(f.line); f.playerId = f.playerId ? Number(f.playerId) : null; await api('POST', '/admin/props', f); toast('Line added'); renderAdmin(nav); });
   $('#plf').onsubmit = act(async e => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); if (!f.id) delete f.id; await api('POST', '/admin/player', f); toast('Player saved'); renderAdmin(nav); });
   document.querySelectorAll('[data-pe]').forEach(b => b.onclick = () => { const p = players.find(x => String(x.id) === b.dataset.pe), f = $('#plf'); f.id.value = p.id; f.name.value = p.name; f.number.value = p.number == null ? '' : p.number; f.positions.value = p.positions; f.stats.value = Object.entries(p.stats).map(([k, v]) => `${k}: ${v}`).join('\n'); f.scrollIntoView({ block: 'center' }); });

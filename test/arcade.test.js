@@ -466,3 +466,38 @@ test('football migration runs once: old demo lines are hidden but still reachabl
   assert.equal(all.filter(p => !p.hidden && p.playerId == null && p.sport === 'Football').length >= 4, true);
   assert.equal((await boss('GET', '/players')).players.filter(p => p.name === 'Christian Wyatt').length, 1, 'players seeded once');
 });
+
+test('football kickoff auto-locks lines, a pasted box score fills results, grade-all pays out and updates season stats once', async () => {
+  const api = await newUser('grader');
+  const open = () => api('GET', '/props').then(r => r.props);
+  assert.equal((await boss('POST', '/admin/game', { kickoff: Date.now() + 3600e3, gp: 8 })).game.started, false);
+  assert.ok((await open()).some(p => p.status === 'open'), 'still open before kickoff');
+  assert.equal((await boss('GET', '/me')).user.pending, 0);
+  assert.equal((await api('POST', '/admin/paste-parse', { text: 'x' })).status, 403); assert.equal((await api('POST', '/admin/grade-all', { grades: [] })).status, 403);
+  // kickoff passes: everything locks by itself, picks are refused, the admin gets a badge, players see pending results
+  const g = await boss('POST', '/admin/game', { kickoff: Date.now() - 5 * 3600e3 }); assert.equal(g.game.started, true); assert.equal(g.game.pendingResults, true);
+  const r = await api('GET', '/props'); assert.ok(r.props.every(p => p.status !== 'open'), 'locked at kickoff'); assert.equal(r.game.pendingResults, true);
+  const ids = r.props.filter(p => p.status === 'locked').slice(0, 2).map(p => p.id);
+  assert.equal((await api('POST', '/slips', { mode: 'power', entry: 5, picks: ids.map(id => ({ propId: id, dir: 'more' })) })).status, 400);
+  assert.ok((await boss('GET', '/me')).user.pending > 0, 'admin badge after the game');
+  const box = 'Final: South Lakes 28, Madison 14\nPassing\nPlayer Cmp Att Yds TD Int\nChristian Wyatt 9 14 130 2 0\nRushing\nPlayer Car Yds Avg TD\nChristian Wyatt 8 52 6.5 1\nNick Picarelli 2 10 5.0 1\nReceiving\nPlayer Rec Yds TD\nJoshua-Benjamin Dagbe 5 101 1\nNick Picarelli 3 60 0\nDefense\nPlayer Tot Solo Ast Sacks Int\nSebastian "Sebi" Valencia 8 5 3 1.0 0\n';
+  const parsed = await boss('POST', '/admin/paste-parse', { text: box });
+  assert.deepEqual(parsed.scores, { sl: 28, opp: 14 });
+  const val = (who, stat) => parsed.rows.find(x => x.who.startsWith(who) && x.stat === stat);
+  assert.equal(val('Christian', 'Rushing yards').value, 52); assert.equal(val('Christian', 'Passing TDs').value, 2); assert.equal(val('Christian', 'Completion %').value, 64.3);
+  assert.equal(val('Joshua', 'Receiving TDs').value, 1); assert.equal(val('Joshua', 'Interceptions').value, 0); assert.match(val('Joshua', 'Interceptions').note, /not listed/);
+  assert.equal(val('Nick', 'Receiving yards').value, 60); assert.equal(val('Nick', 'Total TDs (rush + catch)').value, 1); assert.equal(val('Sebastian', 'Tackles').value, 8);
+  assert.equal(val('South Lakes', 'South Lakes points').value, 28); assert.equal(val('Madison', 'Madison points').value, 14); assert.equal(val('South Lakes', 'Total points').value, 42); assert.equal(parsed.rows.find(x => /wins by 7/.test(x.stat)).value, 1);
+  // junk paste: nothing found, nothing invented
+  assert.ok((await boss('POST', '/admin/paste-parse', { text: 'hello world' })).rows.every(x => x.value == null));
+  // a lineup on two of these, graded in one go
+  const a = r.props.find(p => p.who.startsWith('Christian') && p.stat === 'Rushing yards'), b = r.props.find(p => p.who.startsWith('Christian') && p.stat === 'Passing TDs');
+  const wy = (await boss('GET', '/admin/players')).players.find(p => p.name === 'Christian Wyatt');
+  const gr = await boss('POST', '/admin/grade-all', { grades: parsed.rows.map(x => ({ propId: x.propId, actual: x.value })), updateStats: true });
+  assert.equal(gr.statsUpdated, true); assert.ok(gr.graded >= 8);
+  const after = (await boss('GET', '/admin/players')); const w2 = after.players.find(p => p.name === 'Christian Wyatt');
+  assert.equal(w2.stats['Rushing yds/game'], 46.9); assert.equal(w2.stats['Passing TD'], 12); assert.equal(after.players.find(p => p.name === 'Nick Picarelli').stats['Receiving yds/game'], 56.3);
+  assert.equal(after.game.gp, 9); assert.equal(after.game.applied, true);
+  assert.equal((await boss('POST', '/admin/grade-all', { grades: [{ propId: a.id, actual: 1 }], updateStats: true })).status, 400, 'already settled lines cannot be graded again');
+  assert.equal(wy.stats['Passing TD'], 10, 'stats before the update were untouched');
+});
