@@ -78,6 +78,11 @@ const sfx = (() => {
     o.connect(a); a.connect(out); o.start(s); o.stop(s + d + 0.03);
   }
   const notes = (fs, step, d, type, g) => fs.forEach((f, k) => tone(f, k * step, d, type, g));
+  function noise(t = 0, d = 0.15, g = 0.1, f = 2000, type = 'bandpass', f2) { // filtered white noise: swishes, thuds, cheers
+    const n = Math.floor(ac.sampleRate * d), buf = ac.createBuffer(1, n, ac.sampleRate), ch = buf.getChannelData(0); for (let i = 0; i < n; i++) ch[i] = Math.random() * 2 - 1;
+    const src = ac.createBufferSource(), fl = ac.createBiquadFilter(), a = ac.createGain(), st = ac.currentTime + t; src.buffer = buf; fl.type = type; fl.frequency.setValueAtTime(f, st); if (f2) fl.frequency.exponentialRampToValueAtTime(f2, st + d);
+    a.gain.setValueAtTime(0.0001, st); a.gain.exponentialRampToValueAtTime(g, st + Math.min(0.03, d / 3)); a.gain.exponentialRampToValueAtTime(0.0001, st + d); src.connect(fl); fl.connect(a); a.connect(out); src.start(st);
+  }
   function flavor() { const l = luckLevel(); if (l !== 'normal' && l <= 2) tone(120, 0, 0.25, 'sine', 0.08, 70); if (l >= 8) { tone(2093, 0.3, 0.35, 'sine', 0.035); tone(2637, 0.38, 0.35, 'sine', 0.03); } }
   const S = {
     tap: () => tone(620, 0, 0.05, 'triangle', 0.04),
@@ -96,10 +101,20 @@ const sfx = (() => {
     clunk: () => { tone(160, 0, 0.14, 'sine', 0.13, 62); tone(95, 0.01, 0.12, 'triangle', 0.08); },
     ratchet: () => [0, 0.05, 0.1, 0.15, 0.2].forEach((t, k) => tone(700 + k * 90, t, 0.035, 'square', 0.04)),
     lever: () => tone(380, 0, 0.3, 'sawtooth', 0.04, 130),
-    pad0: () => { tone(196, 0, 0.22, 'triangle', 0.12, 130); tone(392, 0, 0.08, 'sine', 0.04); },
-    pad1: () => { tone(247, 0, 0.22, 'triangle', 0.12, 165); tone(494, 0, 0.08, 'sine', 0.04); },
-    pad2: () => { tone(311, 0, 0.22, 'triangle', 0.12, 208); tone(622, 0, 0.08, 'sine', 0.04); },
-    pad3: () => { tone(392, 0, 0.22, 'triangle', 0.12, 262); tone(784, 0, 0.08, 'sine', 0.04); },
+    pad0: () => { tone(150, 0, 0.3, 'sine', 0.22, 80); noise(0, 0.1, 0.16, 1800, 'bandpass'); },
+    pad1: () => { tone(190, 0, 0.28, 'sine', 0.22, 105); noise(0, 0.1, 0.16, 2200, 'bandpass'); },
+    pad2: () => { tone(240, 0, 0.26, 'sine', 0.22, 135); noise(0, 0.1, 0.16, 2600, 'bandpass'); },
+    pad3: () => { tone(300, 0, 0.24, 'sine', 0.22, 170); noise(0, 0.12, 0.2, 3200, 'bandpass'); },
+    swish: () => { noise(0, 0.38, 0.16, 3200, 'bandpass', 900); tone(1568, 0.12, 0.22, 'sine', 0.035); },
+    brick: () => { tone(160, 0, 0.2, 'square', 0.09, 70); noise(0, 0.14, 0.14, 700, 'lowpass'); },
+    rim: () => { tone(980, 0, 0.14, 'triangle', 0.08, 520); tone(1470, 0, 0.08, 'sine', 0.03); },
+    cheer: () => { noise(0, 0.9, 0.09, 1100, 'bandpass', 2400); noise(0.05, 0.8, 0.05, 3000, 'highpass'); },
+    roar: () => { noise(0, 1.3, 0.13, 900, 'bandpass', 2600); noise(0.1, 1.2, 0.07, 2800, 'highpass'); notes([523, 659, 784, 1047], 0.07, 0.2, 'triangle', 0.05); },
+    tick: () => tone(1100, 0, 0.04, 'square', 0.03),
+    whoosh: () => noise(0, 0.28, 0.1, 500, 'bandpass', 2600),
+    near: () => { tone(620, 0, 0.12, 'triangle', 0.06, 1500); noise(0, 0.12, 0.06, 2500, 'highpass'); },
+    crash: () => { noise(0, 0.45, 0.22, 450, 'lowpass', 120); tone(120, 0, 0.4, 'sawtooth', 0.13, 38); },
+    clear: () => { notes([523, 659, 784], 0.06, 0.14, 'triangle', 0.06); noise(0.1, 0.5, 0.05, 1500, 'bandpass', 2600); },
     coin: () => { tone(1568, 0, 0.06, 'square', 0.035); tone(2093, 0.06, 0.2, 'square', 0.035); },
     jackpot: () => { notes([523, 659, 784, 1047, 1319, 1568, 2093, 2637], 0.07, 0.26, 'triangle', 0.075); tone(262, 0, 1.1, 'sawtooth', 0.035); tone(2093, 0.6, 0.8, 'sine', 0.05); },
   };
@@ -1489,37 +1504,68 @@ async function trivia(root) {
 }
 
 /* Timing: Free Throw Line. The server runs the meter clock; we draw a copy of it and send the tap. */
+const COURT_SVG = `<svg viewBox="0 0 400 260" preserveAspectRatio="none" aria-hidden="true" class="cscene"><defs>
+  <linearGradient id="cw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#101c4a"/><stop offset="1" stop-color="#1b2f73"/></linearGradient>
+  <linearGradient id="cf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c98a45"/><stop offset="1" stop-color="#9a6228"/></linearGradient>
+  <radialGradient id="cl" cx=".5" cy="0" r=".9"><stop offset="0" stop-color="#fff" stop-opacity=".45"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>
+  <rect width="400" height="150" fill="url(#cw)"/>
+  <g class="bleach">${[0, 1, 2].map(r => `<rect x="0" y="${70 + r * 24}" width="400" height="22" fill="#0c1538" opacity="${.9 - r * .12}"/>`).join('')}</g>
+  <g class="crowd">${Array.from({ length: 34 }, (_, i) => { const r = i % 3, x = 12 + (i * 11.7) % 380, y = 80 + r * 24 + (i % 2) * 3; return `<circle cx="${x.toFixed(1)}" cy="${y}" r="5.2" fill="${['#3b6bff', '#19e58a', '#ffc542', '#ff7a8a', '#d6e0ff'][i % 5]}" opacity=".85" style="animation-delay:${(i % 7) * 40}ms"/>`; }).join('')}</g>
+  <path d="M0 62H400" stroke="#ffffff22"/><text x="200" y="40" text-anchor="middle" font-size="20" font-weight="900" letter-spacing="5" fill="#ffffff55">SEAHAWKS</text>
+  <rect y="150" width="400" height="110" fill="url(#cf)"/>${Array.from({ length: 9 }, (_, i) => `<path d="M${i * 50} 150L${-60 + i * 60} 260" stroke="#00000022" stroke-width="2"/>`).join('')}
+  <path d="M60 260Q200 118 340 260" fill="none" stroke="#fff" stroke-width="2.5" opacity=".75"/><path d="M150 150L110 260M250 150L290 260M150 150H250" fill="none" stroke="#fff" stroke-width="2" opacity=".7"/>
+  <ellipse cx="200" cy="196" rx="44" ry="13" fill="none" stroke="#fff" stroke-width="2" opacity=".6"/>
+  <rect width="400" height="150" fill="url(#cl)"/>
+  <g class="bboard"><rect x="150" y="24" width="100" height="72" rx="6" fill="#fff" stroke="#c9cfe8" stroke-width="4"/><rect x="178" y="52" width="44" height="34" fill="none" stroke="#e8461a" stroke-width="3.5"/><image href="logo.svg" x="184" y="28" width="32" height="32"/></g>
+  <g class="rimg"><ellipse cx="200" cy="99" rx="27" ry="6.5" fill="none" stroke="#ff5a1a" stroke-width="5"/></g>
+  <g class="netg" id="net" style="transform-origin:200px 100px"><path d="M174 101L184 134M187 106L192 136M200 108V137M213 106L208 136M226 101L216 134M178 114H222M184 126H216" fill="none" stroke="#fff" stroke-width="1.6" opacity=".85"/></g></svg>`;
 async function hoops(root) {
-  let st = null, s0 = 0, period = 1700, zone = 0.17, frozen = false, timer = 0, busy = false;
-  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> 10 shots. The power meter swings back and forth: tap <b>SHOOT</b> (or press Space) when the marker is in the <b style="color:#19e58a">green zone</b>. Dead center is a perfect shot (150). Makes in a row add a streak bonus, but the zone shrinks and the meter speeds up.</div>
+  let st = null, s0 = 0, period = 1700, zone = 0.17, frozen = false, timer = 0, busy = false, streak = 0;
+  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> 10 shots. The power meter swings back and forth: tap <b>SHOOT</b> (or press Space) when the marker is in the <b style="color:#19e58a">green zone</b>. The gold center is a perfect shot (150). Makes in a row add a streak bonus, but the zone shrinks and the meter speeds up.</div>
     ${skillBet('hoops')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Shot</small><b id="sn">–</b></div></div>${hsBox()}`,
-    `<div class="court" id="court"><div class="hoopx" aria-hidden="true"><i class="board2"></i><i class="rim2"></i></div><div class="hball" id="hball">🏀</div><div class="hfloor"></div></div>
-      <div class="meter" id="meter"><i class="mzone" id="mz"></i><i class="mmark" id="mm"></i></div>
-      <button class="btn bjbig" id="shoot" disabled>🏀 SHOOT <kbd>Space</kbd></button><div class="pips" id="pips">${'<i></i>'.repeat(10)}</div>`);
-  const mm = $('#mm'), mz = $('#mz'), meter = $('#meter'), ball = $('#hball'), shoot = $('#shoot');
-  const paintZone = () => { mz.style.left = (0.5 - zone) * 100 + '%'; mz.style.width = zone * 200 + '%'; };
-  const tri = el => { const ph = (el % period) / period; return ph < 0.5 ? ph * 2 : 2 - ph * 2; };
-  const place = pos => { mm.style.transform = `translateX(${pos * (meter.clientWidth - 8)}px)`; };
-  function loop() { clearTimeout(timer); if (!root.isConnected || !st) return; if (!frozen) place(tri(performance.now() - s0)); timer = setTimeout(loop, 16); }
-  stopFns.push(() => clearTimeout(timer)); paintZone(); place(0.5);
-  function nextShot(r) { s0 = performance.now(); period = r.period; zone = r.zone; paintZone(); frozen = false; ball.className = 'hball'; shoot.disabled = false; }
+    `<div class="hoopsw"><div class="court" id="court">${COURT_SVG}<div class="hscore"><span>SHOT <b id="hsn">–</b></span><span>PTS <b id="hsc">0</b></span></div><div class="hball" id="hball"><i class="flame">🔥</i><i class="bb">🏀</i></div><div class="hpop" id="hpop"></div><div class="hflash" id="hflash"></div></div>
+      <div class="meter" id="meter"><i class="mzone" id="mz"><i class="mperf" id="mp"></i></i><i class="mtr" data-k="3"></i><i class="mtr" data-k="2"></i><i class="mtr" data-k="1"></i><i class="mmark" id="mm"></i></div>
+      <button class="btn bjbig shootbtn" id="shoot" disabled>🏀 SHOOT <kbd>Space</kbd></button><div class="pips" id="pips">${'<i></i>'.repeat(10)}</div></div>`);
+  const mm = $('#mm'), mz = $('#mz'), mp = $('#mp'), meter = $('#meter'), court = $('#court'), ball = $('#hball'), shoot = $('#shoot'), trail = [...root.querySelectorAll('.mtr')], net = $('#net');
+  const paintZone = () => { mz.style.left = (0.5 - zone) * 100 + '%'; mz.style.width = zone * 200 + '%'; mp.style.width = 100 / 3 + '%'; };
+  const tri = el => { const ph = (((el % period) + period) % period) / period; return ph < 0.5 ? ph * 2 : 2 - ph * 2; };
+  const mw = () => meter.clientWidth - 10, place = pos => { mm.style.transform = `translateX(${pos * mw()}px)`; };
+  const T = (x, y, sc, rot) => `translate(${x}px,${y}px) translate(-50%,-50%) scale(${sc}) rotate(${rot}deg)`;
+  const size = () => { const cw = court.clientWidth; ball.style.fontSize = cw * 0.115 + 'px'; return cw; };
+  const rest = () => { const cw = size(), ch = court.clientHeight; ball.getAnimations().forEach(a => a.cancel()); ball.style.transform = T(cw * 0.5, ch * 0.86, 1, 0); ball.classList.toggle('fire', streak >= 3); };
+  function loop() { clearTimeout(timer); if (!root.isConnected || !st) return; const now = performance.now(); if (!frozen) { const el = now - s0; place(tri(el)); trail.forEach((t, i) => { t.style.transform = `translateX(${tri(el - (i + 1) * 38) * mw()}px)`; }); } timer = setTimeout(loop, 16); }
+  stopFns.push(() => clearTimeout(timer)); paintZone(); place(0.5); setTimeout(rest, 0);
+  const ro = new ResizeObserver(() => { if (!ball.getAnimations().length) { rest(); if (!st) place(0.5); } }); ro.observe(court); stopFns.push(() => ro.disconnect()); // the ball always sits on the free-throw line, whatever size the court ends up
+  const pop = (txt, cls) => { const p = $('#hpop'); p.textContent = txt; p.className = 'hpop'; void p.offsetWidth; p.className = 'hpop show ' + cls; };
+  const flash = cls => { const f = $('#hflash'); f.className = 'hflash'; void f.offsetWidth; f.className = 'hflash ' + cls; };
+  const cheer = () => { const c = court.querySelector('.crowd'); c.classList.remove('cheer'); void c.getBoundingClientRect(); c.classList.add('cheer'); setTimeout(() => c.classList.remove('cheer'), 1100); };
+  const shake = (el, cls, ms) => { el.classList.remove(cls); void el.getBoundingClientRect(); el.classList.add(cls); setTimeout(() => el.classList.remove(cls), ms); };
+  function animShot(r) {
+    const cw = size(), ch = court.clientHeight, X = f => f * cw, Y = f => f * ch, x0 = X(.5), y0 = Y(.86), rx = X(.5), ry = Y(.385), apex = Y(.12);
+    const frames = r.hit
+      ? [{ transform: T(x0, y0, 1, 0), offset: 0 }, { transform: T(x0, apex, .72, 340), offset: .5, easing: 'ease-in' }, { transform: T(rx, ry, .62, 520), offset: .67 }, { transform: T(rx, ry + Y(.14), .6, 560), offset: .8 }, { transform: T(rx + X(.01), Y(.87), .85, 640), offset: 1 }]
+      : [{ transform: T(x0, y0, 1, 0), offset: 0 }, { transform: T(x0 + X(.02), apex, .74, 300), offset: .5, easing: 'ease-in' }, { transform: T(rx + X(.075), ry - Y(.01), .65, 420), offset: .66 }, { transform: T(rx + X(.2), Y(.52), .72, 560), offset: .82 }, { transform: T(rx + X(.34), Y(.88), .85, 760), offset: 1 }];
+    ball.animate(frames, { duration: calm ? 200 : 1100, fill: 'forwards', easing: 'linear' });
+    setTimeout(() => { if (!root.isConnected) return; if (r.hit) { shake(net, 'swish', 700); sfx.play('swish'); if (r.perfect) shake(court.querySelector('.bboard'), 'bflash', 500); } else { shake(court.querySelector('.rimg'), 'rimhit', 500); sfx.play('rim'); setTimeout(() => sfx.play('brick'), 230); } }, calm ? 0 : 740);
+  }
+  function nextShot(r) { s0 = performance.now(); period = r.period; zone = r.zone; paintZone(); frozen = false; rest(); shoot.disabled = false; }
   async function fire() {
-    if (!st || busy || frozen) return; busy = true; frozen = true; shoot.disabled = true;
+    if (!st || busy || frozen) return; busy = true; frozen = true; shoot.disabled = true; sfx.play('whoosh');
     try {
       const r = await api('POST', '/arcade/hoops/shoot'); if (!root.isConnected) return;
-      place(r.pos); const pip = $('#pips').children[r.shot - 1];
-      ball.className = 'hball ' + (r.hit ? (r.perfect ? 'swish' : 'make') : 'miss'); void ball.offsetWidth;
-      if (r.hit) { pip.classList.add('on'); sfx.play(r.perfect ? 'pb' : 'reveal'); resMsg(true, r.perfect ? `SWISH! +${r.pts}` : `Bucket! +${r.pts}`); if (r.streak >= 3) streakFx(r.streak); }
-      else { pip.classList.add('bad'); sfx.play('miss'); resMsg(false, r.stalled ? 'Shot clock! +0' : 'Off the rim'); }
-      $('#sn').textContent = `${Math.min(r.shot + 1, 10)} / 10`; countUp($('#sc'), r.score, 300);
-      await wait(calm ? 300 : 900); if (!root.isConnected) return;
-      if (r.done) { st = null; clearTimeout(timer); lockStart(false); resMsg(true, `${r.makes}/10 made · ${fmt(r.score)} pts`); skillDone('hoops', r, r.makes >= 7); }
+      place(r.pos); streak = r.streak; const pip = $('#pips').children[r.shot - 1]; animShot(r);
+      await wait(calm ? 100 : 760); if (!root.isConnected) return;
+      if (r.hit) { pip.classList.add('on'); flash('g'); cheer(); sfx.play(r.perfect ? 'roar' : 'cheer'); pop(r.perfect ? 'SWISH!' : 'BUCKET!', r.perfect ? 'gold' : 'good'); resMsg(true, r.perfect ? `SWISH! +${r.pts}` : `Bucket! +${r.pts}`); if (r.perfect) fx.burst(60); if (r.streak >= 3) streakFx(r.streak); }
+      else { pip.classList.add('bad'); flash('r'); pop(r.stalled ? 'SHOT CLOCK' : 'BRICK', 'bad'); resMsg(false, r.stalled ? 'Shot clock! +0' : 'Off the rim'); court.classList.add('rest'); }
+      $('#hsn').textContent = `${Math.min(r.shot + 1, 10)}/10`; countUp($('#hsc'), r.score, 300); $('#sn').textContent = `${Math.min(r.shot + 1, 10)} / 10`; countUp($('#sc'), r.score, 300);
+      await wait(calm ? 300 : 800); if (!root.isConnected) return;
+      if (r.done) { st = null; clearTimeout(timer); lockStart(false); rest(); resMsg(true, `${r.makes}/10 made · ${fmt(r.score)} pts`); skillDone('hoops', r, r.makes >= 7); }
       else nextShot(r);
     } catch (e) { toast(e.message); frozen = false; shoot.disabled = false; } finally { busy = false; }
   }
   shoot.onclick = fire;
   skillButtons(bet => act(async () => {
-    const r = await api('POST', '/arcade/hoops/start', { bet }); if (r.bet) setBal(r.balance); st = {}; lockStart(true); $('#sc').textContent = '0'; $('#sn').textContent = '1 / 10'; $('#res').textContent = '';
+    const r = await api('POST', '/arcade/hoops/start', { bet }); if (r.bet) setBal(r.balance); st = {}; streak = 0; lockStart(true); $('#sc').textContent = '0'; $('#hsc').textContent = '0'; $('#sn').textContent = '1 / 10'; $('#hsn').textContent = '1/10'; $('#res').textContent = '';
     [...$('#pips').children].forEach(i => i.className = ''); nextShot(r); loop();
   }));
   loadHS('hoops');
@@ -1527,15 +1573,26 @@ async function hoops(root) {
 
 /* Math: Mental Math Sprint */
 async function math(root) {
-  let st = null, endT = 0, ending = false;
+  let st = null, endT = 0, ending = false, tickT = 0, secs = 60, t0 = 0;
+  const syms = ['+', '−', '×', '÷', '=', 'π', '√', '%', '²', '∑', '∞', '7', '3', '9'];
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> 60 seconds, as many problems as you can. 100 points for each right answer, plus up to 40 for speed and a combo bonus for answering right in a row. Problems get harder as you go. Press Enter to answer.</div>
     ${skillBet('math')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Right</small><b id="mr">0</b></div></div>${hsBox()}`,
-    `<div class="mq"><div class="mtimer"><i id="mt"></i></div><div class="mcombo" id="mc"></div><div class="mbig" id="mqq">Ready? ➕</div>
+    `<div class="mq chalk" id="mq"><div class="msyms" aria-hidden="true">${syms.map((ch, i) => `<i style="left:${(i * 37) % 94}%;top:${(i * 53) % 86}%;animation-delay:${-(i % 7) * 1.1}s;font-size:${22 + (i % 4) * 10}px">${ch}</i>`).join('')}</div>
+      <div class="mtimer" id="mtimer"><i id="mt"></i></div><div class="msecs" id="msecs">60</div>
+      <div class="mflame"><div class="mfbar"><i id="mfl"></i></div><span id="mc"></span></div>
+      <div class="mbig" id="mqq"><span>R</span><span>e</span><span>a</span><span>d</span><span>y</span><span>?</span></div>
       <div class="mrow"><input id="mans" inputmode="numeric" autocomplete="off" aria-label="Your answer" placeholder="?" disabled><button class="btn" id="msub" disabled>Answer ↵</button></div><div class="mfb" id="mfb"></div></div>`);
-  stopFns.push(() => clearTimeout(endT));
-  const ans = $('#mans'), sub = $('#msub'), setQ = q => { $('#mqq').textContent = q + ' = ?'; ans.value = ''; ans.focus(); };
+  stopFns.push(() => { clearTimeout(endT); clearInterval(tickT); });
+  const ans = $('#mans'), sub = $('#msub'), mq = $('#mq'), big = $('#mqq');
+  const setQ = q => { big.innerHTML = [...(q + ' = ?')].map((ch, i) => ch === ' ' ? '<s></s>' : `<span style="animation-delay:${i * 32}ms">${ch}</span>`).join(''); ans.value = ''; ans.focus(); };
+  const shake = () => { mq.classList.remove('wrong'); void mq.offsetWidth; mq.classList.add('wrong'); setTimeout(() => mq.classList.remove('wrong'), 450); };
+  function fly(text, good) { // the answer's points float up from the problem
+    const r = big.getBoundingClientRect(), e = document.createElement('i'); e.className = 'flynum ' + (good ? 'good' : 'bad'); e.textContent = text; e.style.left = r.left + r.width / 2 + 'px'; e.style.top = r.top + r.height / 2 + 'px'; document.body.appendChild(e);
+    e.animate([{ transform: 'translate(-50%,-50%) scale(.6)', opacity: 0 }, { transform: 'translate(-50%,-90%) scale(1.3)', opacity: 1, offset: .25 }, { transform: 'translate(-50%,-260%) scale(1)', opacity: 0 }], { duration: 900, easing: 'ease-out' }).onfinish = () => e.remove();
+    if (good) fx.burst(26, r.left + r.width / 2, r.top + r.height / 2);
+  }
   function finish(r) {
-    if (!st) return; st = null; clearTimeout(endT); ans.disabled = sub.disabled = true; $('#mqq').textContent = `Time! ${fmt(r.score)} pts`; lockStart(false);
+    if (!st) return; st = null; clearTimeout(endT); clearInterval(tickT); ans.disabled = sub.disabled = true; $('#mtimer').classList.remove('hot'); big.innerHTML = `<span class="done">Time! ${fmt(r.score)}</span>`; lockStart(false); sfx.play('clear');
     resMsg(true, `${r.right} right · best combo ${r.bestCombo} · ${fmt(r.score)} pts`); skillDone('math', r, r.right >= 20);
   }
   async function submit() {
@@ -1543,15 +1600,18 @@ async function math(root) {
     try {
       const r = await api('POST', '/arcade/math/answer', { answer: parseInt(v, 10) }); if (!root.isConnected || !st) return;
       if (r.done) return finish(r);
-      const fb = $('#mfb'); fb.className = 'mfb ' + (r.right ? 'good' : 'bad'); fb.textContent = r.right ? `+${r.pts}` : `✗ ${r.answer}`; r.right ? sfx.play('reveal') : sfx.play('miss'); if (r.right) fx.bump($('#mqq'));
-      countUp($('#sc'), r.score, 250); $('#mr').textContent = r.rightCount; $('#mc').textContent = r.combo >= 2 ? `🔥 combo ×${r.combo}` : ''; setQ(r.q);
+      const fb = $('#mfb'); fb.className = 'mfb ' + (r.right ? 'good' : 'bad'); fb.textContent = r.right ? `+${r.pts}` : `✗ the answer was ${r.answer}`;
+      if (r.right) { sfx.play(r.combo >= 5 ? 'streak' : 'reveal'); fly(`+${r.pts}`, true); fx.bump(big); } else { sfx.play('miss'); shake(); fly(`${r.answer}`, false); }
+      countUp($('#sc'), r.score, 250); $('#mr').textContent = r.rightCount; $('#mc').textContent = r.combo >= 2 ? `🔥 ×${r.combo}` : ''; $('#mfl').style.width = Math.min(100, r.combo * 10) + '%'; $('#mfl').classList.toggle('max', r.combo >= 10); setQ(r.q);
     } catch (e) { toast(e.message); } finally { if (st) sub.disabled = false; }
   }
   sub.onclick = submit; ans.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } };
   skillButtons(bet => act(async () => {
-    const r = await api('POST', '/arcade/math/start', { bet }); if (r.bet) setBal(r.balance); st = {}; ending = false; lockStart(true); ans.disabled = sub.disabled = false;
-    $('#sc').textContent = '0'; $('#mr').textContent = '0'; $('#mc').textContent = ''; $('#mfb').textContent = ''; $('#res').textContent = ''; setQ(r.q);
+    const r = await api('POST', '/arcade/math/start', { bet }); if (r.bet) setBal(r.balance); st = {}; ending = false; secs = r.secs; t0 = performance.now(); lockStart(true); ans.disabled = sub.disabled = false;
+    $('#sc').textContent = '0'; $('#mr').textContent = '0'; $('#mc').textContent = ''; $('#mfl').style.width = '0%'; $('#mfb').textContent = ''; $('#res').textContent = ''; setQ(r.q);
     const bar = $('#mt'); bar.style.transition = 'none'; bar.style.width = '100%'; void bar.offsetWidth; bar.style.transition = `width ${r.secs}s linear`; bar.style.width = '0%';
+    clearInterval(tickT); let lastSec = 99; tickT = setInterval(() => { if (!root.isConnected || !st) return clearInterval(tickT); const left = Math.max(0, secs - (performance.now() - t0) / 1000), sec = Math.ceil(left); $('#msecs').textContent = sec;
+      $('#mtimer').classList.toggle('hot', left <= 10); if (sec !== lastSec) { lastSec = sec; if (sec <= 5 && sec > 0) { sfx.play('tick'); mq.classList.add('buzz'); setTimeout(() => mq.classList.remove('buzz'), 180); } } }, 100);
     clearTimeout(endT); endT = setTimeout(async () => { if (!st) return; ending = true; try { finish(await api('POST', '/arcade/math/end')); } catch (e) { toast(e.message); ending = false; } }, r.secs * 1000 + 300);
   }));
   loadHS('math');
@@ -1559,33 +1619,53 @@ async function math(root) {
 
 /* Rhythm memory: Marching Band */
 const BAND_PADS = [['#1b4fd8', 'Blue'], ['#12c26a', 'Green'], ['#f5b800', 'Gold'], ['#e8ecf5', 'White']];
+const drumSvg = k => `<svg viewBox="0 0 200 190" class="drum" aria-hidden="true"><defs><linearGradient id="dsh" x1="0" x2="1"><stop offset="0" stop-color="#000" stop-opacity=".5"/><stop offset=".3" stop-color="#000" stop-opacity="0"/><stop offset=".7" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></linearGradient><linearGradient id="dhd" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#cfd6e6"/></linearGradient></defs>
+  <ellipse cx="100" cy="176" rx="70" ry="9" fill="#000" opacity=".35"/>
+  <path d="M18 76v68q0 32 82 32t82-32V76z" style="fill:var(--pc)"/><path d="M18 76v68q0 32 82 32t82-32V76z" fill="url(#dsh)"/>
+  <path d="M30 92L52 158M70 100L84 172M100 104V176M130 100L116 172M170 92L148 158" stroke="#fff" stroke-width="3.5" opacity=".55" fill="none" stroke-linecap="round"/>
+  <ellipse cx="100" cy="146" rx="82" ry="30" fill="none" stroke="#c8cfdd" stroke-width="6" clip-path="inset(50% 0 0 0)"/>
+  <ellipse cx="100" cy="76" rx="82" ry="34" fill="url(#dhd)"/><ellipse class="hl" cx="100" cy="76" rx="76" ry="30" style="fill:var(--pc)"/>
+  <ellipse cx="100" cy="76" rx="82" ry="34" fill="none" stroke="#e6eaf3" stroke-width="7"/><ellipse cx="100" cy="76" rx="82" ry="34" fill="none" stroke="#7d869c" stroke-width="1.5"/>
+  <image href="logo.svg" x="78" y="56" width="44" height="40" opacity=".92"/></svg>`;
 async function band(root) {
-  let st = null, playing = false, busy = false, tok = 0;
+  let st = null, playing = false, busy = false, tok = 0, plen = 0, done = 0;
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> watch the drums light up, then play the pattern back (click, or keys 1–4). Every round adds one beat, and the faster you go the better. Finishing a round of length n scores 50 + 30 × n.</div>
     ${skillBet('band')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Pattern</small><b id="bl">–</b></div></div>${hsBox()}`,
-    `<div class="bandgrid" id="bg">${BAND_PADS.map(([c, n], k) => `<button class="bpad" data-pad="${k}" style="--pc:${c}" disabled aria-label="${n} drum"><b>${k + 1}</b></button>`).join('')}</div><div class="bandmsg" id="bm">Press Play 🥁</div>`);
-  const pads = [...root.querySelectorAll('.bpad')], msg = t => { $('#bm').textContent = t; };
+    `<div class="bandw"><div class="bandstage" id="bstage"><div class="beams" aria-hidden="true"><i></i><i></i><i></i></div><div class="bflash" id="bfl"></div>
+      <div class="beads" id="beads" aria-label="Pattern progress"></div>
+      <div class="bandgrid" id="bg">${BAND_PADS.map(([c, n], k) => `<button class="bpad" data-pad="${k}" style="--pc:${c}" disabled aria-label="${n} drum, key ${k + 1}">${drumSvg(k)}<i class="ring"></i><i class="stk l"></i><i class="stk r"></i><b class="pn">${k + 1}</b></button>`).join('')}</div>
+      <div class="bandmsg" id="bm">Press Play 🥁</div></div></div>`);
+  const pads = [...root.querySelectorAll('.bpad')], stage = $('#bstage');
+  const msg = (t, cls = '') => { const m = $('#bm'); m.textContent = t; m.className = 'bandmsg ' + cls; void m.offsetWidth; m.classList.add('pop'); };
   stopFns.push(() => { tok++; });
-  const lit = (k, on) => pads[k].classList.toggle('lit', on);
+  const beads = n => { plen = n; $('#beads').innerHTML = Array.from({ length: n }, () => '<i></i>').join(''); };
+  const bead = (i, c) => { const b = $('#beads').children[i]; if (b) { b.style.setProperty('--bc', c); b.className = 'on'; } };
+  function sparks(k) {
+    if (calm) return; const p = pads[k], r = p.getBoundingClientRect(), c = BAND_PADS[k][0];
+    for (let i = 0; i < 9; i++) { const e = document.createElement('i'); e.className = 'spk'; e.style.background = c; p.appendChild(e); const a = Math.random() * Math.PI - Math.PI, d = 40 + Math.random() * 60;
+      e.animate([{ transform: 'translate(-50%,-50%) scale(1)', opacity: 1 }, { transform: `translate(calc(-50% + ${Math.cos(a) * d}px),calc(-50% + ${Math.sin(a) * d - 20}px)) scale(0)`, opacity: 0 }], { duration: 480 + Math.random() * 200, easing: 'ease-out' }).onfinish = () => e.remove(); }
+  }
+  const hit = k => { const p = pads[k]; p.classList.remove('lit'); void p.offsetWidth; p.classList.add('lit'); sfx.play('pad' + k); sparks(k); stage.classList.remove('beat'); void stage.offsetWidth; stage.classList.add('beat'); setTimeout(() => p.classList.remove('lit'), 170); };
   async function playback(seq) {
-    const me = ++tok; playing = true; pads.forEach(p => p.disabled = true); msg('Watch…'); await wait(calm ? 250 : 600);
+    const me = ++tok; playing = true; pads.forEach(p => p.disabled = true); beads(seq.length); done = 0; msg('Watch…', 'dim'); await wait(calm ? 250 : 650);
     const step = Math.max(240, 480 - seq.length * 14);
-    for (const k of seq) { if (me !== tok || !root.isConnected) return; lit(k, true); sfx.play('pad' + k); await wait(step * 0.7); lit(k, false); await wait(step * 0.3); }
-    if (me !== tok) return; playing = false; pads.forEach(p => p.disabled = false); msg('Your turn!');
+    for (let i = 0; i < seq.length; i++) { if (me !== tok || !root.isConnected) return; hit(seq[i]); bead(i, BAND_PADS[seq[i]][0]); await wait(step); }
+    if (me !== tok) return; playing = false; pads.forEach(p => p.disabled = false); $('#beads').querySelectorAll('i').forEach(b => b.className = ''); msg('Your turn!', 'go');
   }
   async function press(k) {
-    if (!st || playing || busy) return; busy = true; lit(k, true); sfx.play('pad' + k); setTimeout(() => lit(k, false), 160);
+    if (!st || playing || busy) return; busy = true; hit(k);
     try {
       const r = await api('POST', '/arcade/band/press', { pad: k }); if (!root.isConnected) return;
       if (!r.ok) {
-        st = null; tok++; pads.forEach(p => { p.disabled = true; }); pads[r.expected].classList.add('hint'); setTimeout(() => pads[r.expected].classList.remove('hint'), 1200); sfx.play('miss'); fx.lose();
-        msg(r.late ? 'Too slow!' : 'Wrong drum!'); lockStart(false); resMsg(true, `Pattern of ${r.length} · cleared ${r.length - 1 < 0 ? 0 : r.length - 1} rounds · ${fmt(r.score)} pts`); skillDone('band', r, r.length >= 8); return;
+        st = null; tok++; pads.forEach(p => { p.disabled = true; }); sfx.play('miss'); fx.lose(); stage.classList.remove('shake', 'redflash'); void stage.offsetWidth; stage.classList.add('shake', 'redflash'); setTimeout(() => stage.classList.remove('shake', 'redflash'), 600);
+        let n = 0; const blink = setInterval(() => { pads[r.expected].classList.toggle('hint'); if (++n > 5) { clearInterval(blink); pads[r.expected].classList.remove('hint'); } }, 220);
+        msg(r.late ? 'Too slow!' : 'Wrong drum!', 'bad'); lockStart(false); resMsg(true, `Cleared ${r.length} round${r.length === 1 ? '' : 's'} · missed a pattern of ${r.length + 1} · ${fmt(r.score)} pts`); skillDone('band', r, r.length >= 8); return;
       }
-      if (r.perfect) { st = null; msg('PERFECT!'); lockStart(false); resMsg(true, `All ${BAND_MAXC} rounds! ${fmt(r.score)} pts`); skillDone('band', r, true); return; }
-      if (r.round) { countUp($('#sc'), r.score, 300); $('#bl').textContent = r.show.length; sfx.play('reveal'); fx.bump($('#bl')); msg(`Round ${r.round} cleared!`); await wait(calm ? 200 : 700); if (root.isConnected && st) playback(r.show); }
+      if (r.perfect) { st = null; msg('PERFECT!', 'gold'); sfx.play('roar'); fx.burst(200); lockStart(false); resMsg(true, `All 20 rounds! ${fmt(r.score)} pts`); skillDone('band', r, true); return; }
+      if (r.round) { bead(plen - 1, BAND_PADS[k][0]); countUp($('#sc'), r.score, 300); $('#bl').textContent = r.show.length; sfx.play('clear'); fx.burst(24 + r.round * 4, innerWidth / 2, innerHeight / 3); fx.bump($('#bl')); msg(`Round ${r.round} cleared!`, 'gold'); if (r.round % 4 === 0) sfx.play('cheer'); await wait(calm ? 200 : 900); if (root.isConnected && st) playback(r.show); }
+      else { bead(done++, BAND_PADS[k][0]); }
     } catch (e) { toast(e.message); } finally { busy = false; }
   }
-  const BAND_MAXC = 20;
   $('#bg').onclick = e => { const b = e.target.closest('.bpad'); if (b && !b.disabled) press(+b.dataset.pad); };
   const keys = e => { if (!root.isConnected) return; if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return; const k = ['1', '2', '3', '4'].indexOf(e.key); if (k >= 0 && !e.repeat) { e.preventDefault(); if (!pads[k].disabled) press(k); } };
   document.addEventListener('keydown', keys); stopFns.push(() => document.removeEventListener('keydown', keys));
@@ -1595,59 +1675,151 @@ async function band(root) {
   loadHS('band');
 }
 
-/* Action: Hallway Dash. The server builds the hallway; we run it, then send our lane changes to be replayed and checked. */
+/* Action: Hallway Dash. A perspective hallway drawn on canvas. The server builds the hallway; we run it, then send our lane changes to be replayed and checked. */
+function rrPath(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+function dashBag(c, x, y, sz, a, b) { // a backpack standing in the hallway
+  const w = sz * .8, h = sz * .95; c.save(); c.translate(x, y);
+  c.fillStyle = '#0007'; c.beginPath(); c.ellipse(0, 0, w * .66, sz * .13, 0, 0, 7); c.fill();
+  c.strokeStyle = b; c.lineWidth = sz * .07; c.beginPath(); c.arc(0, -h, w * .17, Math.PI, 0); c.stroke();
+  const g = c.createLinearGradient(-w / 2, -h, w / 2, 0); g.addColorStop(0, a); g.addColorStop(1, b); c.fillStyle = g; rrPath(c, -w / 2, -h, w, h, sz * .2); c.fill();
+  c.fillStyle = 'rgba(0,0,0,.25)'; rrPath(c, -w * .36, -h * .56, w * .72, h * .42, sz * .1); c.fill(); c.strokeStyle = '#ffffff55'; c.lineWidth = Math.max(1, sz * .03); c.stroke();
+  c.strokeStyle = '#ffd24a'; c.lineWidth = Math.max(1.5, sz * .04); c.beginPath(); c.moveTo(-w * .2, -h * .62); c.lineTo(w * .2, -h * .62); c.stroke(); c.fillStyle = '#ffd24a'; c.beginPath(); c.arc(w * .2, -h * .62, sz * .035, 0, 7); c.fill();
+  c.fillStyle = 'rgba(255,255,255,.22)'; c.beginPath(); c.ellipse(-w * .22, -h * .8, w * .16, h * .1, -.5, 0, 7); c.fill(); c.restore();
+}
+function dashBucket(c, x, y, sz) { // mop bucket with a puddle
+  c.save(); c.translate(x, y); c.fillStyle = 'rgba(90,170,255,.45)'; c.beginPath(); c.ellipse(sz * .05, 0, sz * .62, sz * .17, 0, 0, 7); c.fill(); c.fillStyle = 'rgba(255,255,255,.35)'; c.beginPath(); c.ellipse(-sz * .1, -sz * .02, sz * .22, sz * .05, 0, 0, 7); c.fill();
+  const w = sz * .55, h = sz * .62, g = c.createLinearGradient(-w, 0, w, 0); g.addColorStop(0, '#d89a00'); g.addColorStop(.5, '#ffe14a'); g.addColorStop(1, '#c78600');
+  c.fillStyle = g; c.beginPath(); c.moveTo(-w * .62, -h); c.lineTo(w * .62, -h); c.lineTo(w * .46, 0); c.lineTo(-w * .46, 0); c.closePath(); c.fill();
+  c.fillStyle = '#7a5200'; c.beginPath(); c.ellipse(0, -h, w * .62, sz * .08, 0, 0, 7); c.fill(); c.strokeStyle = '#999'; c.lineWidth = Math.max(1.5, sz * .04); c.beginPath(); c.arc(0, -h, w * .6, Math.PI, 0); c.stroke();
+  c.fillStyle = '#e8461a'; c.fillRect(-w * .5, -h * .62, w, sz * .1); c.restore();
+}
+function dashBall(c, x, y, sz) { c.save(); c.translate(x, y); c.fillStyle = '#0007'; c.beginPath(); c.ellipse(0, 0, sz * .34, sz * .09, 0, 0, 7); c.fill(); const r = sz * .3, g = c.createRadialGradient(-r * .3, -sz * .5, r * .1, 0, -sz * .35, r * 1.1); g.addColorStop(0, '#ffb066'); g.addColorStop(1, '#c2410c');
+  c.fillStyle = g; c.beginPath(); c.arc(0, -r, r, 0, 7); c.fill(); c.strokeStyle = '#3a1000'; c.lineWidth = Math.max(1, sz * .03); c.beginPath(); c.moveTo(-r, -r); c.lineTo(r, -r); c.moveTo(0, -r * 2); c.lineTo(0, 0); c.arc(-r * 1.05, -r, r * .85, -.9, .9); c.moveTo(r * .2, -r); c.arc(r * 1.05, -r, r * .85, Math.PI - .9, Math.PI + .9); c.stroke(); c.restore(); }
+function dashMonitor(c, x, y, sz) { c.save(); c.translate(x, y); c.fillStyle = '#0007'; c.beginPath(); c.ellipse(0, 0, sz * .36, sz * .1, 0, 0, 7); c.fill();
+  c.fillStyle = '#2a2f55'; c.fillRect(-sz * .2, -sz * .42, sz * .14, sz * .42); c.fillRect(sz * .06, -sz * .42, sz * .14, sz * .42); c.fillStyle = '#111'; c.fillRect(-sz * .22, -sz * .06, sz * .18, sz * .06); c.fillRect(sz * .04, -sz * .06, sz * .18, sz * .06);
+  c.fillStyle = '#ffd24a'; rrPath(c, -sz * .3, -sz * .86, sz * .6, sz * .5, sz * .08); c.fill(); c.fillStyle = '#d6e0ff'; c.fillRect(-sz * .3, -sz * .66, sz * .6, sz * .07); c.fillRect(-sz * .3, -sz * .52, sz * .6, sz * .05);
+  c.fillStyle = '#f0c8a0'; c.beginPath(); c.arc(0, -sz * 1.0, sz * .18, 0, 7); c.fill(); c.fillStyle = '#1b2a6b'; c.beginPath(); c.arc(0, -sz * 1.04, sz * .18, Math.PI, 0); c.fill(); c.fillRect(-sz * .26, -sz * 1.05, sz * .52, sz * .05);
+  c.fillStyle = '#e8461a'; c.fillRect(-sz * .2, -sz * .72, sz * .4, sz * .02); c.restore(); }
+function dashTicket(c, x, y, sz, now, k) { c.save(); c.translate(x, y - sz * .55 - Math.sin(now / 260 + k) * sz * .06); const sx = Math.cos(now / 190 + k), glow = c.createRadialGradient(0, 0, 0, 0, 0, sz * .6); glow.addColorStop(0, 'rgba(255,214,74,.55)'); glow.addColorStop(1, 'rgba(255,214,74,0)'); c.fillStyle = glow; c.fillRect(-sz * .6, -sz * .6, sz * 1.2, sz * 1.2);
+  c.scale(Math.abs(sx) < .12 ? .12 : sx, 1); const g = c.createLinearGradient(-sz * .3, 0, sz * .3, 0); g.addColorStop(0, '#fff1a0'); g.addColorStop(.5, '#ffc542'); g.addColorStop(1, '#e09a00'); c.fillStyle = g; rrPath(c, -sz * .32, -sz * .2, sz * .64, sz * .4, sz * .06); c.fill(); c.strokeStyle = '#a86400'; c.lineWidth = Math.max(1, sz * .03); c.stroke();
+  c.fillStyle = '#7a4a00'; c.font = `900 ${Math.round(sz * .2)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('PASS', 0, 0); c.restore(); }
+function dashHawk(c, x, y, sz, phase, lean, dir, t) { // the Seahawk, seen from behind with a backpack, legs and wings pumping
+  const bob = -Math.abs(Math.sin(phase)) * sz * .05, tum = t || { rot: 0, sc: 1 };
+  c.save(); c.translate(x, y); c.rotate(lean + tum.rot); c.scale(tum.sc, tum.sc);
+  c.fillStyle = '#0007'; c.beginPath(); c.ellipse(0, 0, sz * .34, sz * .09, 0, 0, 7); c.fill();
+  for (let i = 0; i < 2; i++) { const ph = phase + i * Math.PI, lx = (i ? 1 : -1) * sz * .14, fy = -Math.max(0, Math.sin(ph)) * sz * .13;
+    c.strokeStyle = '#f5a623'; c.lineWidth = sz * .06; c.lineCap = 'round'; c.beginPath(); c.moveTo(lx, -sz * .22 + bob); c.lineTo(lx * 1.15, fy - sz * .04); c.stroke();
+    c.fillStyle = '#fff'; c.beginPath(); c.ellipse(lx * 1.15, fy - sz * .03, sz * .12, sz * .06, 0, 0, 7); c.fill(); c.fillStyle = '#1b4fd8'; c.fillRect(lx * 1.15 - sz * .12, fy - sz * .035, sz * .24, sz * .025); }
+  for (const a of [-.45, 0, .45]) { c.save(); c.translate(0, -sz * .22 + bob); c.rotate(a); c.fillStyle = a ? '#14308f' : '#0b2a6b'; c.beginPath(); c.ellipse(0, sz * .1, sz * .07, sz * .18, 0, 0, 7); c.fill(); c.restore(); }
+  const flap = Math.sin(phase * 2) * .4; for (const sd of [-1, 1]) { c.save(); c.translate(sd * sz * .27, -sz * .52 + bob); c.rotate(sd * (.5 + flap)); const g = c.createLinearGradient(0, -sz * .2, 0, sz * .3); g.addColorStop(0, '#2a5fe0'); g.addColorStop(1, '#0b2a6b'); c.fillStyle = g; c.beginPath(); c.ellipse(0, 0, sz * .11, sz * .3, 0, 0, 7); c.fill(); c.fillStyle = '#fff'; c.globalAlpha = .75; c.beginPath(); c.ellipse(0, sz * .22, sz * .05, sz * .07, 0, 0, 7); c.fill(); c.restore(); }
+  const bg = c.createLinearGradient(0, -sz * .84, 0, -sz * .2); bg.addColorStop(0, '#19e58a'); bg.addColorStop(1, '#1b4fd8'); c.fillStyle = bg; c.beginPath(); c.ellipse(0, -sz * .5 + bob, sz * .3, sz * .34, 0, 0, 7); c.fill();
+  const pg = c.createLinearGradient(0, -sz * .72, 0, -sz * .28); pg.addColorStop(0, '#ffd24a'); pg.addColorStop(1, '#e09a00'); c.fillStyle = pg; rrPath(c, -sz * .17, -sz * .72 + bob, sz * .34, sz * .42, sz * .07); c.fill(); c.strokeStyle = '#7a4a00'; c.lineWidth = Math.max(1, sz * .025); c.stroke();
+  c.beginPath(); c.moveTo(-sz * .1, -sz * .55 + bob); c.lineTo(sz * .1, -sz * .55 + bob); c.stroke(); c.strokeStyle = '#14308f'; c.lineWidth = sz * .04; c.beginPath(); c.moveTo(-sz * .17, -sz * .66 + bob); c.lineTo(-sz * .2, -sz * .4 + bob); c.moveTo(sz * .17, -sz * .66 + bob); c.lineTo(sz * .2, -sz * .4 + bob); c.stroke();
+  c.fillStyle = '#fff'; c.beginPath(); c.arc(0, -sz * .88 + bob, sz * .19, 0, 7); c.fill(); c.fillStyle = '#0b2a6b'; c.beginPath(); c.arc(0, -sz * .9 + bob, sz * .19, Math.PI * 1.03, Math.PI * 1.97); c.closePath(); c.fill();
+  c.fillStyle = '#ffc542'; c.beginPath(); c.moveTo(dir * sz * .15, -sz * .86 + bob); c.lineTo(dir * sz * .3, -sz * .81 + bob); c.lineTo(dir * sz * .15, -sz * .77 + bob); c.closePath(); c.fill();
+  c.fillStyle = '#ffd24a'; c.beginPath(); c.arc(dir * sz * .08, -sz * .86 + bob, sz * .04, 0, 7); c.fill(); c.fillStyle = '#0a0e13'; c.beginPath(); c.arc(dir * sz * .09, -sz * .86 + bob, sz * .02, 0, 7); c.fill(); c.restore();
+}
 async function dash(root) {
-  let st = null, run = null, timer = 0, img = null;
-  const W = 360, H = 520, PY = 410, RH = 62, LX = l => 60 + l * 120;
-  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> switch lanes with ← → (or A / D, or tap the left / right side of the hallway, or swipe) to dodge backpacks and buckets, and grab 🎫 hall passes. Every row you survive is 10 points and each pass is 50. It speeds up. One hit and the bell rings.</div>
+  let st = null, run = null, timer = 0;
+  const W = 400, H = 560, HY = 150, PY = 470, VX = 200, LANE = 118, FL = 190, K = 0.2, AHEAD = 18, PX = 92;
+  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> switch lanes with ← → (or A / D, or tap the left / right side of the hallway, or swipe) to dodge backpacks, buckets and the hall monitor, and grab 🎫 hall passes. Every row you survive is 10 points and each pass is 50. It speeds up. One hit and the bell rings.</div>
     ${skillBet('dash')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Passes</small><b id="ps">0</b></div></div>${hsBox()}`,
     `<div class="dashwrap"><canvas id="dcv" width="${W}" height="${H}" aria-label="Hallway Dash game"></canvas><div class="dashmsg" id="dm">Press Play 🏃</div></div>`);
-  const cv = $('#dcv'), c = cv.getContext('2d'); img = new Image(); img.src = 'hawk.svg';
+  const cv = $('#dcv'), c = cv.getContext('2d');
   const msg = t => { const m = $('#dm'); m.textContent = t; m.classList.toggle('hidden', !t); };
   stopFns.push(() => { clearTimeout(timer); run = null; });
-  function draw(rowPos, lane, laneX, crashed) {
-    c.clearRect(0, 0, W, H); const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#0d1b46'); g.addColorStop(1, '#1b2f73'); c.fillStyle = g; c.fillRect(0, 0, W, H);
-    c.fillStyle = '#0a1233'; c.fillRect(0, 0, 24, H); c.fillRect(W - 24, 0, 24, H); // lockers
-    const off = (rowPos % 1) * RH; c.fillStyle = '#2b4aa8'; for (let y = -RH + off; y < H; y += RH) { c.fillRect(2, y, 20, RH - 6); c.fillRect(W - 22, y, 20, RH - 6); }
-    c.strokeStyle = '#ffffff22'; c.lineWidth = 2; c.setLineDash([14, 14]); c.lineDashOffset = -off; for (const x of [120, 240]) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke(); } c.setLineDash([]);
-    c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = '38px sans-serif';
-    const r0 = Math.floor(rowPos) - 2, r1 = Math.ceil(rowPos + (PY + 40) / RH);
-    for (let r = Math.max(0, r0); r <= r1; r++) { const row = run.rows[r]; if (!row) continue; const y = PY - (r - rowPos) * RH; if (y < -40 || y > H + 40) continue;
-      for (let l = 0; l < 3; l++) { if (row[0] >> l & 1) c.fillText((r * 7 + l) % 3 ? '🎒' : '🪣', LX(l), y); else if (row[1] === l) c.fillText('🎫', LX(l), y); } }
-    const sz = 62; if (img.complete) { c.save(); c.translate(laneX, PY); if (crashed) { c.rotate(0.6); c.globalAlpha = .85; } c.drawImage(img, -sz / 2, -sz * 0.62, sz, sz); c.restore(); } else c.fillText('🦅', laneX, PY);
-    if (crashed) { c.font = '56px sans-serif'; c.fillText('💥', laneX, PY - 30); }
+  const S = d => 1 / (1 + d * K), P = (x, s, h) => [VX + x * s, HY + (PY - HY - h) * s], LX = (l, s = 1) => VX + (l - 1) * LANE * s;
+  const poly = (pts, fill) => { c.fillStyle = fill; c.beginPath(); pts.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); c.fill(); };
+  const wall = (sd, s1, s2, h1, h2, fill) => poly([P(sd * FL, s1, h1), P(sd * FL, s2, h1), P(sd * FL, s2, h2), P(sd * FL, s1, h2)], fill);
+  function scene(rp, now, crashed, tum) {
+    c.save(); if (run.shakeUntil > now) c.translate((Math.random() - .5) * run.amp, (Math.random() - .5) * run.amp);
+    c.fillStyle = '#0a1233'; c.fillRect(-20, -20, W + 40, H + 40);
+    const sf = S(AHEAD), sn = S(-1.5), cg = c.createLinearGradient(0, 0, 0, HY + 60); cg.addColorStop(0, '#0a1233'); cg.addColorStop(1, '#1a2a66');
+    poly([P(-FL, sf, 580), P(FL, sf, 580), P(FL, sn, 580), P(-FL, sn, 580)], cg);
+    const fg = c.createLinearGradient(0, P(0, sf, 0)[1], 0, H); fg.addColorStop(0, '#2d4694'); fg.addColorStop(1, '#1d3274'); poly([P(-FL, sf, 0), P(FL, sf, 0), P(FL, sn, 0), P(-FL, sn, 0)], fg);
+    // the door at the end of the hall
+    poly([P(-FL, sf, 0), P(FL, sf, 0), P(FL, sf, 580), P(-FL, sf, 580)], '#16246a');
+    const dg = c.createLinearGradient(0, P(0, sf, 300)[1], 0, P(0, sf, 0)[1]); dg.addColorStop(0, '#fff3b0'); dg.addColorStop(1, '#ffb21a'); poly([P(-70, sf, 0), P(70, sf, 0), P(70, sf, 290), P(-70, sf, 290)], dg);
+    c.fillStyle = '#7a4a00'; c.font = '900 9px system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('CLASS', VX, P(0, sf, 250)[1]);
+    const r0 = Math.floor(rp) - 1, r1 = Math.floor(rp) + AHEAD;
+    for (let r = r1; r >= r0; r--) {
+      const d1 = r - rp, s1 = S(d1), s2 = S(d1 + 1), par = r & 1;
+      poly([P(-FL, s2, 0), P(FL, s2, 0), P(FL, s1, 0), P(-FL, s1, 0)], par ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.08)');
+      if (!par) for (const x of [-59, 59]) poly([P(x - 2, s2, 0), P(x + 2, s2, 0), P(x + 2, s1, 0), P(x - 2, s1, 0)], 'rgba(255,255,255,.22)');
+      for (const sd of [-1, 1]) {
+        wall(sd, s1, s2, 0, 28, '#0a1233'); wall(sd, s1, s2, 28, 300, par ? '#2850c4' : '#2f5bd8'); wall(sd, s1, s2, 300, 580, '#18276a');
+        const a = S(d1 + .1), b = S(d1 + .9); wall(sd, a, b, 44, 286, par ? '#3563e0' : '#3c6cf0'); wall(sd, a, b, 236, 244, '#1b3a9a'); wall(sd, a, b, 252, 258, '#1b3a9a'); wall(sd, a, b, 268, 274, '#1b3a9a'); wall(sd, S(d1 + .78), S(d1 + .84), 150, 190, '#ffd24a');
+        if (r % 5 === 2) wall(sd, S(d1 + .15), S(d1 + .85), 360, 470, ['#ff7a8a', '#19e58a', '#ffc542'][(r + (sd > 0 ? 1 : 0)) % 3]);
+      }
+      if (r % 3 === 0) poly([P(-58, S(d1 + .25), 578), P(58, S(d1 + .25), 578), P(58, S(d1 + .75), 578), P(-58, S(d1 + .75), 578)], 'rgba(255,255,235,.9)');
+    }
+    const fog = c.createLinearGradient(0, P(0, sf, 580)[1] - 10, 0, P(0, sf, 0)[1] + 80); fog.addColorStop(0, 'rgba(10,18,51,.55)'); fog.addColorStop(1, 'rgba(10,18,51,0)'); c.fillStyle = fog; c.fillRect(0, 0, W, P(0, sf, 0)[1] + 80);
+    for (let r = r1; r >= Math.floor(rp) - 1; r--) { // objects, far to near
+      const d = r - rp; if (d < -1.2 || d > AHEAD - .5) continue; const row = run.rows[r]; if (!row) continue; const s = S(d), sz = 100 * s, y = P(0, s, 0)[1]; c.globalAlpha = Math.min(1, (AHEAD - 1 - d) / 4);
+      for (let l = 0; l < 3; l++) { const x = LX(l, s);
+        if (row[0] >> l & 1) { const h = (r * 7 + l * 13) % 11; if (h < 4) dashBag(c, x, y, sz, '#ff5a6e', '#a3182e'); else if (h < 7) dashBag(c, x, y, sz, '#3d8bff', '#16379a'); else if (h < 9) dashBucket(c, x, y, sz); else if (h < 10) dashBall(c, x, y, sz); else dashMonitor(c, x, y, sz); }
+        else if (row[1] === l && !(run.got && run.got.has(r))) dashTicket(c, x, y, sz, now, r); }
+      c.globalAlpha = 1;
+    }
+    for (const p of run.parts) { c.globalAlpha = Math.max(0, p.life / p.max); c.fillStyle = p.col; c.beginPath(); c.arc(p.x, p.y, p.r, 0, 7); c.fill(); } c.globalAlpha = 1;
+    const sp = Math.min(2.3, 340 / dashTickAt(Math.max(0, Math.floor(rp)))), lean = Math.max(-1, Math.min(1, (run.target - run.laneX) / 70)) * .3;
+    dashHawk(c, run.laneX, PY, PX, now / 1000 * 9 * sp, lean, run.dir, tum);
+    if (!crashed || tum) { // speed lines
+      const a = Math.max(0, sp - 1.05) * .22; if (a > 0) { c.strokeStyle = `rgba(255,255,255,${Math.min(.35, a)})`; c.lineWidth = 2; for (let i = 0; i < 14; i++) { const ang = i * 2.399 + .3, dd = ((now * .55 * sp + i * 91) % 300) + 90; c.beginPath(); c.moveTo(VX + Math.cos(ang) * dd * .8, 220 + Math.sin(ang) * dd * .9); c.lineTo(VX + Math.cos(ang) * (dd + 34), 220 + Math.sin(ang) * (dd + 34) * 1.1); c.stroke(); } } }
+    const vg = c.createRadialGradient(VX, H * .5, H * .3, VX, H * .5, H * .75); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,10,.5)'); c.fillStyle = vg; c.fillRect(0, 0, W, H);
+    const pr = Math.min(1, rp / run.max); c.fillStyle = 'rgba(5,8,16,.7)'; rrPath(c, 60, 10, 280, 14, 7); c.fill(); const pg = c.createLinearGradient(60, 0, 340, 0); pg.addColorStop(0, '#19e58a'); pg.addColorStop(1, '#ffc542'); c.fillStyle = pg; if (pr > 0) { rrPath(c, 60, 10, Math.max(14, 280 * pr), 14, 7); c.fill(); }
+    c.font = '16px system-ui'; c.textAlign = 'center'; c.fillText('🎓', 352, 18); c.fillText('🏠', 46, 18); c.font = '900 13px system-ui'; c.fillStyle = '#fff'; c.textAlign = 'left'; c.fillText(`×${sp.toFixed(1)}`, 12, 546);
+    if (run.chain >= 2) { c.textAlign = 'right'; c.fillStyle = '#ffd24a'; c.font = '900 20px system-ui'; c.fillText(`🎫 ×${run.chain}`, W - 12, 546); }
+    if (run.pop && now - run.pop.t0 < 800) { const k = (now - run.pop.t0) / 800; c.save(); c.globalAlpha = 1 - k * k; c.translate(VX, 215 - k * 30); c.scale(.7 + Math.min(1, k * 4) * .5, .7 + Math.min(1, k * 4) * .5); c.font = '900 34px system-ui'; c.textAlign = 'center'; c.lineWidth = 6; c.strokeStyle = 'rgba(0,0,0,.6)'; c.strokeText(run.pop.text, 0, 0); c.fillStyle = run.pop.col; c.fillText(run.pop.text, 0, 0); c.restore(); }
+    c.restore();
   }
+  const dashTickAt = r => run.tick[Math.min(r, run.tick.length - 1)];
   const cum = t => { const a = [0]; t.forEach(x => a.push(a[a.length - 1] + x)); return a; };
   function rowPosAt(el) { const T = run.tick, C = run.cum; let lo = 0, hi = T.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (C[mid] <= el) lo = mid; else hi = mid - 1; } return lo + Math.min(1, (el - C[lo]) / T[lo]); }
-  function turn(d) { if (!run || run.over) return; run.queued = d; }
+  const popup = (text, col) => { run.pop = { text, col, t0: performance.now() }; };
+  const puff = (n, x, y, col, spd = 1) => { for (let i = 0; i < n; i++) run.parts.push({ x: x + (Math.random() - .5) * 20, y, vx: (Math.random() - .5) * 2.2 * spd, vy: -Math.random() * 2.5 * spd - .5, r: 2 + Math.random() * 3, life: 26 + Math.random() * 14, max: 40, col }); };
+  function turn(d) { if (!run || run.over || !run.t0) return; run.queued = d; }
   async function more() { if (run.fetching || run.rows.length > run.max) return; run.fetching = true; try { const r = await api('POST', '/arcade/dash/rows', { from: run.rows.length }); if (run) run.rows.push(...r.rows); } catch (e) {} finally { if (run) run.fetching = false; } }
-  async function over(crashed, dist) {
-    run.over = true; clearTimeout(timer); const moves = run.moves; draw(run.pos, run.lane, LX(run.lane), crashed); if (crashed) { sfx.play('miss'); fx.lose(); } else sfx.play('pb');
-    msg(crashed ? '💥 Ouch! Tardy slip.' : '🎓 You made it to class!'); await wait(calm ? 300 : 700); if (!root.isConnected) return;
+  async function over(crashed, why) {
+    run.over = true; clearTimeout(timer); const moves = run.moves; run.shakeUntil = performance.now() + 700; run.amp = crashed ? 18 : 0;
+    if (crashed) { sfx.play('crash'); fx.lose(); puff(26, run.laneX, PY - 40, '#ffd24a', 2.2); msg(why === 'bag' ? '💥 Ouch! Tardy slip.' : '💥 Ouch!'); } else { sfx.play('roar'); fx.burst(160); msg('🎓 You made it to class!'); }
+    const t0 = performance.now(), rp = run.pos;
+    await new Promise(done => { const step = () => { if (!root.isConnected || !run) return done(); const k = Math.min(1, (performance.now() - t0) / (calm ? 100 : 750)); run.parts.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += .12; p.life--; }); run.parts = run.parts.filter(p => p.life > 0);
+      scene(rp, performance.now(), true, crashed ? { rot: k * 4.2, sc: 1 - k * .25 } : null); k < 1 ? setTimeout(step, 16) : done(); }; step(); });
+    if (!root.isConnected) return;
     try { const r = await api('POST', '/arcade/dash/end', { moves }); st = null; run = null; lockStart(false); resMsg(true, `${r.rows} rows · ${r.passes} passes · ${fmt(r.score)} pts`); msg(`${fmt(r.score)} pts`); skillDone('dash', r, r.score >= 1200); }
     catch (e) { toast(e.message); st = null; run = null; lockStart(false); }
   }
+  const setScore = (el, v) => { const t = fmt(v); if (el && el.textContent !== t) el.textContent = t; };
+  let last = 0;
   function tickLoop() {
-    if (!run || run.over || !root.isConnected) return; const el = performance.now() - run.t0, rp = rowPosAt(el); run.pos = rp;
-    if (run.queued) { const nr = Math.floor(rp) + 1, nl = run.lane + run.queued; if (nl >= 0 && nl <= 2 && nr > run.lastRow) { run.moves.push({ row: nr, lane: nl }); run.lastRow = nr; run.next = nl; sfx.play('tap'); } run.queued = 0; }
-    while (run.checked + 1 <= rp) { // evaluate each row as it reaches the player; a lane change takes effect from its row on
-      run.checked++; const r = run.checked; const mv = run.moves.find(m => m.row === r); if (mv) run.lane = mv.lane;
-      if (r > run.max) return over(false, r - 1); const row = run.rows[r]; if (!row) break;
-      if (row[0] >> run.lane & 1) return over(true, r); if (row[1] === run.lane) { run.passes++; sfx.play('coin'); }
+    if (!run || run.over || !root.isConnected) return; const now = performance.now(), el = now - run.t0, rp = rowPosAt(el); run.pos = rp; const dt = Math.min(50, now - last) / 16; last = now;
+    if (run.queued) { const nr = Math.floor(rp) + 1, nl = run.lane + run.queued; if (nl >= 0 && nl <= 2 && nr > run.lastRow) { run.moves.push({ row: nr, lane: nl }); run.lastRow = nr; run.from = run.lane; run.next = nl; run.dir = run.queued; sfx.play('whoosh'); } run.queued = 0; }
+    while (run.checked + 1 <= rp) {
+      run.checked++; const r = run.checked, mv = run.moves.find(m => m.row === r); if (mv) run.lane = mv.lane;
+      if (r > run.max) return over(false); const row = run.rows[r]; if (!row) break;
+      if (row[0] >> run.lane & 1) return over(true, ((r * 7 + run.lane * 13) % 11) < 7 ? 'bag' : 'other');
+      if (mv && row[0] >> run.from & 1) { popup('NEAR MISS!', '#ffd24a'); sfx.play('near'); run.shakeUntil = now + 160; run.amp = 5; }
+      if (row[1] === run.lane) { run.passes++; run.chain++; run.sinceGot = 0; (run.got ||= new Set()).add(r); sfx.play('coin'); puff(10, run.laneX, PY - 50, '#ffd24a', 1.3); if (run.chain >= 3) popup(`PASS ×${run.chain}!`, '#19e58a'); } else if (++run.sinceGot > 14) run.chain = 0;
     }
-    run.laneX += (LX(run.next ?? run.lane) - run.laneX) * 0.35; draw(rp, run.lane, run.laneX, false);
-    countUp0($('#sc'), Math.floor(rp) * 10 + run.passes * 50); $('#ps').textContent = run.passes; if (rp > run.rows.length - 60) more();
+    run.target = LX(run.next ?? run.lane); run.laneX += (run.target - run.laneX) * Math.min(1, .3 * dt);
+    if (now - run.lastPuff > 70) { run.lastPuff = now; puff(1, run.laneX, PY - 2, 'rgba(210,220,255,.6)', .6); }
+    run.parts.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += .1 * dt; p.life -= dt; }); run.parts = run.parts.filter(p => p.life > 0);
+    scene(rp, now, false, null); setScore($('#sc'), Math.floor(rp) * 10 + run.passes * 50); $('#ps').textContent = run.passes; if (rp > run.rows.length - 60) more();
     timer = setTimeout(tickLoop, 16);
   }
-  const countUp0 = (el, v) => { if (el && el.textContent !== fmt(v)) el.textContent = fmt(v); };
   const keys = e => { if (!root.isConnected) return; const k = e.key.toLowerCase(); if (k === 'arrowleft' || k === 'a') { e.preventDefault(); turn(-1); } else if (k === 'arrowright' || k === 'd') { e.preventDefault(); turn(1); } };
   document.addEventListener('keydown', keys); stopFns.push(() => document.removeEventListener('keydown', keys));
   let sx = 0; cv.addEventListener('pointerdown', e => { sx = e.clientX; }); cv.addEventListener('pointerup', e => { const dx = e.clientX - sx, r = cv.getBoundingClientRect(); turn(Math.abs(dx) > 24 ? Math.sign(dx) : e.clientX < r.left + r.width / 2 ? -1 : 1); });
+  // idle picture before the first run
+  run = { rows: Array.from({ length: 40 }, (_, i) => [0, -1]), tick: Array(60).fill(340), max: 400, laneX: LX(1), target: LX(1), dir: 1, parts: [], pos: 0, chain: 0, shakeUntil: 0, amp: 0 }; run.cum = cum(run.tick); scene(0, performance.now(), true, null); const idle = run; run = null;
+  const drawIdle = () => { if (run || !root.isConnected) return; const saved = run; run = idle; scene(0.0, performance.now(), true, null); run = saved; };
+  setTimeout(drawIdle, 60);
   skillButtons(bet => act(async () => {
     const r = await api('POST', '/arcade/dash/start', { bet }); if (r.bet) setBal(r.balance); st = {}; lockStart(true); $('#sc').textContent = '0'; $('#ps').textContent = '0'; $('#res').textContent = '';
-    run = { rows: r.rows, tick: r.tick, cum: cum(r.tick), max: r.max, moves: [], lane: 1, next: 1, laneX: LX(1), lastRow: -1, checked: -1, passes: 0, pos: 0, queued: 0, over: false };
-    draw(0, 1, LX(1), false); for (const n of [3, 2, 1]) { msg(String(n)); sfx.play('tap'); await wait(calm ? 200 : 650); if (!root.isConnected || !run) return; } msg('GO!'); setTimeout(() => { if (run && !run.over) msg(''); }, 500);
-    run.t0 = performance.now(); tickLoop();
+    run = { rows: r.rows, tick: r.tick, cum: cum(r.tick), max: r.max, moves: [], lane: 1, next: 1, from: 1, dir: 1, laneX: LX(1), target: LX(1), lastRow: -1, checked: -1, passes: 0, chain: 0, sinceGot: 0, pos: 0, queued: 0, over: false, parts: [], lastPuff: 0, shakeUntil: 0, amp: 0, pop: null, t0: 0, got: new Set() };
+    scene(0, performance.now(), false, null); for (const n of [3, 2, 1]) { msg(String(n)); sfx.play('tick'); await wait(calm ? 200 : 650); if (!root.isConnected || !run) return; } msg('GO!'); sfx.play('whoosh'); setTimeout(() => { if (run && !run.over) msg(''); }, 500);
+    run.t0 = performance.now(); last = run.t0; tickLoop();
   }));
   loadHS('dash');
 }
