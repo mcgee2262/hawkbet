@@ -633,6 +633,7 @@ Object.assign(arcade, {
 const TSCALE = Number(process.env.SKILL_TIME_SCALE) || 1; // tests shrink the clocks
 // Free Throw Line: a meter sweeps back and forth; tap when it is inside the green zone. The server runs the meter clock.
 const HOOPS_SHOTS = 10, hoopsPeriod = i => Math.round(1700 - 55 * i), hoopsZone = streak => Math.max(0.07, 0.17 - 0.012 * streak), HOOPS_STALL_MS = 9000;
+const HOOPS_TOP = 0.97, hoopsCenter = zone => HOOPS_TOP - zone; // the green window sits at the top of the meter, like NBA 2K
 const meterPos = (el, period) => { const ph = (el % period) / period; return ph < 0.5 ? ph * 2 : 2 - ph * 2; };
 // Mental Math Sprint: 60 seconds, problems get harder as you go
 const MATH_SECS = 60 * TSCALE, MATH_GRACE_MS = 1500;
@@ -647,41 +648,48 @@ function mathQuestion(i) {
 const mathPoints = (secs, combo) => 100 + Math.max(0, 40 - Math.floor(secs * 8)) + Math.min(combo, 10) * 5;
 // Marching Band: repeat the drum pattern, one beat longer every round
 const BAND_MAX = 20, BAND_STEP_MS = 4500, bandRound = n => 50 + 30 * n;
-// Hallway Dash: dodge backpacks in 3 lanes. The server builds the hallway, replays your lane changes and checks the clock.
-const DASH_MAX = 400, DASH_CHUNK = 120, dashTick = i => Math.max(150, Math.round(340 - 2.5 * i));
+// Hallway Dash: 3 lanes. Rows are [blockedMask, passLane, lowMask, highMask, power]. Full blocks need a lane change, low hurdles need a jump,
+// high signs need a slide. Power-ups: magnet (pulls in nearby passes) and shield (saves you from one hit). The server replays your moves.
+const DASH_MAX = 400, DASH_CHUNK = 120, DASH_AIR = 2, DASH_ACT_GAP = 3, DASH_MAGNET = 12, dashTick = i => Math.max(150, Math.round(340 - 2.5 * i));
 const dashTimeAt = r => { let t = 0; for (let i = 0; i < r; i++) t += dashTick(i); return t * TSCALE; };
 const dashRowAt = el => { let r = 0, t = 0; while (r < DASH_MAX + 1 && t + dashTick(r) * TSCALE <= el) t += dashTick(r++) * TSCALE; return r; };
-function dashRows(seed) { // [blockedMask, passLane] per row; a safe path always exists (it shifts at most one lane per row)
-  const rnd = mulberry(seed), rows = []; let p = 1;
+function dashRows(seed) { // a safe path always exists: it shifts at most one lane per row, and hurdles on it are spaced so you can jump or slide in time
+  const rnd = mulberry(seed), rows = []; let p = 1, lastAct = -9;
   for (let r = 0; r <= DASH_MAX; r++) {
-    if (r < 5) { rows.push([0, -1]); continue; }
+    if (r < 5) { rows.push([0, -1, 0, 0, -1]); continue; }
     const k = rnd(); p = Math.min(2, Math.max(0, p + (k < 0.22 ? -1 : k > 0.78 ? 1 : 0)));
-    const q = Math.min(0.65, 0.25 + r * 0.004); let mask = 0; for (let l = 0; l < 3; l++) if (l !== p && rnd() < q) mask |= 1 << l;
-    let pass = -1; if (rnd() < 0.24) { const free = [0, 1, 2].filter(l => !(mask >> l & 1)); pass = free[Math.floor(rnd() * free.length)]; }
-    rows.push([mask, pass]);
+    const q = Math.min(0.62, 0.22 + r * 0.004); let mask = 0, low = 0, high = 0; for (let l = 0; l < 3; l++) if (l !== p && rnd() < q) mask |= 1 << l;
+    if (r >= 8 && r - lastAct >= 4 && rnd() < 0.3) { if (rnd() < 0.5) low |= 1 << p; else high |= 1 << p; lastAct = r; }
+    for (let l = 0; l < 3; l++) if (l !== p && !(mask >> l & 1) && rnd() < 0.1) { if (rnd() < 0.5) low |= 1 << l; else high |= 1 << l; }
+    const free = [0, 1, 2].filter(l => !(mask >> l & 1) && !(low >> l & 1) && !(high >> l & 1));
+    let pass = -1; if (free.length && rnd() < 0.26) pass = free[Math.floor(rnd() * free.length)];
+    let power = -1; if (r >= 12 && free.length && rnd() < 0.035) power = free[Math.floor(rnd() * free.length)] * 10 + (rnd() < 0.5 ? 1 : 2);
+    rows.push([mask, pass, low, high, power]);
   }
   return rows;
 }
-function dashReplay(rows, moves) { // -> { dist, passes, crashed }
-  let lane = 1, mi = 0, passes = 0;
+function dashReplay(rows, moves, acts) { // -> { dist, passes, powers, shieldUsed, crashed }
+  let lane = 1, mi = 0, passes = 0, powers = 0, shield = 0, shieldUsed = 0, magnet = -1;
   for (let r = 0; r <= DASH_MAX; r++) {
     while (mi < moves.length && moves[mi].row <= r) lane = moves[mi++].lane;
-    const [mask, pass] = rows[r];
-    if (mask >> lane & 1) return { dist: r, passes, crashed: true };
-    if (pass === lane) passes++;
+    const air = acts.some(a => a.kind === 'j' && a.row <= r && r < a.row + DASH_AIR), slide = acts.some(a => a.kind === 's' && a.row <= r && r < a.row + DASH_AIR);
+    const [mask, pass, low, high, power] = rows[r];
+    if ((mask >> lane & 1) || ((low >> lane & 1) && !air) || ((high >> lane & 1) && !slide)) { if (shield) { shield = 0; shieldUsed++; } else return { dist: r, passes, powers, shieldUsed, crashed: true }; }
+    if (pass >= 0 && (pass === lane || (magnet >= r && Math.abs(pass - lane) <= 1))) passes++;
+    if (power >= 0 && Math.floor(power / 10) === lane) { powers++; if (power % 10 === 1) magnet = r + DASH_MAGNET; else shield = 1; }
   }
-  return { dist: DASH_MAX, passes, crashed: false };
+  return { dist: DASH_MAX, passes, powers, shieldUsed, crashed: false };
 }
 Object.assign(arcade, {
-  hoopsStart: ctx => tx(() => { const s = { i: 0, score: 0, makes: 0, perfects: 0, streak: 0, s0: now(), shots: [] }; return { ...skillStart(ctx, 'hoops', s), shots: HOOPS_SHOTS, period: hoopsPeriod(0), zone: hoopsZone(0) }; }),
+  hoopsStart: ctx => tx(() => { const s = { i: 0, score: 0, makes: 0, perfects: 0, streak: 0, s0: now(), shots: [] }; return { ...skillStart(ctx, 'hoops', s), shots: HOOPS_SHOTS, period: hoopsPeriod(0), zone: hoopsZone(0), center: hoopsCenter(hoopsZone(0)) }; }),
   hoopsShoot: ctx => tx(() => {
     const { r, st } = live(ctx, 'hoops'), el = now() - st.s0, period = hoopsPeriod(st.i), zone = hoopsZone(st.streak);
-    const stalled = el > HOOPS_STALL_MS, pos = meterPos(el, period), off = Math.abs(pos - 0.5), hit = !stalled && off <= zone, perfect = hit && off <= zone / 3;
+    const stalled = el > HOOPS_STALL_MS, pos = meterPos(el, period), off = Math.abs(pos - hoopsCenter(zone)), hit = !stalled && off <= zone, perfect = hit && off <= zone / 3;
     const pts = !hit ? 0 : (perfect ? 150 : 100) + Math.min(100, 25 * st.streak);
     st.streak = hit ? st.streak + 1 : 0; st.makes += hit ? 1 : 0; st.perfects += perfect ? 1 : 0; st.score += pts; st.i++; st.shots.push(hit ? (perfect ? 2 : 1) : 0);
-    const out = { hit, perfect, pts, pos, stalled, score: st.score, shot: st.i, streak: st.streak, makes: st.makes };
+    const out = { hit, perfect, pts, pos, center: hoopsCenter(zone), zone, stalled, score: st.score, shot: st.i, streak: st.streak, makes: st.makes };
     if (st.i >= HOOPS_SHOTS) return { ...out, ...skillFinish(ctx, r, st, st.score, { makes: st.makes, perfects: st.perfects }) };
-    st.s0 = now(); save(r, st); return { ...out, period: hoopsPeriod(st.i), zone: hoopsZone(st.streak) };
+    st.s0 = now(); save(r, st); return { ...out, period: hoopsPeriod(st.i), zone: hoopsZone(st.streak), nextCenter: hoopsCenter(hoopsZone(st.streak)) };
   }),
   mathStart: ctx => tx(() => {
     const q = mathQuestion(0), st = { t0: now(), i: 0, score: 0, right: 0, combo: 0, bestCombo: 0, ans: q.ans, asked: now() };
@@ -725,14 +733,15 @@ Object.assign(arcade, {
     return { from, rows: dashRows(st.seed).slice(from, from + DASH_CHUNK) };
   },
   dashEnd: ctx => tx(() => {
-    const { r, st } = live(ctx, 'dash'), moves = ctx.body.moves;
-    if (!Array.isArray(moves) || moves.length > 500) bad('Bad moves');
+    const { r, st } = live(ctx, 'dash'), moves = ctx.body.moves, acts = ctx.body.acts || [];
+    if (!Array.isArray(moves) || moves.length > 500 || !Array.isArray(acts) || acts.length > 200) bad('Bad moves');
     let prevRow = -1, prevLane = 1;
     for (const m of moves) { if (!m || !Number.isInteger(m.row) || !Number.isInteger(m.lane) || m.row <= prevRow || m.row > DASH_MAX || m.lane < 0 || m.lane > 2 || Math.abs(m.lane - prevLane) !== 1) bad('Those moves are not possible'); prevRow = m.row; prevLane = m.lane; }
-    const res = dashReplay(dashRows(st.seed), moves);
+    let prevAct = -99; for (const a of acts) { if (!a || !Number.isInteger(a.row) || (a.kind !== 'j' && a.kind !== 's') || a.row < 0 || a.row > DASH_MAX || a.row < prevAct + DASH_AIR + (DASH_ACT_GAP - DASH_AIR)) bad('Those jumps are not possible'); prevAct = a.row; }
+    const res = dashReplay(dashRows(st.seed), moves, acts);
     if (now() - st.t0 < dashTimeAt(res.dist) - 800 * TSCALE) bad('Too fast: that run is not possible yet');
-    const score = res.dist * 10 + res.passes * 50 + (res.crashed ? 0 : 500);
-    return skillFinish(ctx, r, st, score, { rows: res.dist, passes: res.passes, crashed: res.crashed });
+    const checkpoints = Math.min(3, Math.floor(res.dist / 100)), score = res.dist * 10 + res.passes * 50 + checkpoints * 100 + (res.crashed ? 0 : 500);
+    return skillFinish(ctx, r, st, score, { rows: res.dist, passes: res.passes, crashed: res.crashed, checkpoints, powers: res.powers });
   }),
 });
 

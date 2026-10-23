@@ -338,14 +338,15 @@ test('admin tools: players, money for one or everyone, balance, shop prices and 
 });
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-test('Free Throw Line: the server runs the meter clock, scores makes, and stops after 10 shots', async () => {
+test('Free Throw Line: the server runs the meter clock, the green window is at the top, 10 shots end the game', async () => {
   const api = await newUser('hoopster'), s = await api('POST', '/arcade/hoops/start', { bet: 0 });
-  assert.equal(s.shots, 10); assert.ok(s.zone > 0.1);
-  let r = await api('POST', '/arcade/hoops/shoot'); assert.equal(r.hit, false, 'shooting at once (meter at the end) misses'); assert.equal(r.pts, 0);
-  // the meter starts at one end, so the middle of the green zone is a quarter of the way round
-  let period = r.period, makes = 0;
-  for (let i = 1; i < 10; i++) { await sleep(period / 4); r = await api('POST', '/arcade/hoops/shoot'); period = r.period; makes += r.hit ? 1 : 0; }
-  assert.ok(r.done, 'game ends after 10 shots'); assert.ok(makes >= 3, `timed shots at mid-meter should often go in (${makes}/9)`); // the green zone shrinks to +-40ms late in a game, so a slow moment on a busy machine can miss assert.equal(r.score, (await api('GET', '/arcade/highscores?game=hoops')).top[0].best);
+  assert.equal(s.shots, 10); assert.ok(s.zone > 0.1); assert.ok(Math.abs(s.center - (0.97 - s.zone)) < 1e-9, 'green window sits at the top of the meter');
+  let r = await api('POST', '/arcade/hoops/shoot'); assert.equal(r.hit, false, 'shooting at once (meter empty) misses'); assert.equal(r.pts, 0);
+  let period = r.period, zone = r.zone, makes = 0;
+  // the meter rises from one end, so the green window (near the top) is reached at center * period / 2
+  for (let i = 1; i < 10; i++) { await sleep(((0.97 - zone) * period) / 2); r = await api('POST', '/arcade/hoops/shoot'); period = r.period; zone = r.zone; makes += r.hit ? 1 : 0; }
+  assert.ok(r.done, 'game ends after 10 shots'); assert.ok(makes >= 3, `timed shots at the green window should often go in (${makes}/9)`); // the window shrinks to +-40ms late in a game, so a slow moment on a busy machine can miss
+  assert.equal(r.score, (await api('GET', '/arcade/highscores?game=hoops')).top[0].best);
   assert.equal((await api('POST', '/arcade/hoops/shoot')).status, 409, 'no shots after the game');
 });
 
@@ -368,17 +369,24 @@ test('Marching Band: the pattern grows one beat per round, wrong pads end the ga
   r = await api('POST', '/arcade/band/press', { pad: (seq[0] + 1) % 4 }); assert.equal(r.ok, false); assert.equal(r.done, true); assert.equal(r.score, 80 + 110 + 140); assert.equal(r.length, 3, 'length = rounds completed');
 });
 
-test('Hallway Dash: the server builds the hallway and replays your moves; impossible runs are rejected', async () => {
+test('Hallway Dash: server builds the hallway, replays moves, jumps and slides; impossible runs are rejected', async () => {
   const api = await newUser('runner'), s = await api('POST', '/arcade/dash/start', { bet: 0 });
-  assert.equal(s.rows.length, 120); assert.ok(s.rows.slice(0, 5).every(r => r[0] === 0 && r[1] === -1), 'a free stretch to start');
+  assert.equal(s.rows.length, 120); assert.ok(s.rows.slice(0, 5).every(r => r[0] === 0 && r[1] === -1 && r[2] === 0 && r[3] === 0 && r[4] === -1), 'a free stretch to start');
+  assert.ok(s.rows.every(r => r.length === 5), 'rows are [blocked, pass, low, high, power]');
   assert.equal((await api('POST', '/arcade/dash/rows', { from: 390 })).status, 400, 'cannot peek far ahead of the clock');
   assert.equal((await api('POST', '/arcade/dash/end', { moves: [{ row: 5, lane: 1 }] })).status, 400, 'moves must change lane by one');
   assert.equal((await api('POST', '/arcade/dash/end', { moves: [{ row: 9, lane: 0 }, { row: 8, lane: 1 }] })).status, 400, 'rows must increase');
-  // standing still in the middle lane: the first blocked middle-lane row is where the run ends
-  const crash = s.rows.findIndex(r => r[0] & 2), early = await api('POST', '/arcade/dash/end', { moves: [] });
-  if (early.status === 400) { assert.match(early.error, /Too fast/); }
-  const need = s.tick.slice(0, crash).reduce((a, b) => a + b, 0) * 0.05 + 900; await sleep(need);
-  const r = await api('POST', '/arcade/dash/end', { moves: [] }); assert.equal(r.done, true); assert.equal(r.rows, crash); assert.equal(r.crashed, true); assert.equal(r.score, crash * 10 + r.passes * 50);
+  assert.equal((await api('POST', '/arcade/dash/end', { moves: [], acts: [{ row: 9, kind: 'x' }] })).status, 400, 'unknown action');
+  assert.equal((await api('POST', '/arcade/dash/end', { moves: [], acts: [{ row: 9, kind: 'j' }, { row: 10, kind: 's' }] })).status, 400, 'no back-to-back jumps and slides');
+  // standing still in the middle lane: the first cell in lane 1 that needs a lane change, jump or slide is where the run ends
+  const hit = r => (r[0] | r[2] | r[3]) & 2, first = s.rows.findIndex(hit), row = s.rows[first], kind = row[0] & 2 ? 'block' : row[2] & 2 ? 'low' : 'high';
+  const endRun = async body => { for (let i = 0; i < 40; i++) { const r = await api('POST', '/arcade/dash/end', body); if (r.status !== 400 || !/Too fast/.test(r.error)) return r; await sleep(150); } throw new Error('run never became possible'); };
+  const r = await endRun({ moves: [], acts: [] }); assert.equal(r.done, true); assert.equal(r.rows, first); assert.equal(r.crashed, true); assert.equal(r.score, first * 10 + r.passes * 50 + Math.min(3, Math.floor(first / 100)) * 100);
+  // a jump clears a low hurdle and a slide clears a high sign, but nothing clears a full block
+  const s2 = await api('POST', '/arcade/dash/start', { bet: 0 }), f2 = s2.rows.findIndex(hit), c2 = s2.rows[f2], k2 = c2[0] & 2 ? 'block' : c2[2] & 2 ? 'low' : 'high';
+  const acts = k2 === 'low' ? [{ row: f2 - 1, kind: 'j' }] : k2 === 'high' ? [{ row: f2 - 1, kind: 's' }] : [];
+  const r2 = await endRun({ moves: [], acts }); assert.equal(r2.done, true);
+  if (k2 === 'block') assert.equal(r2.rows, f2, 'a full block ends the run'); else assert.ok(r2.rows > f2, `${k2} obstacle at ${f2} should be cleared, run ended at ${r2.rows}`);
 });
 
 test('Site Mode: School Edition hides chance games on the server, turns bets into daily-capped rewards, and refunds open rounds', async () => {
