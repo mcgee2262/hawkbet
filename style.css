@@ -1098,3 +1098,10 @@ h1 .fb{font-size:13px;color:var(--mut);font-weight:600;margin-left:8px}
 .pendnote{margin:-4px 0 12px}
 .gradebox textarea{width:100%;background:#0d141b;color:#fff;border:1px solid var(--line);border-radius:8px;padding:8px;font:12px ui-monospace,monospace;margin-bottom:8px}
 .gradebox .row input[type=number]{max-width:90px}
+/* home banner pattern: moving stripes and chip rings (no emojis, nothing floats over the balance) */
+.heropat{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:0}
+.hp-stripes{position:absolute;top:0;bottom:0;left:-30%;width:160%;background:repeating-linear-gradient(115deg,#2f6bff1f 0 22px,transparent 22px 44px,#12c26a1a 44px 66px,transparent 66px 88px);animation:hpslide 14s linear infinite;will-change:transform}
+@keyframes hpslide{to{transform:translateX(88px)}}
+.hp-rings{position:absolute;right:-70px;top:-90px;width:300px;height:300px;border-radius:50%;background:repeating-radial-gradient(circle,transparent 0 16px,#12c26a26 16px 20px,transparent 20px 34px,#2f6bff26 34px 38px);-webkit-mask:radial-gradient(circle,#000 30%,transparent 72%);mask:radial-gradient(circle,#000 30%,transparent 72%)}
+.heroin>.heropat{position:absolute}
+@media(prefers-reduced-motion:reduce){.hp-stripes{animation:none}}
