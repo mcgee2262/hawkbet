@@ -1105,3 +1105,5 @@ h1 .fb{font-size:13px;color:var(--mut);font-weight:600;margin-left:8px}
 .hp-rings{position:absolute;right:-70px;top:-90px;width:300px;height:300px;border-radius:50%;background:repeating-radial-gradient(circle,transparent 0 16px,#12c26a26 16px 20px,transparent 20px 34px,#2f6bff26 34px 38px);-webkit-mask:radial-gradient(circle,#000 30%,transparent 72%);mask:radial-gradient(circle,#000 30%,transparent 72%)}
 .heroin>.heropat{position:absolute}
 @media(prefers-reduced-motion:reduce){.hp-stripes{animation:none}}
+.mbig{flex-wrap:wrap;row-gap:.1em;line-height:1.1;font-size:clamp(40px,10vw,76px)}.mbig .tk{display:inline-flex;white-space:nowrap}.mbig>s{display:inline-block;width:.3em}.mbig .tk>span{display:inline-block}.msyms i{opacity:.7}
+.mbig .tk{animation:none}

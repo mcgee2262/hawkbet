@@ -1664,14 +1664,20 @@ async function math(root) {
   const syms = ['+', '−', '×', '÷', '=', 'π', '√', '%', '²', '∑', '∞', '7', '3', '9'];
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> 60 seconds, as many problems as you can. 100 points for each right answer, plus up to 40 for speed and a combo bonus for answering right in a row. Problems get harder as you go. Press Enter to answer.</div>
     ${skillBet('math')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Right</small><b id="mr">0</b></div></div>${hsBox()}`,
-    `<div class="mq chalk" id="mq"><div class="msyms" aria-hidden="true">${syms.map((ch, i) => `<i style="left:${(i * 37) % 94}%;top:${(i * 53) % 86}%;animation-delay:${-(i % 7) * 1.1}s;font-size:${22 + (i % 4) * 10}px">${ch}</i>`).join('')}</div>
+    `<div class="mq chalk" id="mq"><div class="msyms" aria-hidden="true">${syms.map((ch, i) => `<i style="left:${i % 2 ? (i * 5) % 11 : 87 + (i * 3) % 9}%;top:${(i * 53) % 86}%;animation-delay:${-(i % 7) * 1.1}s;font-size:${22 + (i % 4) * 10}px">${ch}</i>`).join('')}</div>
       <div class="mtimer" id="mtimer"><i id="mt"></i></div><div class="msecs" id="msecs">60</div>
       <div class="mflame"><div class="mfbar"><i id="mfl"></i></div><span id="mc"></span></div>
       <div class="mbig" id="mqq"><span>R</span><span>e</span><span>a</span><span>d</span><span>y</span><span>?</span></div>
       <div class="mrow"><input id="mans" inputmode="numeric" autocomplete="off" aria-label="Your answer" placeholder="?" disabled><button class="btn" id="msub" disabled>Answer ↵</button></div><div class="mfb" id="mfb"></div></div>`);
   stopFns.push(() => { clearTimeout(endT); clearInterval(tickT); });
   const ans = $('#mans'), sub = $('#msub'), mq = $('#mq'), big = $('#mqq');
-  const setQ = q => { big.innerHTML = [...(q + ' = ?')].map((ch, i) => ch === ' ' ? '<s></s>' : `<span style="animation-delay:${i * 32}ms">${ch}</span>`).join(''); ans.value = ''; ans.focus(); };
+  const setQ = q => { // each number/operator is one nowrap group so a line break never splits a number; the font is measured to fit the board
+    const toks = String(q).split(/\s+/).filter(Boolean).concat(['= ?']); let k = 0;
+    big.innerHTML = toks.map(t => `<span class="tk">${[...t].map(ch => `<span style="animation-delay:${k++ * 32}ms">${ch}</span>`).join('')}</span>`).join('<s></s>'); ans.value = ''; ans.focus();
+    const W = big.clientWidth || 320, base = Math.min(76, Math.max(40, innerWidth * .1));
+    big.style.flexWrap = 'nowrap'; big.style.fontSize = '40px'; const w40 = big.scrollWidth || 1; big.style.flexWrap = '';
+    const one = 40 * W * .95 / w40; big.style.fontSize = Math.round(Math.max(24, Math.min(base, one >= 34 ? one : Math.min(base, one * 1.7)))) + 'px'; // too small for one line: let it wrap onto two
+  };
   const shake = () => { mq.classList.remove('wrong'); void mq.offsetWidth; mq.classList.add('wrong'); setTimeout(() => mq.classList.remove('wrong'), 450); };
   function fly(text, good) { // the answer's points float up from the problem
     const r = big.getBoundingClientRect(), e = document.createElement('i'); e.className = 'flynum ' + (good ? 'good' : 'bad'); e.textContent = text; e.style.left = r.left + r.width / 2 + 'px'; e.style.top = r.top + r.height / 2 + 'px'; document.body.appendChild(e);
