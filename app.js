@@ -1445,7 +1445,7 @@ const skillBet = id => SCHOOL() ? `<div class="tiers" aria-label="Hawk Bucks by 
   <div class="duo"><button class="btn bjbig" id="start">▶ Play <kbd>Space</kbd></button></div>
   <div class="note">Your score earns Hawk Bucks (up to ${fmt(SCHOOLR.cap)} a day). Scores go on the top-scores board and count toward challenges and achievements.</div>` : `${betBox()}${id === 'hoops' && CFG.hoopsMax ? `<div class="note" style="margin:4px 0 8px">Max bet on this game: <b>${fmt(CFG.hoopsMax)}</b> 🪙</div>` : ''}<div class="tiers" aria-label="Payout by score">${CFG.skillTiers[id].map(([min, m]) => `<span>${fmt(min)}+ <b>${m}x</b></span>`).join('')}<span>lower <b>0</b></span></div>
   <div class="duo"><button class="btn" id="start">🪙 Play for Hawk Bucks</button><button class="btn alt" id="practice">Practice (free)</button></div>
-  <div class="note">Your score sets the payout, and luck doesn't apply here. Starting over or leaving a paid game early forfeits the bet.</div>`;
+  <div class="note">Your score sets the payout, and luck doesn't apply here. Starting over or leaving a paid game early forfeits the bet.</div><div class="mbadge hidden" aria-live="polite"></div>`;
 const lockStart = on => { $('#start').disabled = on; const p = $('#practice'); if (p) p.disabled = on; };
 function skillDone(id, r, great) {
   STATS.best[id] = { score: r.best }; paintPB(); lastRes = null;
@@ -1460,7 +1460,19 @@ function skillDone(id, r, great) {
   else if (great) fx.win(false); else sfx.play('win');
   loadHS(id);
 }
-function skillButtons(begin) { $('#start').onclick = () => begin(SCHOOL() ? 0 : readBet())(); if ($('#practice')) $('#practice').onclick = () => begin(0)(); }
+/* live multiplier badge: while a bet is on a skill game, shows the multiplier your score has earned so far and what it would pay */
+let mbBet = 0, mbMult = null;
+function paintMB(id, score) {
+  const t = (CFG && CFG.skillTiers && CFG.skillTiers[id]) || [], cur = t.find(([min]) => score >= min), nxt = t.filter(([min]) => min > score).pop(), m = cur ? cur[1] : 0;
+  const html = `<span class="mbx">${m}x</span><span class="mbp">${m ? `pays <b>${fmt(Math.round(mbBet * m))}</b> 🪙` : `bet ${fmt(mbBet)} 🪙`}</span><small>${nxt ? `Next: ${nxt[1]}x at ${fmt(nxt[0])}` : 'Top multiplier!'}</small>`;
+  document.querySelectorAll('.mbadge').forEach(b => { b.classList.toggle('hidden', !mbBet); b.classList.toggle('on', m > 0); b.innerHTML = html; if (mbMult !== null && m > mbMult) { b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); } });
+  if (mbMult !== null && m > mbMult) sfx.play('reveal'); mbMult = m;
+}
+function skillButtons(begin) {
+  const go = bet => { mbBet = bet; mbMult = null; paintMB(game, 0); begin(bet)(); };
+  $('#start').onclick = () => go(SCHOOL() ? 0 : readBet()); if ($('#practice')) $('#practice').onclick = () => { mbBet = 0; mbMult = null; paintMB(game, 0); begin(0)(); };
+  const sc = $('#sc'); if (sc && window.MutationObserver) { const mo = new MutationObserver(() => { if (mbBet) paintMB(game, parseInt(sc.textContent.replace(/\D/g, ''), 10) || 0); }); mo.observe(sc, { childList: true, characterData: true, subtree: true }); stopFns.push(() => mo.disconnect()); }
+}
 
 /* Reaction: Bell Rush */
 async function bell(root) {
@@ -1816,7 +1828,7 @@ async function dash(root) {
   const CPN = ['LEVEL 2 · SOPHOMORE', 'LEVEL 3 · JUNIOR', 'LEVEL 4 · SENIOR'], CPS = ['SOPH', 'JUNIOR', 'SENIOR'], LVN = ['FRESHMAN', 'SOPHOMORE', 'JUNIOR', 'SENIOR'], LVC = ['#19e58a', '#5b8cff', '#a855ff', '#ff5d6c'], GR = 0.25; // GR: a lane change counts up to a quarter row late, so near-misses are dodges
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>🎯 Goal:</b> race down the hallway and get to class before the bell. <b>← →</b> switch lanes around carts, <b>↑</b> jump the backpacks, <b>↓</b> slide under signs (phones: swipe, or tap a side). Grab 🪙 chips (+50), 🧲 magnet pulls them in, 🛡️ shield saves you from one hit. It starts easy and gets harder every 100 rows (Freshman → Senior). Every row is 10 points, each new level is +100 and the 🎓 door is a +500 jackpot.</div>
     ${skillBet('dash')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Chips</small><b id="ps">0</b></div></div>${hsBox()}`,
-    `<div class="dashwrap"><canvas id="dcv" width="${W}" height="${H}" aria-label="Hallway Dash game"></canvas><div class="dashmsg" id="dm"></div>
+    `<div class="dashwrap"><canvas id="dcv" width="${W}" height="${H}" aria-label="Hallway Dash game"></canvas><div class="mbadge ov hidden" aria-live="polite"></div><div class="dashmsg" id="dm"></div>
       <div class="dashintro" id="dintro">🎓 Reach class! ← → lanes · ↑ jump · ↓ slide</div><button class="dashinfo" id="dinfo" aria-label="How to play">ⓘ How to play</button></div>`);
   const hideIntro = () => { const d = $('#dintro'); if (d) d.classList.add('hidden'); };
   let firstVisit = true; try { firstVisit = !localStorage.getItem('hb_dash_seen'); localStorage.setItem('hb_dash_seen', '1'); } catch (e) {}
