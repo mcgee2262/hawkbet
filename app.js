@@ -1573,49 +1573,69 @@ async function trivia(root) {
 
 /* Timing: Free Throw Line, NBA 2K style. A vertical shot meter fills up; let go inside the green window. The server runs the meter clock. */
 const BALL_SVG = `<svg viewBox="0 0 40 40" aria-hidden="true"><defs><radialGradient id="bbg" cx=".35" cy=".3" r=".85"><stop offset="0" stop-color="#ffb877"/><stop offset=".55" stop-color="#e8641a"/><stop offset="1" stop-color="#7a2400"/></radialGradient></defs><circle cx="20" cy="20" r="18.6" fill="url(#bbg)" stroke="#3d1100" stroke-width="1.3"/><path d="M20 1.5V38.5M1.5 20H38.5M6.2 7.6Q20 20 6.2 32.4M33.8 7.6Q20 20 33.8 32.4" fill="none" stroke="#2f0d00" stroke-width="1.4"/><ellipse cx="13" cy="11" rx="6.4" ry="3.4" fill="#fff" opacity=".4" transform="rotate(-35 13 11)"/></svg>`;
+/* Free Throw court: seen from behind the shooter, hoop at the far end facing the player. Everything is drawn in a 400x260 box.
+   The shooter's parts are in absolute coordinates (feet at 95,236) so their animations can pivot around fixed points. */
+const SH = { x: 95, y: 236 }, shp = s => s.replace(/(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/g, (m, a, b) => `${+a + SH.x},${+b + SH.y}`), she = (cx, cy) => `cx="${cx + SH.x}" cy="${cy + SH.y}"`;
+const SHOOTER_SVG = `<ellipse class="shpart" id="shShadow" ${she(0, 0)} rx="30" ry="6" fill="#0007"/>
+  <g id="shooter" class="shpart"><g id="shLegs" class="shpart">
+    <path d="${shp('M-9,-40 L-10,-8 M10,-40 L11,-8')}" stroke="#f5a623" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <path d="${shp('M-19,-9 Q-10,-17 -1,-9 L0,-2 L-20,-2 Z M2,-9 Q11,-17 20,-9 L21,-2 L1,-2 Z')}" fill="#fff" stroke="#1b4fd8" stroke-width="1.6"/><path d="${shp('M-20,-2 L0,-2 M1,-2 L21,-2')}" stroke="#19e58a" stroke-width="3" stroke-linecap="round"/></g>
+  <g id="shUp" class="shpart">
+    <path d="${shp('M-17,-54 L17,-54 L20,-30 L-20,-30 Z')}" fill="#1b4fd8" stroke="#fff" stroke-width="1.6"/><path d="${shp('M0,-54 L0,-31')}" stroke="#ffffff66" stroke-width="1.5"/>
+    <g id="shGuide" class="shpart"><path d="${shp('M-14,-88 Q-6,-84 8,-92 Q16,-98 20,-104 Q10,-102 4,-97 Q-4,-91 -17,-78 Z')}" fill="#14308f" stroke="#0b2a6b" stroke-width="1.2"/></g>
+    <path d="${shp('M-19,-92 Q0,-101 19,-92 L21,-54 L-21,-54 Z')}" fill="url(#jg)" stroke="#fff" stroke-width="1.6"/><path d="${shp('M-10,-92 Q0,-85 10,-92')}" fill="none" stroke="#fff" stroke-width="2"/>
+    <text x="${SH.x}" y="${SH.y - 66}" text-anchor="middle" font-size="17" font-weight="900" fill="#fff" stroke="#0b2a6b" stroke-width=".8">23</text>
+    <g id="shArm" class="shpart"><path d="${shp('M14,-90 Q34,-88 38,-104 Q40,-118 34,-124 Q30,-112 26,-102 Q20,-96 14,-82 Z')}" fill="#1b4fd8" stroke="#0b2a6b" stroke-width="1.4"/><path d="${shp('M22,-98 Q28,-104 30,-114 M27,-94 Q33,-100 35,-110')}" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".8"/>
+      <g id="shHand" class="shpart"><path d="${shp('M33,-120 Q36,-132 42,-134 Q42,-126 40,-120 Z')}" fill="#1b4fd8" stroke="#0b2a6b" stroke-width="1.2"/></g></g>
+    <path d="${shp('M-12,-112 Q-28,-124 -38,-112 Q-24,-112 -14,-104 Z M-10,-106 Q-26,-112 -34,-98 Q-22,-100 -12,-98 Z')}" fill="#0b2a6b" stroke="#1b4fd8" stroke-width="1"/>
+    <circle ${she(2, -108)} r="13.5" fill="#fff" stroke="#c9d6f5" stroke-width="1"/><path d="${shp('M-10,-114 Q2,-126 14,-114 Q2,-118 -10,-114 Z')}" fill="#0b2a6b"/><path d="${shp('M-11,-111 Q-4,-122 8,-121 Q-2,-118 -8,-108 Z')}" fill="#1b4fd8"/>
+    <path d="${shp('M14,-110 L26,-106 L14,-101 Z')}" fill="#ffc542" stroke="#b26b00" stroke-width="1"/><circle ${she(8, -111)} r="3" fill="#ffd24a"/><circle ${she(8.8, -111)} r="1.5" fill="#0a0e13"/>
+  </g></g>`;
 const ARENA_SVG = `<svg viewBox="0 0 400 260" preserveAspectRatio="none" aria-hidden="true" class="cscene"><defs>
   <linearGradient id="aw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#05081c"/><stop offset="1" stop-color="#101c4a"/></linearGradient>
-  <linearGradient id="af" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e0a259"/><stop offset=".5" stop-color="#c98a45"/><stop offset="1" stop-color="#8a5622"/></linearGradient>
-  <linearGradient id="ab" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <linearGradient id="af" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d9a35e"/><stop offset=".5" stop-color="#c58a46"/><stop offset="1" stop-color="#8a5622"/></linearGradient>
   <linearGradient id="agl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <linearGradient id="keyg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b4fd8" stop-opacity=".7"/><stop offset="1" stop-color="#12c26a" stop-opacity=".62"/></linearGradient>
   <linearGradient id="jg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#19e58a"/><stop offset="1" stop-color="#0a8f4e"/></linearGradient>
-  <linearGradient id="ajt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a1230"/><stop offset="1" stop-color="#050810"/></linearGradient></defs>
+  <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#eaf2ff" stop-opacity=".55"/><stop offset="1" stop-color="#9fb8ff" stop-opacity=".18"/></linearGradient>
+  <linearGradient id="ajt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a1230"/><stop offset="1" stop-color="#050810"/></linearGradient>
+  <clipPath id="floorClip"><path d="M0 124H400V260H0Z"/></clipPath></defs>
   <rect width="400" height="260" fill="url(#aw)"/>
-  <g class="beams"><path d="M40 0L90 150L10 150Z"/><path d="M130 0L200 150L110 150Z"/><path d="M270 0L340 150L240 150Z"/><path d="M360 0L420 150L330 150Z"/></g>
-  <g class="banners">${[['STATE', '2024', 30], ['STATE', '2025', 76], ['REGION', '2025', 322], ['DISTRICT', '2025', 366]].map(([a, b, x]) => `<path d="M${x - 15} 0h30v54l-15 -10l-15 10z" fill="#1b4fd8" stroke="#fff" stroke-width="1.5"/><text x="${x}" y="22" text-anchor="middle" font-size="7" font-weight="900" fill="#fff">${a}</text><text x="${x}" y="33" text-anchor="middle" font-size="9" font-weight="900" fill="#ffc542">${b}</text>`).join('')}</g>
-  <g class="stands"><path d="M0 70H400V150H0Z" fill="#0b1236"/><path d="M0 90H400M0 112H400M0 132H400" stroke="#1d2a5e" stroke-width="2"/></g>
-  <g class="crowd">${Array.from({ length: 52 }, (_, i) => { const r = i % 3, x = 8 + (i * 7.7) % 386, y = 80 + r * 21 + (i % 2) * 3; return `<circle cx="${x.toFixed(1)}" cy="${y}" r="4.6" fill="${['#3b6bff', '#19e58a', '#ffc542', '#ff7a8a', '#d6e0ff'][i % 5]}" opacity=".88" style="animation-delay:${(i % 9) * 35}ms"/>`; }).join('')}</g>
-  <g class="jumbo"><rect x="132" y="6" width="136" height="50" rx="7" fill="url(#ajt)" stroke="#3a4c90" stroke-width="2"/><text x="200" y="19" text-anchor="middle" font-size="8" font-weight="900" letter-spacing="2" fill="#8fb0ff">SEAHAWKS</text><text id="jtS" x="168" y="46" text-anchor="middle" font-size="24" font-weight="900" fill="#ffb21a" font-family="ui-monospace,Menlo,monospace">0</text><text id="jtN" x="238" y="40" text-anchor="middle" font-size="11" font-weight="900" fill="#fff" font-family="ui-monospace,Menlo,monospace">SHOT 1/10</text><image href="logo.svg" x="192" y="22" width="16" height="16"/></g>
-  <rect y="150" width="400" height="110" fill="url(#af)"/>${Array.from({ length: 11 }, (_, i) => `<path d="M${i * 40} 150L${-120 + i * 64} 260" stroke="#00000020" stroke-width="2"/>`).join('')}
-  <path d="M170 150H350L392 260H150Z" fill="#1b4fd8" opacity=".55" stroke="#fff" stroke-width="2.4"/><ellipse cx="260" cy="204" rx="62" ry="15" fill="none" stroke="#fff" stroke-width="2.2" opacity=".85"/><image href="logo.svg" x="241" y="190" width="38" height="28" opacity=".85"/>
-  <path d="M148 150L128 260" stroke="#fff" stroke-width="3.2"/>
-  <rect y="150" width="400" height="110" fill="url(#agl)"/>
-  <g class="supp"><rect x="292" y="104" width="7" height="60" rx="2" fill="#2a3a6a"/><rect x="294" y="164" width="3" height="44" fill="#1d2a5e"/></g>
-  <g class="bboard"><rect x="289" y="54" width="9" height="62" rx="2" fill="#fff" stroke="#c9cfe8" stroke-width="2"/><rect x="286" y="76" width="4" height="22" fill="#e8461a"/></g>
-  <g class="rimg"><path d="M246 109H290" stroke="#ff5a1a" stroke-width="5" stroke-linecap="round"/><ellipse cx="268" cy="109" rx="22" ry="4.5" fill="none" stroke="#ff7a3c" stroke-width="2" opacity=".7"/></g>
-  <g class="netg" id="net" style="transform-origin:268px 111px"><path d="M248 111L255 144M258 113L262 146M268 114V147M278 113L274 146M288 111L281 144M250 124H286M254 135H282" fill="none" stroke="#fff" stroke-width="1.5" opacity=".85"/></g>
-  <g id="shooter" class="shooter"><ellipse cx="92" cy="231" rx="34" ry="6.5" fill="#0007"/><g transform="translate(92 231) scale(1.3) translate(-92 -231)">
-    <g class="legs"><path d="M85 214v12M99 214v12" stroke="#f5a623" stroke-width="5" stroke-linecap="round"/><path d="M79 230q6-7 13 0v3H79zM93 230q6-7 13 0v3H93z" fill="#fff" stroke="#1b4fd8" stroke-width="1.6"/><rect x="79" y="231" width="13" height="3" rx="1.5" fill="#19e58a"/><rect x="93" y="231" width="13" height="3" rx="1.5" fill="#19e58a"/></g>
-    <path d="M74 205h36l3 14H71z" fill="#1b4fd8" stroke="#fff" stroke-width="1.5"/><path d="M92 206v12" stroke="#ffffff55" stroke-width="1.5"/>
-    <g class="wingback"><path d="M76 186q-13 12-7 27q9-8 9-23z" fill="#0b2a6b" stroke="#1b4fd8" stroke-width="1"/></g>
-    <g class="torso"><path d="M75 182q17-9 34 0l2 24H73z" fill="url(#jg)" stroke="#fff" stroke-width="1.6"/><path d="M82 181q10 7 20 0" fill="none" stroke="#fff" stroke-width="2"/><text x="92" y="200" text-anchor="middle" font-size="12" font-weight="900" fill="#fff" stroke="#0b2a6b" stroke-width=".7">23</text></g>
-    <g class="wingup"><path d="M105 186q11-4 17-14q2-4 6-3q1 5-2 9q-6 12-19 14z" fill="#1b4fd8" stroke="#0b2a6b" stroke-width="1.4"/><path d="M122 172l5-6M126 176l6-3" stroke="#fff" stroke-width="2" stroke-linecap="round"/></g>
-    <circle cx="92" cy="166" r="14" fill="#fff"/><path d="M78 164q14-15 28 0z" fill="#0b2a6b"/><path d="M78 162h28v4H78z" fill="#e8461a"/><path d="M104 168l11 4-11 4z" fill="#ffc542" stroke="#b26b00" stroke-width="1"/><circle cx="99" cy="167" r="2.8" fill="#ffd24a"/><circle cx="99.7" cy="167" r="1.4" fill="#0a0e13"/>
-  </g></g></svg>`;
+  <g class="beams"><path d="M40 0L90 124L10 124Z"/><path d="M150 0L215 124L110 124Z"/><path d="M270 0L340 124L240 124Z"/><path d="M360 0L420 124L330 124Z"/></g>
+  <g class="banners">${[['REGION', '2025', 322], ['DISTRICT', '2025', 366]].map(([a, b, x]) => `<path d="M${x - 15} 0h30v50l-15 -10l-15 10z" fill="#1b4fd8" stroke="#fff" stroke-width="1.5"/><text x="${x}" y="20" text-anchor="middle" font-size="7" font-weight="900" fill="#fff">${a}</text><text x="${x}" y="31" text-anchor="middle" font-size="9" font-weight="900" fill="#ffc542">${b}</text>`).join('')}</g>
+  <g class="stands"><path d="M0 64H400V124H0Z" fill="#0b1236"/><path d="M0 82H400M0 100H400" stroke="#1d2a5e" stroke-width="2"/></g>
+  <g class="crowd">${Array.from({ length: 56 }, (_, i) => { const r = i % 3, x = 6 + (i * 7.2) % 390, y = 70 + r * 18 + (i % 2) * 3; return `<circle cx="${x.toFixed(1)}" cy="${y}" r="4.4" fill="${['#3b6bff', '#19e58a', '#ffc542', '#ff7a8a', '#d6e0ff'][i % 5]}" opacity=".88" style="animation-delay:${(i % 9) * 35}ms"/>`; }).join('')}</g>
+  <g class="jumbo"><rect x="12" y="6" width="120" height="50" rx="7" fill="url(#ajt)" stroke="#3a4c90" stroke-width="2"/><text x="72" y="19" text-anchor="middle" font-size="8" font-weight="900" letter-spacing="2" fill="#8fb0ff">SEAHAWKS</text><text id="jtS" x="44" y="47" text-anchor="middle" font-size="24" font-weight="900" fill="#ffb21a" font-family="ui-monospace,Menlo,monospace">0</text><text id="jtN" x="100" y="40" text-anchor="middle" font-size="10" font-weight="900" fill="#fff" font-family="ui-monospace,Menlo,monospace">SHOT 1/10</text></g>
+  <g clip-path="url(#floorClip)"><rect y="124" width="400" height="136" fill="url(#af)"/>${Array.from({ length: 17 }, (_, i) => `<path d="M255 40L${-190 + i * 38} 260" stroke="#00000024" stroke-width="1.6"/>`).join('')}
+    <path d="M40 124L-70 260M440 124L560 260" stroke="#fff" stroke-width="3" opacity=".9"/>
+    <path d="M228 124H282L352 214H158Z" fill="url(#keyg)" stroke="#fff" stroke-width="2.2"/><path d="M243 124L216 214M267 124L294 214" stroke="#ffffff55" stroke-width="1.4"/>
+    <path d="M158 214H352" stroke="#fff" stroke-width="3"/><path d="M158 214A97 26 0 0 1 352 214" fill="none" stroke="#fff" stroke-width="2.2"/><path d="M158 214A97 26 0 0 0 352 214" fill="none" stroke="#fff" stroke-width="2" stroke-dasharray="7 6" opacity=".8"/>
+    <path d="M60 124Q255 330 450 124" fill="none" stroke="#fff" stroke-width="2.4" opacity=".85"/>
+    <ellipse cx="255" cy="214" rx="38" ry="12.5" fill="#19e58a22" stroke="#fff" stroke-width="1.6" opacity=".7"/><g transform="translate(255 214) scale(1 .36)"><image href="logo.svg" x="-34" y="-34" width="68" height="68" opacity=".92"/></g>
+    <rect y="124" width="400" height="136" fill="url(#agl)"/></g>
+  <path d="M30 124H380" stroke="#fff" stroke-width="3"/>
+  <g class="supp"><rect x="251" y="0" width="8" height="34" fill="#2a3a6a"/><rect x="249" y="30" width="12" height="5" fill="#1d2a5e"/></g>
+  <g class="bboard"><path d="M214 34H296L291 92H219Z" fill="url(#glass)" stroke="#1b4fd8" stroke-width="4.5" stroke-linejoin="round"/><path d="M236 60H274L272 83H238Z" fill="none" stroke="#19e58a" stroke-width="3.2" stroke-linejoin="round"/><path d="M222 40L240 40M222 46L232 46" stroke="#fff" stroke-width="2" opacity=".55" stroke-linecap="round"/></g>
+  <g class="rimg"><path d="M255 91V95" stroke="#1b4fd8" stroke-width="4"/><path d="M236 95A19 5.5 0 0 1 274 95" fill="none" stroke="#19e58a" stroke-width="3.6"/></g>
+  <g id="vmeter" class="vmeterg"><path id="vpath" d="M46 238C20 208 20 160 50 124" fill="none" stroke="#0a1230" stroke-width="15" stroke-linecap="round" opacity=".9"/><path class="vtrack" d="M46 238C20 208 20 160 50 124" fill="none" stroke="#26346f" stroke-width="11" stroke-linecap="round"/>
+    <path id="vzone" d="M46 238C20 208 20 160 50 124" fill="none" stroke="#19e58a" stroke-width="11"/><path id="vperf" d="M46 238C20 208 20 160 50 124" fill="none" stroke="#eafff4" stroke-width="5"/>
+    <path id="vfill" class="vfillp" d="M46 238C20 208 20 160 50 124" fill="none" stroke="#cfe0ff" stroke-width="5" stroke-linecap="butt"/><circle id="vmark" r="5.5" fill="#fff" cx="46" cy="238"/><text id="vl" x="52" y="116" text-anchor="middle"></text></g>
+  ${SHOOTER_SVG}</svg>`;
+const ARENA_FRONT = `<svg viewBox="0 0 400 260" preserveAspectRatio="none" aria-hidden="true" class="cfront"><g id="net" class="netg" style="transform-origin:255px 97px"><path d="M238 97L246 130M246 98L250 131M255 99V132M264 98L260 131M272 97L264 130M241 108H269M243 118H267M246 127H264" fill="none" stroke="#fff" stroke-width="1.4" opacity=".9"/><path d="M246 127H264" stroke="#19e58a" stroke-width="2.4"/></g><path d="M236 95A19 5.5 0 0 0 274 95" fill="none" stroke="#19e58a" stroke-width="3.8" class="rimfront"/></svg>`;
 async function hoops(root) {
   let st = null, s0 = 0, period = 1700, zone = 0.17, center = 0.8, frozen = false, timer = 0, busy = false, streak = 0, total = 0, lat = 0;
-  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> 10 shots, NBA 2K style. A shot meter fills and drains: tap <b>SHOOT</b> (or press Space) when it's in the <b style="color:#19e58a">green window</b> near the top. Dead center is a perfect green (150). Makes in a row add a streak bonus, but the window shrinks and the meter speeds up.</div>
+  root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> 10 shots, NBA 2K style. A shot meter fills and drains: tap <b>SHOOT</b> (or press Space) when it's in the <b style="color:#19e58a">green window</b> near the top. Dead center is a perfect green (150). Makes in a row add a streak bonus, but the meter speeds up and the green window gets smaller the more you score.</div>
     ${skillBet('hoops')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Shot</small><b id="sn">–</b></div></div>${hsBox()}`,
-    `<div class="hoopsw"><div class="court" id="court">${ARENA_SVG}<div class="vmeter" id="vmeter"><i class="vzone" id="vz"><i class="vperf" id="vp"></i></i><i class="vfill" id="vf"></i><i class="vmark" id="vm"></i><b class="vlabel" id="vl"></b></div>
-      <div class="hshadow" id="hsh"></div><div class="hball" id="hball"><i class="flame">🔥</i><div class="bb">${BALL_SVG}</div></div><div class="hpop" id="hpop"></div><div class="hsub" id="hsub"></div><div class="hflash" id="hflash"></div></div>
+    `<div class="hoopsw"><div class="court" id="court">${ARENA_SVG}<div class="hshadow" id="hsh"></div><div class="hball" id="hball"><i class="flame">🔥</i><div class="bb">${BALL_SVG}</div></div>${ARENA_FRONT}<div class="hpop" id="hpop"></div><div class="hsub" id="hsub"></div><div class="hflash" id="hflash"></div><div class="mbadge ov hidden" aria-live="polite"></div></div>
       <button class="btn bjbig shootbtn" id="shoot" disabled>🏀 SHOOT <kbd>Space</kbd></button><div class="pips" id="pips">${'<i></i>'.repeat(10)}</div></div>`);
-  const court = $('#court'), ball = $('#hball'), shoot = $('#shoot'), net = $('#net'), vmeter = $('#vmeter'), vf = $('#vf'), vm = $('#vm'), vz = $('#vz'), vp = $('#vp'), vl = $('#vl'), hsh = $('#hsh'), shooter = $('#shooter');
+  const court = $('#court'), ball = $('#hball'), shoot = $('#shoot'), net = $('#net'), vmeter = $('#vmeter'), vf = $('#vfill'), vm = $('#vmark'), vz = $('#vzone'), vp = $('#vperf'), vl = $('#vl'), hsh = $('#hsh'), shooter = $('#shooter'), vpath = $('#vpath'), MLEN = vpath.getTotalLength() || 140;
   const tri = el => { const ph = (((el % period) + period) % period) / period; return ph < 0.5 ? ph * 2 : 2 - ph * 2; };
-  const paintZone = () => { const lo = center - zone, hi = Math.min(1, center + zone); vz.style.bottom = lo * 100 + '%'; vz.style.height = (hi - lo) * 100 + '%'; vp.style.height = (zone / 3 * 2 / (hi - lo)) * 100 + '%'; };
-  const place = pos => { vf.style.transform = `scaleY(${Math.max(0.001, pos)})`; vm.style.bottom = pos * 100 + '%'; };
+  const dash = (el, lo, hi) => { el.style.strokeDasharray = `${Math.max(0.1, (hi - lo) * MLEN)} ${MLEN * 3}`; el.style.strokeDashoffset = `${-lo * MLEN}`; };
+  const paintZone = () => { const lo = Math.max(0, center - zone), hi = Math.min(1, center + zone); dash(vz, lo, hi); dash(vp, Math.max(0, center - zone / 3), Math.min(1, center + zone / 3)); };
+  const place = pos => { pos = Math.max(0, Math.min(1, pos)); vf.style.strokeDasharray = `${Math.max(0.1, pos * MLEN)} ${MLEN * 3}`; const p = vpath.getPointAtLength(pos * MLEN); vm.setAttribute('cx', p.x); vm.setAttribute('cy', p.y); };
   const T = (x, y, sc, rot) => `translate(${x}px,${y}px) translate(-50%,-50%) scale(${sc}) rotate(${rot}deg)`;
   const size = () => { const cw = court.clientWidth; ball.style.fontSize = cw * 0.085 + 'px'; return cw; };
-  const rest = () => { const cw = size(), ch = court.clientHeight; ball.getAnimations().forEach(a => a.cancel()); ball.style.transform = T(cw * 0.345, ch * 0.59, 1, 0); hsh.getAnimations().forEach(a => a.cancel()); hsh.style.opacity = 0; ball.classList.toggle('fire', streak >= 3); };
+  const rest = () => { const cw = size(), ch = court.clientHeight; ball.getAnimations().forEach(a => a.cancel()); ball.style.transform = T(cw * 128 / 400, ch * 152 / 260, 1, 0); hsh.getAnimations().forEach(a => a.cancel()); hsh.style.opacity = 0; ball.classList.toggle('fire', streak >= 3); };
   function loop() { clearTimeout(timer); if (!root.isConnected || !st) return; if (!frozen) place(tri(performance.now() - s0)); timer = setTimeout(loop, 16); }
   stopFns.push(() => clearTimeout(timer)); paintZone(); place(0.4); setTimeout(rest, 0);
   const ro = new ResizeObserver(() => { if (!ball.getAnimations().length) rest(); }); ro.observe(court); stopFns.push(() => ro.disconnect());
@@ -1623,15 +1643,29 @@ async function hoops(root) {
   const sub = txt => { const p = $('#hsub'); p.textContent = txt; p.className = 'hsub'; void p.offsetWidth; p.className = 'hsub show'; };
   const flash = cls => { const f = $('#hflash'); f.className = 'hflash'; void f.offsetWidth; f.className = 'hflash ' + cls; };
   const bump = (el, cls, ms) => { el.classList.remove(cls); void el.getBoundingClientRect(); el.classList.add(cls); setTimeout(() => el.classList.remove(cls), ms); };
-  function animShot(r) {
-    const cw = size(), ch = court.clientHeight, X = f => f * cw, Y = f => f * ch, x0 = X(.345), y0 = Y(.59);
-    const frames = r.hit
-      ? [{ transform: T(x0, y0, 1, 0), offset: 0 }, { transform: T(x0 + X(.01), y0 - Y(.04), 1, 40), offset: .13 }, { transform: T(X(.47), Y(.12), .74, 330), offset: .5, easing: 'ease-in' }, { transform: T(X(.675), Y(.405), .62, 520), offset: .7 }, { transform: T(X(.675), Y(.54), .6, 560), offset: .8 }, { transform: T(X(.69), Y(.88), .85, 640), offset: 1 }]
-      : [{ transform: T(x0, y0, 1, 0), offset: 0 }, { transform: T(x0 + X(.01), y0 - Y(.04), 1, 40), offset: .13 }, { transform: T(X(.48), Y(.12), .76, 300), offset: .5, easing: 'ease-in' }, { transform: T(X(.705), Y(.39), .66, 430), offset: .68 }, { transform: T(X(.8), Y(.58), .74, 560), offset: .82 }, { transform: T(X(.9), Y(.88), .85, 760), offset: 1 }];
-    const dur = calm ? 200 : 1200; ball.animate(frames, { duration: dur, fill: 'forwards', easing: 'linear' });
-    hsh.style.opacity = .5; hsh.animate([{ transform: `translate(${x0}px,${Y(.86)}px) translate(-50%,-50%) scale(1)`, opacity: .5 }, { transform: `translate(${X(.5)}px,${Y(.86)}px) translate(-50%,-50%) scale(.6)`, opacity: .2, offset: .5 }, { transform: `translate(${X(r.hit ? .69 : .9)}px,${Y(.86)}px) translate(-50%,-50%) scale(1)`, opacity: .5 }], { duration: dur, fill: 'forwards' });
-    bump(shooter, 'jump', 420);
-    setTimeout(() => { if (!root.isConnected) return; if (r.hit) { bump(shooter, 'fist', 700); bump(net, 'swish', 700); sfx.play('swish'); if (r.perfect) bump(court.querySelector('.bboard'), 'bflash', 500); } else { bump(shooter, 'shake', 500); bump(court.querySelector('.rimg'), 'rimhit', 500); sfx.play('rim'); setTimeout(() => sfx.play('brick'), 230); } }, calm ? 0 : 820);
+  const HIT_MS = 1180; // when the ball reaches the rim
+  function animShot(r) { // a jump shot: gather, jump, release at the top, flick and hold, land. Ball, body, arm and shadow share one clock.
+    const cw = size(), ch = court.clientHeight, X = u => u / 400 * cw, Y = v => v / 260 * ch, D = 1750, lerp = (a, b, k) => a + (b - a) * k;
+    const P = (t, u, v, s, rot) => ({ transform: T(X(u), Y(v), s, rot), offset: t / D });
+    const arc = (t0, t1, [u0, v0, s0, r0], [u1, v1, s1, r1], h, n = 12) => Array.from({ length: n }, (_, i) => { const k = (i + 1) / n; return P(lerp(t0, t1, k), lerp(u0, u1, k), lerp(v0, v1, k) - 4 * h * k * (1 - k), lerp(s0, s1, k), lerp(r0, r1, k)); });
+    const rel = [136, 100, .95, 30], early = r.stalled || r.pos < r.center; let end;
+    const frames = [P(0, 128, 152, 1, 0), P(180, 126, 163, 1, 0), P(480, ...rel)];
+    if (r.hit) { frames.push(...arc(480, HIT_MS, rel, [255, 87, .62, 420], 72), P(1330, 255, 128, .6, 440), P(1500, 262, 206, .82, 520), P(1620, 268, 184, .8, 560), P(1750, 274, 208, .82, 620)); end = [255, 274]; }
+    else if (early) { frames.push(...arc(480, HIT_MS, rel, [238, 99, .62, 380], 58), P(1280, 224, 122, .65, 420), P(1420, 206, 172, .75, 470), P(1560, 200, 214, .82, 520), P(1650, 204, 192, .8, 540), P(1750, 208, 214, .82, 560)); end = [238, 208]; }
+    else { frames.push(...arc(480, HIT_MS, rel, [252, 68, .6, 380], 64), P(1280, 292, 92, .65, 400), P(1400, 312, 148, .75, 450), P(1520, 320, 214, .82, 500), P(1620, 326, 194, .8, 520), P(1750, 330, 214, .82, 540)); end = [252, 330]; }
+    const dur = calm ? 200 : D; ball.animate(frames, { duration: dur, fill: 'forwards', easing: 'linear' });
+    const S = (t, u, sc) => ({ transform: `translate(${X(u)}px,${Y(229)}px) translate(-50%,-50%) scale(${sc})`, offset: t / D });
+    hsh.style.opacity = .5; hsh.animate([S(0, 128, 1), S(480, 136, 1), S(HIT_MS, end[0], .6), S(1750, end[1], .9)], { duration: dur, fill: 'forwards' });
+    if (calm) return;
+    const B = 1400, o = t => t / B, piv = (x, y, f) => `translate(${x}px,${y}px) ${f} translate(${-x}px,${-y}px)`, run = (el, kf) => el.animate(kf, { duration: B, easing: 'ease-in-out' });
+    run(shooter, [{ transform: 'translateY(0px)' }, { transform: 'translateY(3px)', offset: o(180) }, { transform: 'translateY(-26px)', offset: o(480), easing: 'ease-out' }, { transform: 'translateY(-26px)', offset: o(560) }, { transform: 'translateY(0px)', offset: o(870), easing: 'ease-in' }, { transform: 'translateY(2px)', offset: o(980) }, { transform: 'translateY(0px)' }]);
+    run($('#shLegs'), [{ transform: piv(95, 236, 'scale(1,1)') }, { transform: piv(95, 236, 'scale(1,.78)'), offset: o(180) }, { transform: piv(95, 236, 'scale(1,1.1)'), offset: o(360) }, { transform: piv(95, 236, 'scale(1,1.12)'), offset: o(480) }, { transform: piv(95, 236, 'scale(1,.84)'), offset: o(880) }, { transform: piv(95, 236, 'scale(1,1)'), offset: o(1010) }, { transform: piv(95, 236, 'scale(1,1)') }]);
+    run($('#shUp'), [{ transform: piv(95, 186, 'rotate(0deg)') }, { transform: piv(95, 186, 'rotate(4deg)'), offset: o(180) }, { transform: piv(95, 186, 'rotate(-3deg)'), offset: o(480) }, { transform: piv(95, 186, 'rotate(2deg)'), offset: o(880) }, { transform: piv(95, 186, 'rotate(0deg)') }]);
+    run($('#shArm'), [{ transform: piv(109, 148, 'rotate(0deg)') }, { transform: piv(109, 148, 'rotate(-24deg)'), offset: o(180) }, { transform: piv(109, 148, 'rotate(38deg)'), offset: o(480) }, { transform: piv(109, 148, 'rotate(48deg)'), offset: o(620) }, { transform: piv(109, 148, 'rotate(40deg)'), offset: o(900) }, { transform: piv(109, 148, 'rotate(0deg)') }]);
+    run($('#shHand'), [{ transform: piv(128, 112, 'rotate(0deg)') }, { transform: piv(128, 112, 'rotate(0deg)'), offset: o(430) }, { transform: piv(128, 112, 'rotate(38deg)'), offset: o(580) }, { transform: piv(128, 112, 'rotate(34deg)'), offset: o(900) }, { transform: piv(128, 112, 'rotate(0deg)') }]);
+    run($('#shGuide'), [{ transform: piv(81, 148, 'rotate(0deg)') }, { transform: piv(81, 148, 'rotate(-14deg)'), offset: o(180) }, { transform: piv(81, 148, 'rotate(12deg)'), offset: o(480) }, { transform: piv(81, 148, 'rotate(4deg)'), offset: o(700) }, { transform: piv(81, 148, 'rotate(0deg)') }]);
+    run($('#shShadow'), [{ transform: piv(95, 236, 'scale(1)') }, { transform: piv(95, 236, 'scale(.72)'), offset: o(480) }, { transform: piv(95, 236, 'scale(.72)'), offset: o(560) }, { transform: piv(95, 236, 'scale(1)'), offset: o(870) }, { transform: piv(95, 236, 'scale(1)') }]);
+    setTimeout(() => { if (!root.isConnected) return; if (r.hit) { bump(net, 'swish', 700); sfx.play('swish'); if (r.perfect) bump(court.querySelector('.bboard'), 'bflash', 500); shooter.animate([{ transform: 'translateY(0px)' }, { transform: 'translateY(-9px)', offset: .4 }, { transform: 'translateY(0px)', offset: .7 }, { transform: 'translateY(-5px)', offset: .85 }, { transform: 'translateY(0px)' }], { duration: 600 }); } else { bump(court.querySelector('.rimg'), 'rimhit', 500); sfx.play('rim'); setTimeout(() => sfx.play('brick'), 230); shooter.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-4px)', offset: .3 }, { transform: 'translateX(3px)', offset: .6 }, { transform: 'translateX(0)' }], { duration: 450 }); } }, HIT_MS);
   }
   function release(r) { // 2K-style timing read-out: GREEN when it goes in, early/late otherwise
     if (r.hit) return [r.perfect ? 'PERFECT GREEN!' : 'GREEN!', r.perfect ? 'perfect' : 'green', r.perfect ? 'Perfect release' : 'Good release'];
@@ -1653,11 +1687,11 @@ async function hoops(root) {
       const r = await api('POST', '/arcade/hoops/shoot', { lat: Math.round(lat) }); if (!root.isConnected) return;
       place(r.pos); streak = r.streak; total = r.score; const pip = $('#pips').children[r.shot - 1], [word, cls, detail] = release(r); animShot(r);
       vl.textContent = word.replace('PERFECT ', ''); vmeter.classList.add(r.hit ? 'green' : 'miss'); sub(detail);
-      await wait(calm ? 100 : 820); if (!root.isConnected) return;
+      await wait(calm ? 100 : HIT_MS); if (!root.isConnected) return;
       if (r.hit) { pip.classList.add('on'); flash('g'); court.querySelector('.crowd').classList.add('cheer'); setTimeout(() => court.querySelector('.crowd').classList.remove('cheer'), 1100); sfx.play('green'); setTimeout(() => sfx.play(r.perfect ? 'roar' : 'cheer'), 150); pop(word, cls); resMsg(true, `${word} +${r.pts}`); if (r.perfect) fx.burst(70); if (r.streak >= 3) streakFx(r.streak); }
       else { pip.classList.add('bad'); flash('r'); pop(word, 'bad'); resMsg(false, detail); }
       $('#jtN').textContent = `SHOT ${Math.min(r.shot + 1, 10)}/10`; $('#jtS').textContent = r.score; $('#sn').textContent = `${Math.min(r.shot + 1, 10)} / 10`; countUp($('#sc'), r.score, 300);
-      await wait(calm ? 300 : 900); if (!root.isConnected) return;
+      await wait(calm ? 300 : 700); if (!root.isConnected) return;
       if (r.done) { st = null; clearTimeout(timer); lockStart(false); rest(); resMsg(true, `${r.makes}/10 green · ${fmt(r.score)} pts`); skillDone('hoops', r, r.makes >= 7); }
       else { busy = false; await nextShot(r); }
     } catch (e) { toast(e.message); frozen = false; shoot.disabled = false; } finally { busy = false; }

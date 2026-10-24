@@ -640,7 +640,7 @@ Object.assign(arcade, {
 /* ---------- four more skill games: Free Throw Line, Mental Math Sprint, Marching Band, Hallway Dash ---------- */
 const TSCALE = Number(process.env.SKILL_TIME_SCALE) || 1; // tests shrink the clocks
 // Free Throw Line: a meter sweeps back and forth; tap when it is inside the green zone. The server runs the meter clock.
-const HOOPS_SHOTS = 10, hoopsPeriod = i => Math.round(1700 - 55 * i), hoopsZone = streak => Math.max(0.07, 0.17 - 0.012 * streak), HOOPS_STALL_MS = 9000;
+const HOOPS_SHOTS = 10, hoopsPeriod = i => Math.round(1700 - 55 * i), hoopsZone = score => Math.max(0.06, 0.17 - 0.00006 * score), HOOPS_STALL_MS = 9000;
 const HOOPS_TOP = 0.97, HOOPS_GRACE_MS = 35, HOOPS_LAT_MAX = 150, hoopsCenter = zone => HOOPS_TOP - zone; // the green window sits at the top of the meter, like NBA 2K
 const meterPos = (el, period) => { const ph = (el % period) / period; return ph < 0.5 ? ph * 2 : 2 - ph * 2; };
 // Mental Math Sprint: 60 seconds, problems get harder as you go
@@ -697,17 +697,17 @@ function dashReplay(rows, moves, acts) { // -> { dist, passes, powers, shieldUse
 Object.assign(arcade, {
   hoopsStart: ctx => tx(() => { const s = { i: 0, score: 0, makes: 0, perfects: 0, streak: 0, s0: null, shots: [] }; return { ...skillStart(ctx, 'hoops', s), shots: HOOPS_SHOTS, period: hoopsPeriod(0), zone: hoopsZone(0), center: hoopsCenter(hoopsZone(0)) }; }),
   hoopsReady: ctx => tx(() => { // the meter starts when the player's screen is ready, so the meter they see and the server's copy begin together
-    const { r, st } = live(ctx, 'hoops'); if (st.s0 == null) { st.s0 = now(); save(r, st); } return { ok: true, period: hoopsPeriod(st.i), zone: hoopsZone(st.streak), center: hoopsCenter(hoopsZone(st.streak)) };
+    const { r, st } = live(ctx, 'hoops'); if (st.s0 == null) { st.s0 = now(); save(r, st); } return { ok: true, period: hoopsPeriod(st.i), zone: hoopsZone(st.score), center: hoopsCenter(hoopsZone(st.score)) };
   }),
   hoopsShoot: ctx => tx(() => {
     const { r, st } = live(ctx, 'hoops'); if (st.s0 == null) bad('The meter is not ready yet', 409);
-    const lat = Math.min(HOOPS_LAT_MAX, Math.max(0, Number(ctx.body.lat) || 0)), el = Math.max(0, now() - st.s0 - lat), period = hoopsPeriod(st.i), zone = hoopsZone(st.streak); // lat = the player's one-way delay, so what they saw is what counts
+    const lat = Math.min(HOOPS_LAT_MAX, Math.max(0, Number(ctx.body.lat) || 0)), el = Math.max(0, now() - st.s0 - lat), period = hoopsPeriod(st.i), zone = hoopsZone(st.score); // lat = the player's one-way delay, so what they saw is what counts
     const grace = HOOPS_GRACE_MS * 2 / period, stalled = el > HOOPS_STALL_MS, pos = meterPos(el, period), off = Math.abs(pos - hoopsCenter(zone)), hit = !stalled && off <= zone + grace, perfect = hit && off <= zone / 3 + grace;
     const pts = !hit ? 0 : (perfect ? 150 : 100) + Math.min(100, 25 * st.streak);
     st.streak = hit ? st.streak + 1 : 0; st.makes += hit ? 1 : 0; st.perfects += perfect ? 1 : 0; st.score += pts; st.i++; st.shots.push(hit ? (perfect ? 2 : 1) : 0);
     const out = { hit, perfect, pts, pos, center: hoopsCenter(zone), zone, stalled, score: st.score, shot: st.i, streak: st.streak, makes: st.makes };
     if (st.i >= HOOPS_SHOTS) return { ...out, ...skillFinish(ctx, r, st, st.score, { makes: st.makes, perfects: st.perfects }) };
-    st.s0 = null; save(r, st); return { ...out, period: hoopsPeriod(st.i), zone: hoopsZone(st.streak), nextCenter: hoopsCenter(hoopsZone(st.streak)) };
+    st.s0 = null; save(r, st); return { ...out, period: hoopsPeriod(st.i), zone: hoopsZone(st.score), nextCenter: hoopsCenter(hoopsZone(st.score)) };
   }),
   mathStart: ctx => tx(() => {
     const q = mathQuestion(0), st = { t0: now(), i: 0, score: 0, right: 0, combo: 0, bestCombo: 0, ans: q.ans, asked: now() };

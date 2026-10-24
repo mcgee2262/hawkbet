@@ -518,3 +518,12 @@ test('Free Throw max bet: capped at 5,000 by default, admin can change or turn i
   assert.equal((await api('POST', '/arcade/hoops/start', { bet: 9000 })).bet, 9000, 'no limit when off');
   await boss('POST', '/admin/mode', { hoopsCap: { on: true, max: 5000 } });
 });
+
+test('Free Throw Line: the green window shrinks as the score climbs', async () => {
+  const api = await newUser('shrinker'), s = await api('POST', '/arcade/hoops/start', { bet: 0 });
+  await api('POST', '/arcade/hoops/ready'); await sleep(((0.97 - s.zone) * s.period) / 2 + 12);
+  const r = await api('POST', '/arcade/hoops/shoot'); assert.equal(r.hit, true);
+  assert.ok(r.zone < s.zone, `zone ${r.zone} should be smaller than ${s.zone} after scoring ${r.score}`); assert.ok(Math.abs(r.zone - Math.max(0.06, 0.17 - 0.00006 * r.score)) < 1e-9);
+  const miss = await newUser('misser'), m0 = await miss('POST', '/arcade/hoops/start', { bet: 0 }); await miss('POST', '/arcade/hoops/ready'); const mr = await miss('POST', '/arcade/hoops/shoot');
+  assert.equal(mr.hit, false); assert.ok(Math.abs(mr.zone - m0.zone) < 1e-9, 'a miss scores nothing, so the window stays the same size');
+});
