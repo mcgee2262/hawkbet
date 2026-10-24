@@ -1807,13 +1807,17 @@ function dashMonitor(c, x, y, sz) { c.save(); c.translate(x, y); c.fillStyle = '
   c.fillStyle = '#e8461a'; c.fillRect(-sz * .2, -sz * .72, sz * .4, sz * .02); c.restore(); }
 function dashHawk(c, x, y, sz, phase, lean, dir, t, pose) { // the Seahawk, seen from behind with a backpack, legs and wings pumping
   const bob = -Math.abs(Math.sin(phase)) * sz * .05, tum = t || { rot: 0, sc: 1 };
-  c.save(); c.translate(x, y); c.rotate(lean + tum.rot + (pose && pose.slide ? .35 * pose.slide : 0)); c.scale(tum.sc * (pose && pose.slide ? 1 + .12 * pose.slide : 1), tum.sc * (pose && pose.slide ? 1 - .5 * pose.slide : 1)); if (pose && pose.air) phase = 0.3;
+  const po = pose || {}; let sx = tum.sc, sy = tum.sc;
+  if (po.slide) { sx *= 1 + .18 * po.slide; sy *= 1 - .55 * po.slide; } // slide: stretch low and wide
+  if (po.jk != null) { const k = po.jk, q = k < .1 ? -(k / .1) * .2 : k < .28 ? -.2 + (k - .1) / .18 * .36 : k < .7 ? .16 * (1 - (k - .28) / .42) : 0; sy *= 1 + q; sx *= 1 - q * .6; } // jump: crouch, then stretch up, then settle
+  if (po.land) { sy *= 1 - .22 * po.land; sx *= 1 + .14 * po.land; } // landing squash
+  c.save(); c.translate(x, y); c.rotate(lean + tum.rot); c.scale(sx, sy); if (po.air) phase = 0.3;
   c.fillStyle = '#0007'; c.beginPath(); c.ellipse(0, 0, sz * .34, sz * .09, 0, 0, 7); c.fill();
   for (let i = 0; i < 2; i++) { const ph = phase + i * Math.PI, lx = (i ? 1 : -1) * sz * .14, fy = -Math.max(0, Math.sin(ph)) * sz * .13;
     c.strokeStyle = '#f5a623'; c.lineWidth = sz * .06; c.lineCap = 'round'; c.beginPath(); c.moveTo(lx, -sz * .22 + bob); c.lineTo(lx * 1.15, fy - sz * .04); c.stroke();
     c.fillStyle = '#fff'; c.beginPath(); c.ellipse(lx * 1.15, fy - sz * .03, sz * .12, sz * .06, 0, 0, 7); c.fill(); c.fillStyle = '#1b4fd8'; c.fillRect(lx * 1.15 - sz * .12, fy - sz * .035, sz * .24, sz * .025); }
   for (const a of [-.45, 0, .45]) { c.save(); c.translate(0, -sz * .22 + bob); c.rotate(a); c.fillStyle = a ? '#14308f' : '#0b2a6b'; c.beginPath(); c.ellipse(0, sz * .1, sz * .07, sz * .18, 0, 0, 7); c.fill(); c.restore(); }
-  const flap = Math.sin(phase * 2) * .4; for (const sd of [-1, 1]) { c.save(); c.translate(sd * sz * .27, -sz * .52 + bob); c.rotate(sd * (.5 + flap)); const g = c.createLinearGradient(0, -sz * .2, 0, sz * .3); g.addColorStop(0, '#2a5fe0'); g.addColorStop(1, '#0b2a6b'); c.fillStyle = g; c.beginPath(); c.ellipse(0, 0, sz * .11, sz * .3, 0, 0, 7); c.fill(); c.fillStyle = '#fff'; c.globalAlpha = .75; c.beginPath(); c.ellipse(0, sz * .22, sz * .05, sz * .07, 0, 0, 7); c.fill(); c.restore(); }
+  const flap = Math.sin(phase * 2) * .4; for (const sd of [-1, 1]) { c.save(); c.translate(sd * sz * .27, -sz * .52 + bob); c.rotate(sd * (.5 + flap + (po.air ? .9 : 0) + (po.slide ? .5 * po.slide : 0))); const g = c.createLinearGradient(0, -sz * .2, 0, sz * .3); g.addColorStop(0, '#2a5fe0'); g.addColorStop(1, '#0b2a6b'); c.fillStyle = g; c.beginPath(); c.ellipse(0, 0, sz * .11, sz * .3, 0, 0, 7); c.fill(); c.fillStyle = '#fff'; c.globalAlpha = .75; c.beginPath(); c.ellipse(0, sz * .22, sz * .05, sz * .07, 0, 0, 7); c.fill(); c.restore(); }
   const bg = c.createLinearGradient(0, -sz * .84, 0, -sz * .2); bg.addColorStop(0, '#19e58a'); bg.addColorStop(1, '#1b4fd8'); c.fillStyle = bg; c.beginPath(); c.ellipse(0, -sz * .5 + bob, sz * .3, sz * .34, 0, 0, 7); c.fill();
   const pg = c.createLinearGradient(0, -sz * .72, 0, -sz * .28); pg.addColorStop(0, '#ffd24a'); pg.addColorStop(1, '#e09a00'); c.fillStyle = pg; rrPath(c, -sz * .17, -sz * .72 + bob, sz * .34, sz * .42, sz * .07); c.fill(); c.strokeStyle = '#7a4a00'; c.lineWidth = Math.max(1, sz * .025); c.stroke();
   c.beginPath(); c.moveTo(-sz * .1, -sz * .55 + bob); c.lineTo(sz * .1, -sz * .55 + bob); c.stroke(); c.strokeStyle = '#14308f'; c.lineWidth = sz * .04; c.beginPath(); c.moveTo(-sz * .17, -sz * .66 + bob); c.lineTo(-sz * .2, -sz * .4 + bob); c.moveTo(sz * .17, -sz * .66 + bob); c.lineTo(sz * .2, -sz * .4 + bob); c.stroke();
@@ -1862,7 +1866,7 @@ async function dash(root) {
   const dashTickAt = r => run.tick[Math.min(r, run.tick.length - 1)];
   const scoreNow = () => Math.floor(run.pos) * 10 + run.passes * 50 + Math.min(3, Math.floor(run.pos / 100)) * 100;
   function scene(rp, now, crashed, tum) {
-    c.save(); if (run.shakeUntil > now) c.translate((Math.random() - .5) * run.amp, (Math.random() - .5) * run.amp);
+    c.save(); if (run.shakeUntil > now) c.translate((Math.random() - .5) * run.amp, (Math.random() - .5) * run.amp); if (run.slide) c.translate(0, run.slide * 6); // the camera dips on a slide
     c.translate(W / 2, H / 2); c.rotate(Math.max(-1, Math.min(1, (run.target - run.laneX) / 70)) * .018); c.translate(-W / 2, -H / 2); // the camera leans a touch into lane changes
     c.fillStyle = '#0a1233'; c.fillRect(-30, -30, W + 60, H + 60);
     const sf = S(AHEAD), sn = S(-1.5), cg = c.createLinearGradient(0, 0, 0, HY + 60); cg.addColorStop(0, '#080e2a'); cg.addColorStop(1, '#1a2a66');
@@ -1902,10 +1906,12 @@ async function dash(root) {
     }
     for (const p of run.parts) { c.globalAlpha = Math.max(0, p.life / p.max); c.fillStyle = p.col; c.beginPath(); c.arc(p.x, p.y, p.r, 0, 7); c.fill(); } c.globalAlpha = 1;
     const sp = Math.min(2.3, speedAt(rp)), lean = Math.max(-1, Math.min(1, (run.target - run.laneX) / 70)) * .28;
-    c.fillStyle = 'rgba(0,0,0,.35)'; c.beginPath(); c.ellipse(run.laneX, PY, PX * .34, PX * .09, 0, 0, 7); c.fill(); // the shadow stays on the floor when you jump
+    const shk = 1 - Math.min(.45, run.air / 170); c.fillStyle = `rgba(0,0,0,${.35 * shk + .05})`; c.beginPath(); c.ellipse(run.laneX, PY, PX * .34 * shk, PX * .09 * shk, 0, 0, 7); c.fill(); // the shadow stays on the floor and shrinks as you rise
     if (run.shield) { c.strokeStyle = 'rgba(91,208,255,.8)'; c.lineWidth = 3; c.beginPath(); c.arc(run.laneX, PY - PX * .5 - run.air, PX * .62 + Math.sin(now / 120) * 2, 0, 7); c.stroke(); c.fillStyle = 'rgba(91,208,255,.12)'; c.fill(); }
     if (run.magnetUntil >= Math.floor(rp)) { c.strokeStyle = 'rgba(255,93,108,.5)'; c.lineWidth = 2; c.setLineDash([6, 8]); c.lineDashOffset = -now / 40; c.beginPath(); c.arc(run.laneX, PY - PX * .5 - run.air, PX * .95, 0, 7); c.stroke(); c.setLineDash([]); }
-    dashHawk(c, run.laneX, PY - run.air, PX, now / 1000 * 9 * sp, lean, run.dir, tum, { air: run.air > 1, slide: run.slide });
+    if (run.air > 8 && run.jk != null && run.jk < .5) { c.strokeStyle = 'rgba(255,255,255,.28)'; c.lineWidth = 3; c.lineCap = 'round'; for (const o of [-16, 0, 16]) { c.beginPath(); c.moveTo(run.laneX + o, PY - run.air + 8); c.lineTo(run.laneX + o, PY - run.air + 34 + run.air * .25); c.stroke(); } } // speed lines trailing the rise
+    if (run.slide > .3) { c.strokeStyle = 'rgba(255,200,120,.45)'; c.lineWidth = 2; c.lineCap = 'round'; for (let i = 0; i < 4; i++) { const w = ((now * .4 + i * 37) % 70); c.beginPath(); c.moveTo(run.laneX - 28 - w * .4 - i * 4, PY - 6 - i * 6); c.lineTo(run.laneX - 12 - w * .1, PY - 6 - i * 6); c.stroke(); c.beginPath(); c.moveTo(run.laneX + 28 + w * .4 + i * 4, PY - 6 - i * 6); c.lineTo(run.laneX + 12 + w * .1, PY - 6 - i * 6); c.stroke(); } }
+    dashHawk(c, run.laneX, PY - run.air, PX, now / 1000 * 9 * sp, lean, run.dir, tum, { air: run.air > 1, slide: run.slide, jk: run.jk, land: run.land });
     if (!crashed || tum) { const a = Math.max(0, sp - 1.05) * .22; if (a > 0) { c.strokeStyle = `rgba(255,255,255,${Math.min(.3, a)})`; c.lineWidth = 2; for (let i = 0; i < 12; i++) { const ang = i * 2.399 + .3, dd = ((now * .5 * sp + i * 91) % 320) + 90; c.beginPath(); c.moveTo(VX + Math.cos(ang) * dd * .85, 230 + Math.sin(ang) * dd * .9); c.lineTo(VX + Math.cos(ang) * (dd + 34), 230 + Math.sin(ang) * (dd + 34) * 1.1); c.stroke(); } } }
     const vg = c.createRadialGradient(VX, H * .5, H * .3, VX, H * .5, H * .78); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,10,.5)'); c.fillStyle = vg; c.fillRect(0, 0, W, H);
     hud(rp, now); c.restore();
@@ -1952,7 +1958,7 @@ async function dash(root) {
   function tickLoop() {
     if (!run || run.over || !root.isConnected) return; const now = performance.now(), el = now - run.t0, rp = rowPosAt(el); run.pos = rp; const dt = Math.min(50, now - last) / 16, nr = Math.floor(rp - GR) + 1; last = now;
     if (run.queued) { const nl = run.next + run.queued; if (nl >= 0 && nl <= 2 && nr > run.lastRow) { run.moves.push({ row: nr, lane: nl }); run.lastRow = nr; run.from = run.next; run.next = nl; run.dir = run.queued; sfx.play('whoosh'); } run.queued = 0; }
-    if (run.qAct && nr >= run.lastAct + 3) { run.acts.push({ row: nr, kind: run.qAct }); run.lastAct = nr; const dur = Math.max(260, run.cum[Math.min(run.cum.length - 1, nr + AIR)] - el); if (run.qAct === 'j') { run.jump = { t0: now, dur }; sfx.play('tap'); } else { run.slideT = { t0: now, dur }; sfx.play('whoosh'); } run.qAct = null; }
+    if (run.qAct && nr >= run.lastAct + 3) { run.acts.push({ row: nr, kind: run.qAct }); run.lastAct = nr; const dur = Math.max(260, run.cum[Math.min(run.cum.length - 1, nr + AIR)] - el); if (run.qAct === 'j') { run.jump = { t0: now, dur }; sfx.play('tap'); puff(8, run.laneX, PY - 2, 'rgba(210,220,255,.75)', 1.3); } else { run.slideT = { t0: now, dur }; sfx.play('whoosh'); } run.qAct = null; }
     while (run.checked + 1 + GR <= rp) {
       run.checked++; const r = run.checked, mv = run.moves.find(m => m.row === r); if (mv) run.lane = mv.lane; if (r > run.max) return over(false); const row = run.rows[r]; if (!row) break;
       const air = run.acts.some(a => a.kind === 'j' && a.row <= r && r < a.row + AIR), slide = run.acts.some(a => a.kind === 's' && a.row <= r && r < a.row + AIR), L = run.lane, [mask, pass, low, high, power] = row;
@@ -1966,8 +1972,9 @@ async function dash(root) {
     }
     if (!dashTips.done) { for (let k = 3; k <= 8; k++) { const nx = run.rows[nr + k]; if (!nx) break; if (!dashTips.low && nx[2]) { dashTips.low = true; tipOf('⬆️ JUMP the backpacks!'); break; } if (!dashTips.high && nx[3]) { dashTips.high = true; tipOf('⬇️ SLIDE under the sign!'); break; } } if (!dashTips.lane && rp > 3) { dashTips.lane = true; tipOf('⬅️ ➡️ change lanes around the carts'); } if (dashTips.low && dashTips.high && dashTips.lane) dashTips.done = true; }
     run.target = LX(run.next ?? run.lane); run.laneX += (run.target - run.laneX) * Math.min(1, .3 * dt);
-    run.air = 0; if (run.jump) { const kk = (now - run.jump.t0) / run.jump.dur; run.air = kk < 1 ? Math.sin(kk * Math.PI) * 78 : 0; if (kk >= 1) run.jump = null; }
-    run.slide = 0; if (run.slideT) { const kk = (now - run.slideT.t0) / run.slideT.dur; run.slide = kk < 1 ? Math.max(0, Math.min(1, kk * 6, (1 - kk) * 6)) : 0; if (kk >= 1) run.slideT = null; }
+    run.air = 0; run.jk = null; if (run.jump) { const kk = (now - run.jump.t0) / run.jump.dur; run.jk = kk; const u = Math.max(0, Math.min(1, (kk - .08) / .92)); run.air = kk < 1 ? Math.sin(u * Math.PI) * 78 : 0; if (kk >= 1) { run.jump = null; run.jk = null; run.landT = now; puff(10, run.laneX, PY - 2, 'rgba(210,220,255,.75)', 1.5); } }
+    run.land = run.landT ? Math.max(0, 1 - (now - run.landT) / 190) : 0; if (!run.land) run.landT = 0;
+    run.slide = 0; if (run.slideT) { const kk = (now - run.slideT.t0) / run.slideT.dur, e = x => x * x * (3 - 2 * x); run.slide = kk < 1 ? e(Math.max(0, Math.min(1, kk * 5, (1 - kk) * 5))) : 0; if (run.slide > .5 && now - (run.lastSpark || 0) > 45) { run.lastSpark = now; puff(2, run.laneX + (Math.random() - .5) * 30, PY - 3, '#ffb347', .9); } if (kk >= 1) { run.slideT = null; puff(5, run.laneX, PY - 2, 'rgba(210,220,255,.6)', 1); } }
     if (now - run.lastPuff > 70) { run.lastPuff = now; puff(1, run.laneX, PY - 2, 'rgba(210,220,255,.6)', .6); }
     run.parts.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += .1 * dt; p.life -= dt; }); run.parts = run.parts.filter(p => p.life > 0);
     scene(rp, now, false, null); setScore($('#sc'), scoreNow()); $('#ps').textContent = run.passes; if (rp > run.rows.length - 60) more();
