@@ -1,6 +1,7 @@
 FROM node:24-slim
 WORKDIR /app
 COPY server.js index.html style.css app.js logo.svg hawk.svg rocket.svg reset-password.js ./
+COPY assets ./assets
 ENV NODE_ENV=production TRUST_PROXY=1 PORT=8080 DB_PATH=/data/hawkbet.db
 RUN mkdir -p /data && chown -R node:node /data /app
 EXPOSE 8080

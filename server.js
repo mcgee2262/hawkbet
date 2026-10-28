@@ -1413,6 +1413,19 @@ const send = (res, status, body, type = 'application/json') => {
     'Content-Security-Policy': CSP, ...(PROD ? { 'Strict-Transport-Security': 'max-age=31536000' } : {}) });
   res.end(body);
 };
+const ASSET_TYPES = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', mp4: 'video/mp4', webm: 'video/webm' };
+function serveAsset(req, res, name) { // Higgsfield art and clips in /assets: cached for a day, with byte ranges so phones can play video
+  const m = /^[a-z0-9_-]+\.(webp|png|jpg|mp4|webm)$/.exec(name); let st;
+  try { st = m && fs.statSync(path.join(__dirname, 'assets', name)); } catch (e) {} if (!st || !st.isFile()) return send(res, 404, 'Not found', 'text/plain');
+  const hdr = { 'Content-Type': ASSET_TYPES[m[1]], 'Cache-Control': 'public, max-age=86400', 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': CSP }, f = path.join(__dirname, 'assets', name);
+  const r = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  if (r && (r[1] || r[2])) {
+    const start = r[1] === '' ? Math.max(0, st.size - +r[2]) : +r[1], end = r[1] === '' || r[2] === '' ? st.size - 1 : Math.min(+r[2], st.size - 1);
+    if (start > end || start >= st.size) { res.writeHead(416, { ...hdr, 'Content-Range': `bytes */${st.size}` }); return res.end(); }
+    res.writeHead(206, { ...hdr, 'Content-Range': `bytes ${start}-${end}/${st.size}`, 'Content-Length': end - start + 1 }); return fs.createReadStream(f, { start, end }).pipe(res);
+  }
+  res.writeHead(200, { ...hdr, 'Content-Length': st.size }); fs.createReadStream(f).pipe(res);
+}
 function clientIp(req) { // only trust proxy headers when told we're behind one
   if (TRUST_PROXY) { const f = req.headers['fly-client-ip'] || req.headers['cf-connecting-ip'] || String(req.headers['x-forwarded-for'] || '').split(',').pop().trim(); if (f) return f; }
   return req.socket.remoteAddress;
@@ -1425,6 +1438,7 @@ function sameOrigin(req) { // CSRF belt-and-braces on top of SameSite=Lax: brows
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x'), key = `${req.method} ${url.pathname}`;
   if (key === 'GET /healthz') { try { db.prepare('SELECT 1').get(); return send(res, 200, '{"ok":true}'); } catch (e) { return send(res, 503, '{"ok":false}'); } }
+  if (req.method === 'GET' && url.pathname.startsWith('/assets/')) return serveAsset(req, res, url.pathname.slice(8));
   if (!url.pathname.startsWith('/api/')) {
     const f = FILES[url.pathname]; if (req.method !== 'GET' || !f) return send(res, 404, 'Not found', 'text/plain');
     return send(res, 200, fs.readFileSync(path.join(__dirname, f)), TYPES[f.split('.').pop()]);

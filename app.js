@@ -687,8 +687,18 @@ async function plinko(root, my) {
     <label>Rows: <b id="rv">12</b></label><input id="rows" type="range" min="8" max="16" value="12" style="width:100%">
     <div style="height:14px"></div><button class="btn" id="drop">Drop ball</button><div class="res" id="res"></div>
     <div class="note">The server picks where the ball lands, then we play it back. Edge slots pay big, the middle pays little.</div></div>
-    <div class="panel stage"><canvas id="cv"></canvas></div></div>`;
+    <div class="panel stage dropstage"><div class="dropframe"><canvas id="cv"></canvas><div class="bigwin hidden" id="bigwin" aria-hidden="true"><video id="bwv" src="assets/bigwin.mp4" muted playsinline preload="none" poster="assets/bigwin-poster.webp"></video><b id="bwt"></b></div></div></div></div>`;
   const cv = $('#cv'), ctx = cv.getContext('2d'), W = 640, top = 40, rh = 28; let sp, H;
+  const IM = Object.fromEntries(['ball', 'peg', 'slot'].map(k => { const im = new Image(); im.src = `assets/drop-${k}.webp`; return [k, im]; })), ok = im => im.complete && im.naturalWidth > 0;
+  const tints = {}, tint = col => { if (tints[col] || !ok(IM.slot)) return tints[col]; const c = document.createElement('canvas'); c.width = IM.slot.naturalWidth; c.height = IM.slot.naturalHeight; const g = c.getContext('2d'); g.drawImage(IM.slot, 0, 0); g.globalCompositeOperation = 'multiply'; g.fillStyle = col; g.fillRect(0, 0, c.width, c.height); return (tints[col] = c); }; // black stays black, so it vanishes when added to the board
+  let pegLayer = null, pegKey = '';
+  const paintPegs = () => { // all the studs once, shadowed, into one layer
+    const d = devicePixelRatio || 1, key = `${rows}|${H}|${ok(IM.peg)}`; if (key === pegKey && pegLayer) return; pegKey = key;
+    pegLayer = document.createElement('canvas'); pegLayer.width = W * d; pegLayer.height = H * d; const g = pegLayer.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0);
+    const pw = 12, ph = ok(IM.peg) ? pw * IM.peg.naturalHeight / IM.peg.naturalWidth : 0;
+    for (let i = 0; i < rows; i++) for (let j = 0; j < i + 3; j++) { const x = W / 2 + (j - (i + 2) / 2) * sp, y = top + i * rh;
+      if (ph) { g.fillStyle = 'rgba(0,0,0,.4)'; g.beginPath(); g.ellipse(x + 1.5, y + 3.5, 4.5, 2, 0, 0, 7); g.fill(); g.drawImage(IM.peg, x - pw / 2, y - ph / 2 - 1, pw, ph); } else { g.fillStyle = '#2f6bff'; g.beginPath(); g.arc(x, y, 3.2, 0, 7); g.fill(); } }
+  };
   async function relayout() {
     const key = rows + risk;
     if (!tables[key]) tables[key] = (await api('GET', `/arcade/plinko-table?rows=${rows}&risk=${risk}`)).mults;
@@ -699,26 +709,33 @@ async function plinko(root, my) {
   const px = (r, k) => W / 2 + (k - r / 2) * sp;
   function draw(now) {
     raf = requestAnimationFrame(draw); if (!M) return;
-    ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#2f6bff';
-    for (let i = 0; i < rows; i++) for (let j = 0; j < i + 3; j++) { ctx.beginPath(); ctx.arc(W / 2 + (j - (i + 2) / 2) * sp, top + i * rh, 3.2, 0, 7); ctx.fill(); }
+    ctx.clearRect(0, 0, W, H); paintPegs(); ctx.drawImage(pegLayer, 0, 0, W, H);
     const y = top + rows * rh + 22, w = sp * 0.86;
     M.forEach((m, k) => {
       const x = px(rows, k), f = flash[k] && now - flash[k] < 400 ? 1 - (now - flash[k]) / 400 : 0;
-      ctx.fillStyle = m >= 5 ? '#ffc542' : m >= 1 ? '#12c26a' : '#2a3a4d'; ctx.globalAlpha = 0.55 + f * 0.45;
-      ctx.beginPath(); ctx.roundRect(x - w / 2, y - 12 + f * 4, w, 26, 6); ctx.fill(); ctx.globalAlpha = 1;
-      ctx.fillStyle = m >= 1 ? '#00110a' : '#cfe0f3'; ctx.font = `700 ${Math.min(11, sp * 0.3)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText((m >= 10 ? m.toFixed(0) : m.toFixed(1)) + 'x', x, y + 5);
+      const col = m >= 5 ? '#ffe08a' : m >= 1 ? '#3dffa5' : '#ff6b7a', cup = tint(col);
+      if (cup) { const cw2 = w + 4, ch2 = cw2 * cup.height / cup.width; ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = (m >= 1 ? .95 : .7) + f * .05; ctx.drawImage(cup, x - cw2 / 2, y - ch2 / 2 - 1 - f * 3, cw2, ch2); ctx.restore(); }
+      else { ctx.fillStyle = m >= 5 ? '#ffc542' : m >= 1 ? '#12c26a' : '#2a3a4d'; ctx.globalAlpha = 0.55 + f * 0.45; ctx.beginPath(); ctx.roundRect(x - w / 2, y - 12 + f * 4, w, 26, 6); ctx.fill(); ctx.globalAlpha = 1; }
+      ctx.font = `800 ${Math.min(11, sp * 0.3)}px sans-serif`; ctx.textAlign = 'center'; const lab = (m >= 10 ? m.toFixed(0) : m.toFixed(1)) + 'x'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.strokeText(lab, x, y + 4 - f * 3); ctx.fillStyle = '#fff'; ctx.fillText(lab, x, y + 4 - f * 3);
     });
     balls.forEach(b => {
       const t = Math.max(0, Math.min((now - b.t0) / 120, b.pts.length - 1)), i = Math.floor(t), f = t - i;
       if (t >= b.pts.length - 1 && !b.done) { b.done = true; flash[b.k] = now; land(b); }
       const a = b.pts[i], c = b.pts[Math.min(i + 1, b.pts.length - 1)], x = a[0] + (c[0] - a[0]) * f, yy = a[1] + (c[1] - a[1]) * f - Math.sin(f * Math.PI) * 7;
-      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x, yy, 6, 0, 7); ctx.fill(); ctx.fillStyle = '#12c26a'; ctx.beginPath(); ctx.arc(x, yy, 3, 0, 7); ctx.fill();
+      if (ok(IM.ball)) { ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(x + 2, yy + 10, 7, 2.6, 0, 0, 7); ctx.fill(); ctx.drawImage(IM.ball, x - 10, yy - 10, 20, 20); } else { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x, yy, 6, 0, 7); ctx.fill(); ctx.fillStyle = '#12c26a'; ctx.beginPath(); ctx.arc(x, yy, 3, 0, 7); ctx.fill(); }
     });
     balls = balls.filter(b => !b.done || now - b.t0 < b.pts.length * 120 + 50);
   }
+  let bwT = 0;
+  function bigWin(b) { // 100x and up: the mascot celebrates over the board for a few seconds
+    const box = $('#bigwin'), v = $('#bwv'); if (!box) return; clearTimeout(bwT); $('#bwt').textContent = `${b.mult >= 1000 ? b.mult.toFixed(0) : +b.mult.toFixed(1)}x`; box.classList.remove('hidden');
+    if (!calm) { try { v.currentTime = 0; v.play().catch(() => {}); } catch (e) {} } bwT = setTimeout(() => { box.classList.add('hidden'); try { v.pause(); } catch (e) {} }, calm ? 2200 : 3400);
+  }
+  stopFns.push(() => clearTimeout(bwT));
   function land(b) {
     pending = Math.max(0, pending - b.payout); showBal();
     if (b.mult >= 2) fx.win(b.mult >= 5);
+    if (b.mult >= 100) bigWin(b);
     $('#res').innerHTML = `<span class="${b.mult >= 1 ? 'win' : 'lose'}">${b.mult.toFixed(2)}x · ${b.payout - b.bet >= 0 ? '+' : ''}${fmt(b.payout - b.bet)} 🪙</span>`;
   }
   $('#drop').onclick = act(async () => {

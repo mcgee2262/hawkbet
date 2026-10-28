@@ -527,3 +527,12 @@ test('Free Throw Line: the green window shrinks as the score climbs', async () =
   const miss = await newUser('misser'), m0 = await miss('POST', '/arcade/hoops/start', { bet: 0 }); await miss('POST', '/arcade/hoops/ready'); const mr = await miss('POST', '/arcade/hoops/shoot');
   assert.equal(mr.hit, false); assert.ok(Math.abs(mr.zone - m0.zone) < 1e-9, 'a miss scores nothing, so the window stays the same size');
 });
+
+test('assets: art is served with the right type, byte ranges work, and nothing outside /assets or odd names is served', async () => {
+  const get = (p, h = {}) => fetch(BASE + p, { headers: h });
+  const a = await get('/assets/drop-bg.webp'); assert.equal(a.status, 200); assert.equal(a.headers.get('content-type'), 'image/webp'); assert.match(a.headers.get('cache-control'), /max-age/); const full = Buffer.from(await a.arrayBuffer()); assert.ok(full.length > 1000);
+  const r = await get('/assets/drop-bg.webp', { Range: 'bytes=0-99' }); assert.equal(r.status, 206); assert.equal(r.headers.get('content-range'), `bytes 0-99/${full.length}`); assert.equal((await r.arrayBuffer()).byteLength, 100);
+  const tail = await get('/assets/drop-bg.webp', { Range: 'bytes=-50' }); assert.equal(tail.status, 206); assert.equal((await tail.arrayBuffer()).byteLength, 50);
+  assert.equal((await get('/assets/drop-bg.webp', { Range: `bytes=${full.length + 5}-` })).status, 416);
+  for (const p of ['/assets/nope.webp', '/assets/../server.js', '/assets/%2e%2e/server.js', '/assets/server.js', '/assets/', '/assets/a/b.webp']) assert.equal((await get(p)).status, 404, p);
+});

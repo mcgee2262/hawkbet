@@ -1125,3 +1125,12 @@ h1 .fb{font-size:13px;color:var(--mut);font-weight:600;margin-left:8px}
 #vl{font:900 11px system-ui;letter-spacing:.08em;fill:#fff;paint-order:stroke;stroke:#000;stroke-width:3px;stroke-linejoin:round}
 .court .mbadge.ov{left:auto;right:8px;top:auto;bottom:8px;margin:0}
 .court .mbadge.ov{padding:4px 9px;gap:0 6px}.court .mbadge.ov .mbx{font-size:20px;min-width:40px}.court .mbadge.ov .mbp{font-size:12px}.court .mbadge.ov small{display:none}
+/* Seahawk Drop: stadium backdrop, chrome cabinet frame, glass slots (Higgsfield art in /assets) */
+.dropstage{background:linear-gradient(#050a1c66,#050a1c33),url(assets/drop-bg.webp) center/cover no-repeat;border-color:#2a3a6a}
+.dropframe{position:relative;max-width:700px;margin:0 auto;border:30px solid transparent;border-image:url(assets/drop-frame.webp) 94 / 30px stretch;background:rgba(3,8,26,.58);box-shadow:0 18px 40px #000a}
+.dropframe canvas{display:block;margin:0 auto}
+.bigwin{position:absolute;inset:0;display:grid;place-items:center;background:radial-gradient(circle,#0a1131cc,#050a1cf0);z-index:3;animation:bwin .4s ease-out}
+.bigwin.hidden{display:none}.bigwin video{width:min(78%,360px);aspect-ratio:1;object-fit:cover;border-radius:22px;box-shadow:0 0 40px #19e58a88,0 0 0 3px #ffffff33;background:#000 url(assets/bigwin-poster.webp) center/cover}
+.bigwin b{position:absolute;left:50%;bottom:7%;transform:translateX(-50%);font:900 clamp(36px,10vw,64px)/1 system-ui;letter-spacing:.02em;color:#ffe08a;text-shadow:0 0 18px #ffb21a,0 3px 0 #0008;animation:bwpop .7s cubic-bezier(.2,1.6,.4,1)}
+@keyframes bwin{from{opacity:0}}@keyframes bwpop{from{transform:translateX(-50%) scale(.4);opacity:0}}
+@media(max-width:600px){.dropframe{border-width:22px;border-image-width:22px}}
