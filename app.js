@@ -687,7 +687,7 @@ async function plinko(root, my) {
     <label>Rows: <b id="rv">12</b></label><input id="rows" type="range" min="8" max="16" value="12" style="width:100%">
     <div style="height:14px"></div><button class="btn" id="drop">Drop ball</button><div class="res" id="res"></div>
     <div class="note">The server picks where the ball lands, then we play it back. Edge slots pay big, the middle pays little.</div></div>
-    <div class="panel stage dropstage"><div class="dropframe"><canvas id="cv"></canvas><div class="bigwin hidden" id="bigwin" aria-hidden="true"><video id="bwv" src="assets/bigwin.mp4" muted playsinline preload="none" poster="assets/bigwin-poster.webp"></video><b id="bwt"></b></div></div></div></div>`;
+    <div class="panel stage dropstage"><div class="dropframe"><canvas id="cv"></canvas><div class="dropwin hidden" id="bigwin" aria-hidden="true"><video id="bwv" src="assets/bigwin.mp4" muted playsinline preload="none" poster="assets/bigwin-poster.webp"></video><b id="bwt"></b></div></div></div></div>`;
   const cv = $('#cv'), ctx = cv.getContext('2d'), W = 640, top = 40, rh = 28; let sp, H;
   const IM = Object.fromEntries(['ball', 'peg', 'slot'].map(k => { const im = new Image(); im.src = `assets/drop-${k}.webp`; return [k, im]; })), ok = im => im.complete && im.naturalWidth > 0;
   const tints = {}, tint = col => { if (tints[col] || !ok(IM.slot)) return tints[col]; const c = document.createElement('canvas'); c.width = IM.slot.naturalWidth; c.height = IM.slot.naturalHeight; const g = c.getContext('2d'); g.drawImage(IM.slot, 0, 0); g.globalCompositeOperation = 'multiply'; g.fillStyle = col; g.fillRect(0, 0, c.width, c.height); return (tints[col] = c); }; // black stays black, so it vanishes when added to the board
