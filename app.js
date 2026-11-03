@@ -204,7 +204,7 @@ async function go() {
   document.querySelectorAll('#origlist a').forEach(a => a.classList.toggle('on', view === 'arcade' && a.dataset.og === game));
   if (view !== 'arcade') document.documentElement.style.removeProperty('--ga');
   if (SCHOOL() && !SKILL_IDS.has(game)) game = 'hoops';
-  paintLevel(); document.body.classList.remove('drawer');
+  paintLevel(); document.body.classList.remove('drawer'); document.body.classList.remove('pg'); $('#app').style.height = ''; // phone one-screen games switch this on again in renderArcade
   const R = { rewards: renderRewards, home: renderHome, board: renderBoard, arcade: renderArcade, lineups: renderLineups, leaders: renderLeaders, admin: renderAdmin, bank: renderBank, luck: renderLuck, shop: renderShop };
   try { await (R[view] || renderHome)(my); const ap = $('#app'); ap.classList.remove('pagein'); void ap.offsetWidth; ap.classList.add('pagein'); } catch (e) { if (my === nav) $('#app').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
   renderSlipBar();
@@ -415,6 +415,49 @@ const CATS = [['all', 'All'], ['featured', '⭐ Featured'], ['recent', '🕘 Rec
 const SKILL_IDS = new Set(['bell', 'memory', 'trivia', 'hoops', 'math', 'band', 'dash']);
 let arcCat = 'all';
 const catsNow = () => SCHOOL() ? CATS.filter(([k]) => k !== 'classic') : CATS;
+/* ---------- phone one-screen games ----------
+   On a phone held upright, the game page becomes one screen: a slim bar, the board (scaled to whatever room is left), and a dock at the bottom
+   with the bet and the main button. Rules and the less-used controls live in a sheet behind the ⚙ button, so the board and its button always fit together. */
+const PHONE = matchMedia('(max-width:899px) and (orientation:portrait)');
+PHONE.addEventListener('change', () => { if (view === 'arcade') go(); });
+const DOCK_KEEP = '.betrow,.duo,.btn,.res,.stats,.stats3,.mbadge,[data-dock]';
+const STAGE_TO_DOCK = { bj: ['#acts', '#deal2'], hoops: ['#shoot'], math: ['.mrow'], cross: ['.xacts'] }; // controls that live inside the board but belong in the dock
+const CTRL_TO_STAGE = { roulette: ['.chips', '.rtable'] }; // the betting table is part of the board
+const MIN_SCALE = { roulette: 0.8 }; // boards that must stay big enough to tap: they scroll inside the board instead of shrinking
+const DOCK_DROP = { dice: ['.duo'], slots: ['.stats', '.duo'], hoops: ['.stats'], dash: ['.stats'] }; // kept out of the dock to save room (moved to the sheet)
+function phoneGame(cur, list) {
+  const body = document.body, app = $('#app'), topbar = document.querySelector('.top'), tab = document.querySelector('.tabbar');
+  body.classList.add('pg');
+  const size = () => { const vh = window.visualViewport ? visualViewport.height : innerHeight; app.style.height = Math.max(320, Math.round(vh - app.getBoundingClientRect().top - tab.offsetHeight)) + 'px'; };
+  size(); addEventListener('resize', size); if (window.visualViewport) visualViewport.addEventListener('resize', size);
+  stopFns.push(() => { removeEventListener('resize', size); if (window.visualViewport) visualViewport.removeEventListener('resize', size); });
+  const best = bestText(cur.id);
+  app.insertAdjacentHTML('afterbegin', `<div class="pgbar"><button class="pgb" id="pgGames" aria-label="Choose a game">🎮 Games</button><div class="pgt"><b>${esc(cur.emoji)} ${esc(cur.title)}</b>${best ? `<small>🏆 ${esc(best)}</small>` : ''}</div><button class="pgb" id="pgOpts" aria-label="Rules and options">⚙ Rules</button></div>`);
+  const ctrl = app.querySelector('.ctrl'), stage = app.querySelector('.stage'); if (!ctrl || !stage) return;
+  // dock: the bet and main buttons; opts: everything else (rules, risk, targets, tiers, top scores)
+  const dock = document.createElement('div'), opts = document.createElement('div'); dock.className = 'dock'; opts.className = 'opts'; opts.innerHTML = '<button class="optx" id="optx" aria-label="Close">✕</button>';
+  body.dataset.pgg = cur.id; const drop = DOCK_DROP[cur.id] || [], toStage = CTRL_TO_STAGE[cur.id] || [];
+  for (const k of [...ctrl.children]) { if (toStage.some(s => k.matches(s))) stage.appendChild(k); else (k.matches(DOCK_KEEP) && !drop.some(s => k.matches(s)) ? dock : opts).appendChild(k); }
+  for (const sel of STAGE_TO_DOCK[cur.id] || []) { const el = stage.querySelector(sel); if (el) dock.appendChild(el); }
+  ctrl.append(dock, opts);
+  const toggle = on => ctrl.classList.toggle('opts-open', on ?? !ctrl.classList.contains('opts-open'));
+  $('#pgOpts').onclick = () => toggle(); $('#optx').onclick = () => toggle(false);
+  $('#pgGames').onclick = () => showModal(`<h3 style="margin:0 0 10px">Choose a game</h3><div class="pggrid">${list.map(g => `<button class="pgg ${g.id === cur.id ? 'on' : ''}" data-pg="${g.id}"><span>${esc(g.emoji)}</span>${esc(g.title)}</button>`).join('')}</div><button class="btn alt" data-close style="margin-top:10px">Close</button>`);
+  $('#modal').onclick = e => { const b = e.target.closest('[data-pg]'); if (b) { game = b.dataset.pg; closeModal(); go(); } else if (e.target.id === 'modal') closeModal(); };
+  // fit: scale the board to the room left over (never bigger than it is). Measured again whenever the board changes size.
+  const fit = document.createElement('div'); fit.className = 'fit'; while (stage.firstChild) fit.appendChild(stage.firstChild); stage.appendChild(fit);
+  let last = '';
+  const refit = () => {
+    if (!fit.isConnected) return; const cs = getComputedStyle(stage), aw = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), ah = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    fit.style.transform = 'none'; fit.style.width = ''; fit.style.height = ''; const nw = Math.max(fit.scrollWidth, 1), nh = Math.max(fit.scrollHeight, 1), k = Math.max(MIN_SCALE[cur.id] || 0, Math.min(1, aw / nw, ah / nh)), key = [aw, ah, nw, nh].join(); stage.style.overflowY = nh * k > ah + 1 ? 'auto' : 'hidden';
+    fit.style.width = nw + 'px'; fit.style.transformOrigin = '0 0'; fit.style.transform = `translate(${Math.max(0, (aw - nw * k) / 2)}px,${Math.max(0, (ah - nh * k) / 2)}px) scale(${k})`; if (key !== last) last = key;
+  };
+  const setc = (c, on) => { if (ctrl.classList.contains(c) !== on) ctrl.classList.toggle(c, on); }; // only touch the class when it changes, or the observer below would fire forever
+  const playing = () => { const s = ctrl.querySelector('#start'), p = !!(s && s.disabled); setc('playing', p); setc('bare', p && ![...dock.children].some(k => k.offsetHeight > 0)); }; // 'bare': nothing left to show in the dock while playing
+  refit(); const t = setInterval(() => { playing(); refit(); }, 350), mo = new MutationObserver(recs => { if (recs.some(r => r.target !== fit)) requestAnimationFrame(refit); }); mo.observe(fit, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
+  const mo2 = new MutationObserver(() => { playing(); requestAnimationFrame(refit); }); mo2.observe(ctrl, { subtree: true, attributes: true, attributeFilter: ['disabled', 'class'] });
+  stopFns.push(() => { clearInterval(t); mo.disconnect(); mo2.disconnect(); delete body.dataset.pgg; });
+}
 async function renderArcade(my) {
   CFG = { ...(await api('GET', '/arcade/config')), user: U.username }; U.luck = CFG.luckName; // luck can change between visits (boosters and charges run out)
   if (Date.now() - (renderArcade.at || 0) > 30000) { STATS = await api('GET', '/arcade/stats').catch(() => STATS); renderArcade.at = Date.now(); } if (my !== nav) return;
@@ -433,6 +476,7 @@ async function renderArcade(my) {
   const on = $('.gtile.on'); if (on) on.scrollIntoView({ block: 'nearest', inline: 'center' });
   paintPB();
   await (GAME_FNS[game] || plinko)($('#gm'), my);
+  if (my === nav && PHONE.matches) phoneGame(cur, list);
   if (my === nav) bindKeys(game);
 }
 // Each key lists buttons to try in order; the first visible, enabled one gets pressed. "last:" repeats your last pick.

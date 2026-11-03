@@ -1134,3 +1134,43 @@ h1 .fb{font-size:13px;color:var(--mut);font-weight:600;margin-left:8px}
 .dropwin b{position:absolute;left:50%;bottom:7%;transform:translateX(-50%);font:900 clamp(36px,10vw,64px)/1 system-ui;letter-spacing:.02em;color:#ffe08a;text-shadow:0 0 18px #ffb21a,0 3px 0 #0008;animation:bwpop .7s cubic-bezier(.2,1.6,.4,1)}
 @keyframes bwin{from{opacity:0}}@keyframes bwpop{from{transform:translateX(-50%) scale(.4);opacity:0}}
 @media(max-width:600px){.dropframe{border-width:22px;border-image-width:22px}}
+
+/* phones: grids and panels may shrink below their content, so nothing pushes the page wider than the screen */
+@media (max-width:760px){.shopwrap,.admgrid{grid-template-columns:minmax(0,1fr)!important}.shopwrap>*,.admgrid>*,.panel,.game>*{min-width:0}.lparts li,.lucktotal,.note{overflow-wrap:anywhere}}
+@media (max-width:760px){.lb{table-layout:fixed;width:100%}.lb td,.lb th{padding:8px 5px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lb th:first-child,.lb td:first-child{width:30px}.lbname{gap:5px}.lbname .av{--s:22px!important}}
+
+/* ===== phone one-screen games (see phoneGame in app.js) ===== */
+.pgbar{display:none}.pggrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:60vh;overflow:auto}
+.pgg{display:flex;align-items:center;gap:8px;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);color:#fff;font-weight:700;font-size:13px;text-align:left}.pgg span{font-size:20px}.pgg.on{border-color:var(--green);box-shadow:0 0 0 1px var(--green) inset}
+body.pg{overflow:hidden;overscroll-behavior:none}
+body.pg .banner{display:none}
+body.pg main#app,body.pg main{padding:6px 8px 0!important;overflow:hidden;display:flex;flex-direction:column}
+body.pg .archead,body.pg .cats,body.pg .gstrip,body.pg .gamehead,body.pg .arcfoot{display:none!important}
+body.pg .pgbar{display:flex;align-items:center;gap:8px;flex:none;margin-bottom:6px}
+.pgb{flex:none;min-height:40px;padding:0 12px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);color:#fff;font-weight:800;font-size:13px}
+.pgt{flex:1;min-width:0;display:grid;line-height:1.15}.pgt b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pgt small{color:var(--gold);font-size:11px}
+body.pg #gm{flex:1;min-height:0;display:flex;flex-direction:column}
+body.pg .game,body.pg .game.wide,body.pg .game.wide2{display:flex!important;flex-direction:column;height:100%;gap:8px;min-height:0}
+body.pg .game>.stage{order:1;flex:1;min-height:0;padding:6px;overflow:hidden;position:relative;display:block}
+body.pg .game>.ctrl{order:2;flex:none;padding:8px 10px 10px;position:relative}
+body.pg .fit{position:relative}
+body.pg .dock{display:grid;gap:6px}
+body.pg .dock .betrow{margin:0}body.pg .dock .betrow input{min-height:44px}body.pg .dock .chip{min-height:44px;min-width:44px}
+body.pg .dock .btn{min-height:50px;font-size:17px;padding:10px;margin:0}body.pg .dock .btn kbd{display:none}
+body.pg .dock .duo{margin:0}body.pg .dock .res{min-height:0;margin:0;font-size:14px;text-align:center}body.pg .dock .res:empty{display:none}
+body.pg .dock .stats{margin:0;gap:6px;grid-template-columns:repeat(auto-fit,minmax(0,1fr))}body.pg .dock .stats>div{padding:4px 8px}body.pg .dock .stats small{font-size:10px}body.pg .dock .stats b{font-size:16px}
+body.pg .dock .mbadge{margin:0;padding:4px 10px}body.pg .dock .mbadge .mbx{font-size:20px;min-width:44px}body.pg .dock .mbadge small{display:none}
+body.pg .dock .bjacts{margin:0;max-width:none}body.pg .dock .bjacts .btn{min-height:50px;flex-direction:row;gap:6px;font-size:16px;padding:6px}body.pg .dock .bjacts .btn span{font-size:20px}
+body.pg .dock .bjbig{margin:0}body.pg .dock .shootbtn{margin:0;font-size:20px}
+body.pg .opts{display:none;position:absolute;left:0;right:0;bottom:calc(100% + 6px);max-height:62dvh;overflow:auto;padding:14px 12px;border-radius:16px;background:linear-gradient(160deg,#16205a,#0a1131);border:1px solid #3a4c90;box-shadow:0 -10px 40px #000c;z-index:40}
+body.pg .ctrl.opts-open .opts{display:block}
+body.pg .optx{position:sticky;top:0;float:right;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#0008;color:#fff;font-weight:900}
+body.pg .opts .note{display:block!important}
+body.pg .keyhint,body.pg .dragtip{display:none!important}
+body.pg .ctrl.playing .betrow,body.pg .ctrl.playing .duo{display:none}
+body.pg .dock .stats3{margin:0}body.pg .dock .stats3 small{display:none}body.pg .dock .stats3>div{padding:4px 6px}
+body[data-pgg=dice] .dgraph,body[data-pgg=dice] .dfair,body[data-pgg=dice] .dstats,body[data-pgg=dice] .ddet{display:none}
+body.pg .dock .duo .btn{font-size:14px;padding:6px 4px;min-height:44px;line-height:1.15}
+body[data-pgg=roulette] .wheelwrap.big{max-width:150px;margin:0 auto}
+body[data-pgg=bj] .dock:has(#acts:not(.hidden)) .betrow{display:none}
+body.pg .ctrl.bare{display:none}
