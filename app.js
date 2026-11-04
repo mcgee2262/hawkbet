@@ -1900,6 +1900,14 @@ function dashMonitor(c, x, y, sz) { c.save(); c.translate(x, y); c.fillStyle = '
   c.fillStyle = '#ffd24a'; rrPath(c, -sz * .3, -sz * .86, sz * .6, sz * .5, sz * .08); c.fill(); c.fillStyle = '#d6e0ff'; c.fillRect(-sz * .3, -sz * .66, sz * .6, sz * .07); c.fillRect(-sz * .3, -sz * .52, sz * .6, sz * .05);
   c.fillStyle = '#f0c8a0'; c.beginPath(); c.arc(0, -sz * 1.0, sz * .18, 0, 7); c.fill(); c.fillStyle = '#1b2a6b'; c.beginPath(); c.arc(0, -sz * 1.04, sz * .18, Math.PI, 0); c.fill(); c.fillRect(-sz * .26, -sz * 1.05, sz * .52, sz * .05);
   c.fillStyle = '#e8461a'; c.fillRect(-sz * .2, -sz * .72, sz * .4, sz * .02); c.restore(); }
+const DIMG = Object.fromEntries(['run1', 'run2', 'jump', 'slide', 'cart', 'bags', 'sign', 'coin', 'magnet', 'shield', 'bg'].map(k => { const im = new Image(); im.src = `assets/dash-${k}.webp`; return [k, im]; })), dok = k => DIMG[k].complete && DIMG[k].naturalWidth > 0;
+const dashArt = () => ['run1', 'run2', 'jump', 'slide', 'cart', 'bags', 'sign', 'coin', 'magnet', 'shield'].every(dok); // the Higgsfield sprites; until they load (or if they fail) the drawn versions are used
+function dashRunner(c, x, y, sz, phase, lean, t, po) { // the 3D mascot: two run steps, a jump and a slide, with the same squash and stretch as before
+  const tum = t || { rot: 0, sc: 1 }, key = po.slide > .3 ? 'slide' : po.air > 6 ? 'jump' : Math.floor(phase * .85) % 2 ? 'run2' : 'run1', im = DIMG[key], h = sz * (key === 'slide' ? 1.15 : 1.5), w = h * im.naturalWidth / im.naturalHeight;
+  let sx = tum.sc, sy = tum.sc; if (po.jk != null) { const k = po.jk, q = k < .1 ? -(k / .1) * .2 : k < .28 ? -.2 + (k - .1) / .18 * .36 : k < .7 ? .16 * (1 - (k - .28) / .42) : 0; sy *= 1 + q; sx *= 1 - q * .6; } if (po.land) { sy *= 1 - .22 * po.land; sx *= 1 + .14 * po.land; }
+  const bob = key.startsWith('run') ? -Math.abs(Math.sin(phase * .85 * Math.PI)) * sz * .05 : 0;
+  c.save(); c.translate(x, y + bob); c.rotate(lean + tum.rot); c.scale(sx, sy); c.drawImage(im, -w / 2, -h, w, h); c.restore();
+}
 function dashHawk(c, x, y, sz, phase, lean, dir, t, pose) { // the Seahawk, seen from behind with a backpack, legs and wings pumping
   const bob = -Math.abs(Math.sin(phase)) * sz * .05, tum = t || { rot: 0, sc: 1 };
   const po = pose || {}; let sx = tum.sc, sy = tum.sc;
@@ -1960,26 +1968,29 @@ async function dash(root) {
   const speedAt = r => 420 / dashTickAt(Math.max(0, Math.floor(r)));
   const dashTickAt = r => run.tick[Math.min(r, run.tick.length - 1)];
   const scoreNow = () => Math.floor(run.pos) * 10 + run.passes * 50 + Math.min(3, Math.floor(run.pos / 100)) * 100;
+  const sprite = (k, x, yb, yt, a) => { const im = DIMG[k], h = Math.max(2, yb - yt), w = h * im.naturalWidth / im.naturalHeight; c.drawImage(im, x - w / 2, yt, w, h); }; // bottom edge, top edge: sizes follow the hallway's perspective
+  const coinSprite = (x, y, sz, now, k) => { const sp = Math.max(.22, Math.abs(Math.cos(now / 240 + k))), h = sz, w = h * sp; c.save(); c.translate(x, y - sz * .62 - Math.sin(now / 260 + k) * sz * .06); const g = c.createRadialGradient(0, 0, 0, 0, 0, sz * .7); g.addColorStop(0, 'rgba(255,220,90,.55)'); g.addColorStop(1, 'rgba(255,220,90,0)'); c.fillStyle = g; c.fillRect(-sz * .7, -sz * .7, sz * 1.4, sz * 1.4); c.drawImage(DIMG.coin, -w / 2, -h / 2, w, h); c.restore(); };
+  const powerSprite = (x, y, sz, now, magnet) => { const im = DIMG[magnet ? 'magnet' : 'shield'], h = sz, w = h * im.naturalWidth / im.naturalHeight, col = magnet ? '255,93,108' : '91,208,255'; c.save(); c.translate(x, y - sz * .62 - Math.sin(now / 300) * sz * .08); const g = c.createRadialGradient(0, 0, 0, 0, 0, sz * .75); g.addColorStop(0, `rgba(${col},.55)`); g.addColorStop(1, `rgba(${col},0)`); c.fillStyle = g; c.fillRect(-sz * .75, -sz * .75, sz * 1.5, sz * 1.5); c.drawImage(im, -w / 2, -h / 2, w, h); c.restore(); };
   function scene(rp, now, crashed, tum) {
     c.save(); if (run.shakeUntil > now) c.translate((Math.random() - .5) * run.amp, (Math.random() - .5) * run.amp); if (run.slide) c.translate(0, run.slide * 6); // the camera dips on a slide
     c.translate(W / 2, H / 2); c.rotate(Math.max(-1, Math.min(1, (run.target - run.laneX) / 70)) * .018); c.translate(-W / 2, -H / 2); // the camera leans a touch into lane changes
-    c.fillStyle = '#0a1233'; c.fillRect(-30, -30, W + 60, H + 60);
-    const sf = S(AHEAD), sn = S(-1.5), cg = c.createLinearGradient(0, 0, 0, HY + 60); cg.addColorStop(0, '#080e2a'); cg.addColorStop(1, '#1a2a66');
+    const art = dashArt() && dok('bg'); if (art) { const ib = DIMG.bg, k = Math.max((W + 60) / ib.naturalWidth, (H + 60) / ib.naturalHeight); c.drawImage(ib, W / 2 - ib.naturalWidth * k / 2, -30, ib.naturalWidth * k, ib.naturalHeight * k); } else { c.fillStyle = '#0a1233'; c.fillRect(-30, -30, W + 60, H + 60); }
+    const sf = S(AHEAD), sn = S(-1.5), cg = c.createLinearGradient(0, 0, 0, HY + 60); if (art) { cg.addColorStop(0, 'rgba(255,236,196,.0)'); cg.addColorStop(1, 'rgba(255,236,196,.0)'); } else { cg.addColorStop(0, '#080e2a'); cg.addColorStop(1, '#1a2a66'); }
     poly([P(-FL, sf, 600), P(FL, sf, 600), P(FL, sn, 600), P(-FL, sn, 600)], cg);
-    const fg = c.createLinearGradient(0, P(0, sf, 0)[1], 0, H); fg.addColorStop(0, '#1a2a63'); fg.addColorStop(1, '#101a45'); poly([P(-FL, sf, 0), P(FL, sf, 0), P(FL, sn, 0), P(-FL, sn, 0)], fg);
-    const toEnd = run.max - rp; if (toEnd > AHEAD - 1) { // the far door, always in sight, tells you where you are headed
+    const fg = c.createLinearGradient(0, P(0, sf, 0)[1], 0, H); if (art) { fg.addColorStop(0, '#6f94e0'); fg.addColorStop(1, '#4f78cf'); } else { fg.addColorStop(0, '#1a2a63'); fg.addColorStop(1, '#101a45'); } poly([P(-FL, sf, 0), P(FL, sf, 0), P(FL, sn, 0), P(-FL, sn, 0)], fg);
+    const toEnd = run.max - rp; if (toEnd > AHEAD - 1 && !art) { // the far door, always in sight, tells you where you are headed
       poly([P(-FL, sf, 0), P(FL, sf, 0), P(FL, sf, 600), P(-FL, sf, 600)], '#16246a'); const dg = c.createLinearGradient(0, P(0, sf, 330)[1], 0, P(0, sf, 0)[1]); dg.addColorStop(0, '#fff3b0'); dg.addColorStop(1, '#ffb21a'); poly([P(-96, sf, 0), P(96, sf, 0), P(96, sf, 300), P(-96, sf, 300)], dg);
       c.fillStyle = '#7a4a00'; c.font = '900 8px system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('🎓 CLASS', VX, P(0, sf, 190)[1]); }
     const r0 = Math.floor(rp) - 1, r1 = Math.floor(rp) + AHEAD;
     for (let r = r1; r >= r0; r--) {
       const d1 = r - rp, s1 = S(d1), s2 = S(d1 + 1), par = r & 1, row = run.rows[r];
-      for (let l = 0; l < 3; l++) { const ox = OX(l); poly([P(ox - 53, s2, 0), P(ox + 53, s2, 0), P(ox + 53, s1, 0), P(ox - 53, s1, 0)], par ? '#3a559f' : '#314a90');
+      for (let l = 0; l < 3; l++) { const ox = OX(l); poly([P(ox - 53, s2, 0), P(ox + 53, s2, 0), P(ox + 53, s1, 0), P(ox - 53, s1, 0)], art ? (par ? '#9ab8f2' : '#8aaaec') : (par ? '#3a559f' : '#314a90'));
         for (const e of [-1, 1]) poly([P(ox + e * 53 - 1.6, s2, 0), P(ox + e * 53 + 1.6, s2, 0), P(ox + e * 53 + 1.6, s1, 0), P(ox + e * 53 - 1.6, s1, 0)], 'rgba(255,255,255,.55)'); }
       if (row) for (let l = 0; l < 3; l++) { // lane warnings on the floor a couple of rows before an obstacle
         const kind = (row[0] >> l & 1) ? 'b' : (row[2] >> l & 1) ? 'l' : (row[3] >> l & 1) ? 'h' : ''; if (!kind) continue; const ox = OX(l);
         for (const back of [1, 2, 3]) { if (r - back < 0) continue; const e1 = S(r - back - rp), e2 = S(r - back + 1 - rp); poly([P(ox - 53, e2, 0), P(ox + 53, e2, 0), P(ox + 53, e1, 0), P(ox - 53, e1, 0)], kind === 'b' ? 'rgba(255,60,80,.16)' : kind === 'l' ? 'rgba(255,200,40,.17)' : 'rgba(60,200,255,.17)'); }
         const gy = P(0, S(r - 2 - rp + .5), 0)[1], gs = S(r - 2 - rp + .5); if (r - 2 - rp > -.3) { c.font = `900 ${Math.round(34 * gs)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = kind === 'b' ? '#ff5d6c' : kind === 'l' ? '#ffd24a' : '#5bd0ff'; c.fillText(kind === 'b' ? '✕' : kind === 'l' ? '▲' : '▼', LX(l, gs), gy); } }
-      for (const sd of [-1, 1]) { wall(sd, s1, s2, 0, 30, '#0a1233'); wall(sd, s1, s2, 30, 290, par ? '#2850c4' : '#2f5bd8'); wall(sd, s1, s2, 290, 600, '#18276a'); wall(sd, S(d1 + .08), S(d1 + .92), 46, 276, par ? '#3563e0' : '#3c6cf0'); wall(sd, S(d1 + .78), S(d1 + .84), 150, 190, '#ffd24a');
+      for (const sd of [-1, 1]) { wall(sd, s1, s2, 0, 30, art ? '#2a4a9a' : '#0a1233'); wall(sd, s1, s2, 30, 290, art ? ['#2f8cff', '#2fcf7a', '#ff9f43'][r % 3] : par ? '#2850c4' : '#2f5bd8'); wall(sd, s1, s2, 290, 600, art ? '#ffe9bf' : '#18276a'); wall(sd, S(d1 + .08), S(d1 + .92), 46, 276, art ? ['#4aa0ff', '#45e08a', '#ffb25a'][r % 3] : par ? '#3563e0' : '#3c6cf0'); wall(sd, S(d1 + .78), S(d1 + .84), 150, 190, '#ffd24a');
         wall(sd, S(d1 + .49), S(d1 + .51), 46, 276, 'rgba(8,16,60,.55)'); wall(sd, S(d1 + .42), S(d1 + .46), 150, 186, '#ffd24a'); wall(sd, S(d1 + .54), S(d1 + .58), 150, 186, '#ffd24a'); wall(sd, S(d1 + .1), S(d1 + .4), 238, 246, 'rgba(8,16,60,.5)'); wall(sd, S(d1 + .6), S(d1 + .9), 238, 246, 'rgba(8,16,60,.5)'); }
       if (r % 3 === 0) { poly([P(-58, S(d1 + .25), 598), P(58, S(d1 + .25), 598), P(58, S(d1 + .75), 598), P(-58, S(d1 + .75), 598)], 'rgba(255,255,235,.8)'); for (let l = 0; l < 3; l++) poly([P(OX(l) - 40, S(d1 + .78), 0), P(OX(l) + 40, S(d1 + .78), 0), P(OX(l) + 40, S(d1 + .22), 0), P(OX(l) - 40, S(d1 + .22), 0)], 'rgba(255,255,255,.07)'); }
       if (r === 100 || r === 200 || r === 300) { // checkpoint arch
@@ -1987,16 +1998,16 @@ async function dash(root) {
         c.fillStyle = '#ffd24a'; c.font = `900 ${Math.max(7, 40 * sa)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(CPN[r / 100 - 1], VX, P(0, sa, 330)[1]); }
     }
     if (toEnd < AHEAD - .5 && toEnd > -.5) vault(Math.max(0.05, toEnd), now);
-    const fog = c.createLinearGradient(0, P(0, sf, 600)[1] - 10, 0, P(0, sf, 0)[1] + 90); fog.addColorStop(0, 'rgba(8,14,42,.78)'); fog.addColorStop(1, 'rgba(8,14,42,0)'); c.fillStyle = fog; c.fillRect(0, 0, W, P(0, sf, 0)[1] + 90);
+    const fog = c.createLinearGradient(0, P(0, sf, 600)[1] - 10, 0, P(0, sf, 0)[1] + 90); if (art) { fog.addColorStop(0, 'rgba(255,238,200,.7)'); fog.addColorStop(1, 'rgba(255,238,200,0)'); } else { fog.addColorStop(0, 'rgba(8,14,42,.78)'); fog.addColorStop(1, 'rgba(8,14,42,0)'); } c.fillStyle = fog; c.fillRect(0, 0, W, P(0, sf, 0)[1] + 90);
     for (let r = Math.min(r1, run.max); r >= Math.floor(rp) - 1; r--) { // objects, far to near
       const d = r - rp, row = run.rows[r]; if (d < -.8 || d > AHEAD - .5 || !row) continue; const s = S(d), y = P(0, s, 0)[1]; c.globalAlpha = Math.min(1, (AHEAD - 1 - d) / 5) * (d < 1.2 ? Math.max(.35, (d + .8) / 2) : 1);
       for (let l = 0; l < 3; l++) { const ox = OX(l), x = LX(l, s), v = (r * 7 + l * 13) % 3, sh = (w, op) => { c.fillStyle = `rgba(0,0,0,${op})`; c.beginPath(); c.ellipse(x, y, w * s, w * .16 * s, 0, 0, 7); c.fill(); };
-        if (row[0] >> l & 1) { sh(58, .3); box(ox, d, .7, BW, 104, v ? '#2f5bd8' : '#d8203a', v ? '#9ab6ff' : '#ff8a96', v ? '#1b3a9a' : '#8a1224', (a, b, yt, yb, ss) => { c.fillStyle = 'rgba(8,16,60,.55)'; for (let i = 0; i < 3; i++) c.fillRect(a + (b - a) * .14, yt + (yb - yt) * (.14 + i * .12), (b - a) * .72, Math.max(1, 3 * ss)); c.fillStyle = '#ffd24a'; c.fillRect(a, yb - (yb - yt) * .2, b - a, (yb - yt) * .09); c.fillStyle = '#111'; c.beginPath(); c.arc(a + (b - a) * .17, yb, 5 * ss, 0, 7); c.arc(b - (b - a) * .17, yb, 5 * ss, 0, 7); c.fill(); }); }
-        if (row[2] >> l & 1) dashBag(c, x, y, 78 * s, v ? '#3d8bff' : '#ff5a6e', v ? '#16379a' : '#a3182e');
-        if (row[3] >> l & 1) { const pa = P(ox - BW / 2 + 4, s, 330), pb = P(ox + BW / 2 - 4, s, 330); c.strokeStyle = '#8a93b8'; c.lineWidth = Math.max(1.5, 4 * s); c.beginPath(); c.moveTo(P(ox - BW / 2 + 6, s, 72)[0], P(0, s, 72)[1]); c.lineTo(pa[0], pa[1]); c.moveTo(P(ox + BW / 2 - 6, s, 72)[0], P(0, s, 72)[1]); c.lineTo(pb[0], pb[1]); c.stroke();
+        if (row[0] >> l & 1 && dashArt()) { sh(58, .3); sprite('cart', x, y, P(0, s, 150)[1], 1); } else if (row[0] >> l & 1) { sh(58, .3); box(ox, d, .7, BW, 104, v ? '#2f5bd8' : '#d8203a', v ? '#9ab6ff' : '#ff8a96', v ? '#1b3a9a' : '#8a1224', (a, b, yt, yb, ss) => { c.fillStyle = 'rgba(8,16,60,.55)'; for (let i = 0; i < 3; i++) c.fillRect(a + (b - a) * .14, yt + (yb - yt) * (.14 + i * .12), (b - a) * .72, Math.max(1, 3 * ss)); c.fillStyle = '#ffd24a'; c.fillRect(a, yb - (yb - yt) * .2, b - a, (yb - yt) * .09); c.fillStyle = '#111'; c.beginPath(); c.arc(a + (b - a) * .17, yb, 5 * ss, 0, 7); c.arc(b - (b - a) * .17, yb, 5 * ss, 0, 7); c.fill(); }); }
+        if (row[2] >> l & 1) { if (dashArt()) { sh(50, .25); sprite('bags', x, y, P(0, s, 74)[1], 1); } else dashBag(c, x, y, 78 * s, v ? '#3d8bff' : '#ff5a6e', v ? '#16379a' : '#a3182e'); }
+        if (row[3] >> l & 1 && dashArt()) { sprite('sign', x, P(0, s, 62)[1], P(0, s, 205)[1], 1); sh(46, .22); } else if (row[3] >> l & 1) { const pa = P(ox - BW / 2 + 4, s, 330), pb = P(ox + BW / 2 - 4, s, 330); c.strokeStyle = '#8a93b8'; c.lineWidth = Math.max(1.5, 4 * s); c.beginPath(); c.moveTo(P(ox - BW / 2 + 6, s, 72)[0], P(0, s, 72)[1]); c.lineTo(pa[0], pa[1]); c.moveTo(P(ox + BW / 2 - 6, s, 72)[0], P(0, s, 72)[1]); c.lineTo(pb[0], pb[1]); c.stroke();
           box(ox, d, .12, BW, 128, '#d8203a', '#ff7a8a', '#8a1224', null, 72); const bb = P(ox, s, 100); c.fillStyle = '#fff'; c.font = `900 ${Math.max(6, 18 * s)}px system-ui`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('HALL CLOSED', bb[0], bb[1]); sh(46, .25); }
-        if (row[1] === l && !run.got.has(r)) chip(x, y, 82 * s, now, r);
-        if (row[4] >= 0 && Math.floor(row[4] / 10) === l && !run.got.has(-r)) orb(x, y, 96 * s, now, row[4] % 10 === 1 ? '🧲' : '🛡️', row[4] % 10 === 1 ? '#ff5d6c' : '#5bd0ff'); }
+        if (row[1] === l && !run.got.has(r)) { if (dashArt()) coinSprite(x, y, 88 * s, now, r); else chip(x, y, 82 * s, now, r); }
+        if (row[4] >= 0 && Math.floor(row[4] / 10) === l && !run.got.has(-r)) { if (dashArt()) powerSprite(x, y, 100 * s, now, row[4] % 10 === 1); else orb(x, y, 96 * s, now, row[4] % 10 === 1 ? '🧲' : '🛡️', row[4] % 10 === 1 ? '#ff5d6c' : '#5bd0ff'); } }
       c.globalAlpha = 1;
     }
     for (const p of run.parts) { c.globalAlpha = Math.max(0, p.life / p.max); c.fillStyle = p.col; c.beginPath(); c.arc(p.x, p.y, p.r, 0, 7); c.fill(); } c.globalAlpha = 1;
@@ -2006,9 +2017,9 @@ async function dash(root) {
     if (run.magnetUntil >= Math.floor(rp)) { c.strokeStyle = 'rgba(255,93,108,.5)'; c.lineWidth = 2; c.setLineDash([6, 8]); c.lineDashOffset = -now / 40; c.beginPath(); c.arc(run.laneX, PY - PX * .5 - run.air, PX * .95, 0, 7); c.stroke(); c.setLineDash([]); }
     if (run.air > 8 && run.jk != null && run.jk < .5) { c.strokeStyle = 'rgba(255,255,255,.28)'; c.lineWidth = 3; c.lineCap = 'round'; for (const o of [-16, 0, 16]) { c.beginPath(); c.moveTo(run.laneX + o, PY - run.air + 8); c.lineTo(run.laneX + o, PY - run.air + 34 + run.air * .25); c.stroke(); } } // speed lines trailing the rise
     if (run.slide > .3) { c.strokeStyle = 'rgba(255,200,120,.45)'; c.lineWidth = 2; c.lineCap = 'round'; for (let i = 0; i < 4; i++) { const w = ((now * .4 + i * 37) % 70); c.beginPath(); c.moveTo(run.laneX - 28 - w * .4 - i * 4, PY - 6 - i * 6); c.lineTo(run.laneX - 12 - w * .1, PY - 6 - i * 6); c.stroke(); c.beginPath(); c.moveTo(run.laneX + 28 + w * .4 + i * 4, PY - 6 - i * 6); c.lineTo(run.laneX + 12 + w * .1, PY - 6 - i * 6); c.stroke(); } }
-    dashHawk(c, run.laneX, PY - run.air, PX, now / 1000 * 9 * sp, lean, run.dir, tum, { air: run.air > 1, slide: run.slide, jk: run.jk, land: run.land });
+    if (dashArt()) dashRunner(c, run.laneX, PY - run.air, PX, now / 1000 * 9 * sp, lean, tum, { air: run.air, slide: run.slide, jk: run.jk, land: run.land }); else dashHawk(c, run.laneX, PY - run.air, PX, now / 1000 * 9 * sp, lean, run.dir, tum, { air: run.air > 1, slide: run.slide, jk: run.jk, land: run.land });
     if (!crashed || tum) { const a = Math.max(0, sp - 1.05) * .22; if (a > 0) { c.strokeStyle = `rgba(255,255,255,${Math.min(.3, a)})`; c.lineWidth = 2; for (let i = 0; i < 12; i++) { const ang = i * 2.399 + .3, dd = ((now * .5 * sp + i * 91) % 320) + 90; c.beginPath(); c.moveTo(VX + Math.cos(ang) * dd * .85, 230 + Math.sin(ang) * dd * .9); c.lineTo(VX + Math.cos(ang) * (dd + 34), 230 + Math.sin(ang) * (dd + 34) * 1.1); c.stroke(); } } }
-    const vg = c.createRadialGradient(VX, H * .5, H * .3, VX, H * .5, H * .78); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,10,.5)'); c.fillStyle = vg; c.fillRect(0, 0, W, H);
+    const vg = c.createRadialGradient(VX, H * .5, H * .3, VX, H * .5, H * .78); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, art ? 'rgba(60,30,0,.28)' : 'rgba(0,0,10,.5)'); c.fillStyle = vg; c.fillRect(0, 0, W, H);
     hud(rp, now); c.restore();
   }
   function hud(rp, now) { // one slim bar: score, level, chips; a thin progress line; small hints
