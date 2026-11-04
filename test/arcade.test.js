@@ -384,7 +384,7 @@ test('Hallway Dash: server builds the hallway, replays moves, jumps and slides; 
   assert.ok(s.rows.every(r => r.length === 5), 'rows are [blocked, pass, low, high, power]');
   assert.equal((await api('POST', '/arcade/dash/rows', { from: 390 })).status, 400, 'cannot peek far ahead of the clock');
   assert.ok(s.rows.slice(0, 10).every(r => !r[0] && !r[2] && !r[3]), 'a calm opening with nothing to dodge');
-  assert.ok(s.tick[0] >= 440 && s.tick[399] <= 160, 'starts slow, ends fast'); assert.ok(s.tick.every((v, i) => i === 0 || v <= s.tick[i - 1]), 'only ever speeds up'); assert.ok(s.rows.slice(0, 25).every(r => !r[2] && !r[3]), 'no hurdles or signs in the first stretch');
+  assert.equal(s.tick[0], 280, 'starts at 1.5x speed (420 / 280)'); assert.ok(s.tick[399] <= 160, 'ends fast'); assert.ok(s.tick.every((v, i) => i === 0 || v <= s.tick[i - 1]), 'only ever speeds up'); assert.ok(s.rows.slice(0, 25).every(r => !r[2] && !r[3]), 'no hurdles or signs in the first stretch');
   assert.equal((await api('POST', '/arcade/dash/end', { moves: [{ row: 5, lane: 1 }] })).status, 400, 'moves must change lane by one');
   assert.equal((await api('POST', '/arcade/dash/end', { moves: [{ row: 9, lane: 0 }, { row: 8, lane: 1 }] })).status, 400, 'rows must increase');
   assert.equal((await api('POST', '/arcade/dash/end', { moves: [], acts: [{ row: 9, kind: 'x' }] })).status, 400, 'unknown action');

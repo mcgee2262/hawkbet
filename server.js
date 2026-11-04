@@ -661,7 +661,7 @@ const BAND_MAX = 20, BAND_STEP_MS = 4500, bandRound = n => 50 + 30 * n;
 const DASH_MAX = 400, DASH_CHUNK = 120, DASH_AIR = 2, DASH_ACT_GAP = 3, DASH_MAGNET = 12;
 // Levels (every 100 rows): 0 Freshman, 1 Sophomore, 2 Junior, 3 Senior. Slow and roomy at first, faster and busier later.
 const dashLevel = r => Math.min(3, Math.floor(r / 100));
-const dashTick = i => i < 100 ? Math.round(460 - 1.6 * i) : i < 200 ? Math.round(300 - 0.7 * (i - 100)) : i < 300 ? Math.round(230 - 0.5 * (i - 200)) : Math.max(150, Math.round(180 - 0.3 * (i - 300)));
+const dashTick = i => i < 100 ? Math.round(280 - 0.5 * i) : i < 200 ? Math.round(230 - 0.3 * (i - 100)) : i < 300 ? Math.round(200 - 0.3 * (i - 200)) : Math.max(150, Math.round(170 - 0.2 * (i - 300))); // ms per row: starts at 1.5x speed (420 / 280) and climbs to 2.8x
 const dashTimeAt = r => { let t = 0; for (let i = 0; i < r; i++) t += dashTick(i); return t * TSCALE; };
 const dashRowAt = el => { let r = 0, t = 0; while (r < DASH_MAX + 1 && t + dashTick(r) * TSCALE <= el) t += dashTick(r++) * TSCALE; return r; };
 const DASH_LV = [ // per level: path shift chance, wall chance per side lane, obstacle row gap, hurdle/sign chance on the path, spare obstacles, chip chance, power-up chance
