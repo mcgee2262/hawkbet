@@ -1687,7 +1687,7 @@ async function hoops(root) {
   let st = null, s0 = 0, period = 1700, zone = 0.17, center = 0.8, frozen = false, timer = 0, busy = false, streak = 0, total = 0, lat = 0;
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>How to play:</b> 10 shots, NBA 2K style. A shot meter fills and drains: tap <b>SHOOT</b> (or press Space) when it's in the <b style="color:#19e58a">green window</b> near the top. Dead center is a perfect green (150). Makes in a row add a streak bonus, but the meter speeds up and the green window gets smaller the more you score.</div>
     ${skillBet('hoops')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Shot</small><b id="sn">–</b></div></div>${hsBox()}`,
-    `<div class="hoopsw"><div class="court" id="court">${ARENA_SVG}<div class="hshadow" id="hsh"></div><div class="hball" id="hball"><i class="flame">🔥</i><div class="bb">${BALL_SVG}</div></div>${ARENA_FRONT}<div class="hpop" id="hpop"></div><div class="hsub" id="hsub"></div><div class="hflash" id="hflash"></div><div class="mbadge ov hidden" aria-live="polite"></div></div>
+    `<div class="hoopsw"><div class="court" id="court">${ARENA_SVG}<div class="hshadow" id="hsh"></div><div class="hball" id="hball"><i class="flame">🔥</i><div class="bb">${BALL_SVG}</div></div>${ARENA_FRONT}<div class="hpop" id="hpop"></div><div class="hsub" id="hsub"></div><div class="hflash" id="hflash"></div></div>
       <button class="btn bjbig shootbtn" id="shoot" disabled>🏀 SHOOT <kbd>Space</kbd></button><div class="pips" id="pips">${'<i></i>'.repeat(10)}</div></div>`);
   const court = $('#court'), ball = $('#hball'), shoot = $('#shoot'), net = $('#net'), vmeter = $('#vmeter'), vf = $('#vfill'), vm = $('#vmark'), vz = $('#vzone'), vp = $('#vperf'), vl = $('#vl'), hsh = $('#hsh'), shooter = $('#shooter'), vpath = $('#vpath'), MLEN = vpath.getTotalLength() || 140;
   const tri = el => { const ph = (((el % period) + period) % period) / period; return ph < 0.5 ? ph * 2 : 2 - ph * 2; };
@@ -1931,7 +1931,7 @@ function dashHawk(c, x, y, sz, phase, lean, dir, t, pose) { // the Seahawk, seen
 let dashTips = { low: false, high: false, lane: false, done: false };
 let threeP; const loadThree = () => threeP || (threeP = new Promise(res => { // real 3D for Hallway Dash: three.js plus our scene file; if either fails the flat canvas version runs instead
   if (window.Dash3D) return res(true); const add = (src, ok) => { const e = document.createElement('script'); e.src = src; e.onload = ok; e.onerror = () => res(false); document.head.appendChild(e); };
-  add('assets/three_min.js', () => add('assets/dash3d.js?v=2', () => res(!!window.Dash3D)));
+  add('assets/three_min.js', () => add('assets/dash3d.js?v=3', () => res(!!window.Dash3D)));
 }));
 async function dash(root) {
   let st = null, run = null, timer = 0, played = false; const has3d = await loadThree(); if (!root.isConnected) return;
@@ -1948,7 +1948,7 @@ async function dash(root) {
     <ul class="dashrules"><li><b>⬅️ ➡️</b> switch lanes around the carts</li><li><b>⬆️</b> jump over the backpacks</li><li><b>⬇️</b> slide under the hanging signs</li><li><b>🪙</b> grab chips for points</li><li><b>🧲 🛡️</b> magnet and shield power-ups</li></ul><p><small>Phones: swipe up / down, tap left / right</small></p><button class="btn" data-close>Got it</button>`);
   const cv = $('#dcv'), c = cv.getContext('2d'); let d3 = null; if (has3d) { try { d3 = window.Dash3D($('#dgl'), W, H); } catch (e) { d3 = null; } if (!d3) { $('#dgl').remove(); $('.dashwrap').classList.remove('d3'); } }
   const tiers = (CFG && CFG.skillTiers && CFG.skillTiers.dash) || [[2500, 3], [1800, 2], [1200, 1.5], [700, 1]];
-  const msg = t => { const m = $('#dm'); m.textContent = t; m.classList.toggle('hidden', !t); };
+  const msg = t => { const m = $('#dm'); m.textContent = t; m.classList.toggle('big', /^(\d$|GO)/.test(t)); m.classList.toggle('hidden', !t); };
   stopFns.push(() => { clearTimeout(timer); run = null; });
   const FX = () => (run && run.fx) || (run ? run.laneX : 200), FY = () => (run && run.fy) || PY; // where the runner's feet are on screen (3D projects them; the flat version uses fixed spots)
   const S = d => 1 / (1 + d * K), P = (x, s, h) => [VX + x * s, HY + (PY - HY - h) * s], OX = l => (l - 1) * LANE, LX = (l, s = 1) => VX + OX(l) * s;
@@ -2046,13 +2046,12 @@ async function dash(root) {
     const bx = 24, bw = W - 48, by = 52, pr = Math.min(1, rp / run.max); c.fillStyle = 'rgba(255,255,255,.14)'; rrPath(c, bx, by, bw, 5, 3); c.fill(); const pg = c.createLinearGradient(bx, 0, bx + bw, 0); pg.addColorStop(0, '#19e58a'); pg.addColorStop(.5, '#5b8cff'); pg.addColorStop(1, '#ff5d6c'); c.fillStyle = pg; if (pr > 0) { rrPath(c, bx, by, Math.max(5, bw * pr), 5, 3); c.fill(); }
     for (let i = 1; i <= 3; i++) { const x = bx + bw * i / 4; c.fillStyle = rp >= i * 100 ? '#fff' : '#ffffff66'; c.beginPath(); c.arc(x, by + 2.5, 3.2, 0, 7); c.fill(); c.font = '700 8px system-ui'; c.textAlign = 'center'; c.fillStyle = rp >= i * 100 ? LVC[i] : '#8fb0ff'; c.fillText(CPS[i - 1], x, by + 14); }
     c.font = '14px system-ui'; c.textAlign = 'center'; c.fillText('🎓', bx + bw + 4, by + 2); c.fillText('🦅', bx + Math.max(4, bw * pr), by - 8);
-    c.textAlign = 'left'; c.font = '800 10px system-ui'; c.fillStyle = '#ffd24acc'; c.fillText(cur ? `PAYOUT ${lab(cur[1])}` : `${fmt(tiers[tiers.length - 1][0])} pts to win`, 20, 80); c.textAlign = 'right'; c.fillStyle = '#ffffffaa'; c.fillText(`🎓 ${Math.max(0, Math.round(run.max - rp))} rows to class`, W - 20, 80);
+    c.font = '700 9px system-ui'; c.textAlign = 'right'; c.fillStyle = '#ffffff66'; c.fillText(`🎓 ${Math.max(0, Math.round(run.max - rp))} rows to class`, W - 20, 80);
     c.textAlign = 'left'; c.font = '900 12px system-ui'; c.fillStyle = '#ffffffcc'; c.fillText(`×${Math.min(3, speedAt(rp)).toFixed(1)} speed`, 12, 548);
-    if (nxt) { c.textAlign = 'center'; c.font = '700 10px system-ui'; c.fillStyle = '#ffffff99'; c.fillText(`next: ${fmt(nxt[0])} pts → ${lab(nxt[1])}`, W / 2, 548); }
     if (run.chain >= 2) { c.textAlign = 'right'; c.fillStyle = '#ffd24a'; c.font = '900 16px system-ui'; c.fillText(`🪙 combo ×${run.chain}`, W - 12, 548); }
     if (run.magnetUntil >= Math.floor(rp)) { c.textAlign = 'left'; c.font = '800 12px system-ui'; c.fillStyle = '#ff9aa5'; c.fillText(`🧲 ${Math.max(0, Math.ceil(run.magnetUntil - rp))}`, 12, 528); }
     if (run.shield) { c.textAlign = 'left'; c.font = '800 12px system-ui'; c.fillStyle = '#8fe0ff'; c.fillText('🛡️ ready', 62, 528); }
-    if (run.pop && now - run.pop.t0 < (run.pop.dur || 900)) { const dur = run.pop.dur || 900, k = (now - run.pop.t0) / dur; c.save(); c.globalAlpha = k < .8 ? 1 : 1 - (k - .8) * 5; c.translate(VX, (run.pop.y || 190) - k * 26); const sc2 = .7 + Math.min(1, k * 6) * .5; c.scale(sc2, sc2); c.font = `900 ${run.pop.size || 30}px system-ui`; c.textAlign = 'center'; c.lineWidth = 6; c.strokeStyle = 'rgba(0,0,0,.65)'; c.strokeText(run.pop.text, 0, 0); c.fillStyle = run.pop.col; c.fillText(run.pop.text, 0, 0); c.restore(); }
+    if (run.pop && now - run.pop.t0 < (run.pop.dur || 900)) { const dur = run.pop.dur || 900, k = (now - run.pop.t0) / dur; c.save(); c.globalAlpha = (k < .6 ? 1 : 1 - (k - .6) * 2.5) * .55; c.translate(VX, d3 ? 106 - k * 8 : (run.pop.y || 190) - k * 26); const sc2 = .85 + Math.min(1, k * 6) * .15; c.scale(sc2, sc2); c.font = `900 ${d3 ? Math.round((run.pop.size || 30) * .5) : run.pop.size || 30}px system-ui`; c.textAlign = 'center'; c.lineWidth = d3 ? 3 : 6; c.strokeStyle = 'rgba(0,0,0,.65)'; c.strokeText(run.pop.text, 0, 0); c.fillStyle = run.pop.col; c.fillText(run.pop.text, 0, 0); c.restore(); }
   }
   const cum = t => { const a = [0]; t.forEach(x => a.push(a[a.length - 1] + x)); return a; };
   function rowPosAt(el) { const T = run.tick, C = run.cum; let lo = 0, hi = T.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (C[mid] <= el) lo = mid; else hi = mid - 1; } return lo + Math.min(1, (el - C[lo]) / T[lo]); }

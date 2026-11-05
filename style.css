@@ -982,6 +982,7 @@ body.out .side,body.out .tabbar,body.out .lvlchip,body.out .menubtn,body.out .sc
 .mrow{display:flex;gap:10px;justify-content:center}.mrow input{width:200px;font-size:28px;font-weight:800;text-align:center;background:var(--panel2);border:2px solid var(--line);border-radius:12px;color:#fff;padding:8px}
 .dashwrap{position:relative;width:100%;max-width:400px;margin:0 auto;touch-action:none}.dashwrap canvas{display:block;width:100%;height:auto;border-radius:16px;box-shadow:0 0 0 3px #2a3a6a;touch-action:none;background:#0d1b46}
 .dashwrap.d3 #dcv{position:absolute;left:0;top:0;background:none;box-shadow:none}.dashwrap.d3 #dgl{background:#fff1d6}
+.dashwrap.d3 .dashmsg{font-size:17px;top:17%;opacity:.6}.dashwrap.d3 .dashmsg.big{font-size:34px;top:40%;opacity:1}
 .dashmsg{position:absolute;left:0;right:0;top:40%;text-align:center;font:900 34px/1.1 system-ui;color:#fff;text-shadow:0 3px 12px #000;pointer-events:none}.dashmsg.hidden{display:none}
 .school .nonschool{display:none!important}
 .modecards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:10px 0}.modecard{text-align:left;background:var(--panel2);border:2px solid var(--line);border-radius:14px;padding:14px;color:#fff;cursor:pointer;display:grid;gap:6px;font-size:14px}.modecard b{font-size:18px}.modecard span{color:var(--mut)}.modecard.on{border-color:#19e58a;box-shadow:0 0 0 2px #19e58a55}

@@ -2,7 +2,7 @@
    World units: the runner stands at z = 0 and the hallway runs toward -z. One row = ROW units. */
 (function () {
   const T = window.THREE; if (!T) return;
-  const LANE = 2.6, ROW = 3.4, WALL = 4.9, CEIL = 4.7, AHEAD = 12, POOL = AHEAD + 6, VX = 200, LANEPX = 122;
+  const LANE = 2.6, ROW = 3.4, WALL = 4.9, CEIL = 4.7, AHEAD = 20, POOL = AHEAD + 6, VX = 200, LANEPX = 122;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const mats = {}, mat = (col, extra) => { const k = col + (extra ? JSON.stringify(extra) : ''); return mats[k] || (mats[k] = new T.MeshLambertMaterial({ color: col, ...extra })); };
   const geos = {}, G = (k, f) => geos[k] || (geos[k] = f());
@@ -57,15 +57,15 @@
   /* ---------- the mascot: an osprey built from simple shapes, with a real run cycle ---------- */
   function mkRunner() {
     const R = {}, root = new T.Group(), body = new T.Group(); root.add(body); R.root = root; R.body = body;
-    const blue = 0x2a56d6, navy = 0x1a2f7a, white = 0xf4f7ff, brown = 0x6b4a2a, gold = 0xffc542, orange = 0xff9f1a;
+    const blue = 0x1b4fd8, navy = 0x14c46f, white = 0xf4f7ff, brown = 0x0b2a6b, gold = 0xf5a623, orange = 0xf5a623;
     body.add(box(.78, .9, .5, blue, 0, 1.45, 0), box(.52, .62, .12, white, 0, 1.4, -.28), box(.8, .22, .52, navy, 0, 1.06, 0));
     const pack = grp(box(.7, .8, .32, gold, 0, 0, 0), box(.5, .3, .1, 0xd99a00, 0, -.12, .2), box(.74, .1, .34, 0xffe27a, 0, .38, 0)); pack.position.set(0, 1.5, .42); body.add(pack);
     const head = new T.Group(); head.position.set(0, 2.18, 0); body.add(head); R.head = head;
-    head.add(sph(.4, white, 0, 0, 0, 1, .95, 1), sph(.34, brown, 0, .12, .1, 1, .8, 1), cyl(0, .13, .38, gold, 0, -.05, -.46, 10), box(.08, .05, .1, 0x151a2e, -.17, .08, -.34), box(.08, .05, .1, 0x151a2e, .17, .08, -.34));
+    head.add(sph(.4, white, 0, 0, 0, 1, .95, 1), sph(.34, brown, 0, .12, .1, 1, .8, 1), cyl(0, .13, .38, gold, 0, -.05, -.46, 10), box(.1, .07, .1, 0xffd24a, -.17, .08, -.34), box(.1, .07, .1, 0xffd24a, .17, .08, -.34), box(.74, .16, .5, 0x0b2a6b, 0, .1, -.08));
     head.children[3].rotation.x = -Math.PI / 2; head.add(box(.7, .08, .05, 0xffc542, 0, .26, -.2));
     body.add(box(.55, .12, .5, brown, 0, 1.02, .42)); // tail feathers
     const mkLeg = x => { const hip = new T.Group(); hip.position.set(x, 1.02, 0); const th = box(.26, .55, .26, navy, 0, -.27, 0); const knee = new T.Group(); knee.position.set(0, -.55, 0); const sh = box(.22, .5, .22, orange, 0, -.25, 0), ft = box(.34, .1, .5, orange, 0, -.5, -.12); knee.add(sh, ft); hip.add(th, knee); hip.userData.knee = knee; body.add(hip); return hip; };
-    const mkArm = x => { const sh = new T.Group(); sh.position.set(x * 1.0, 1.78, 0); const arm = grp(box(.2, .62, .3, brown, x * .14, -.31, 0), box(.1, .5, .5, 0x3a2810, x * .18, -.36, .1)); const el = new T.Group(); el.position.set(x * .14, -.62, 0); el.add(box(.2, .5, .26, brown, 0, -.25, 0), sph(.14, white, 0, -.55, 0)); sh.add(arm, el); sh.userData.el = el; body.add(sh); return sh; };
+    const mkArm = x => { const sh = new T.Group(); sh.position.set(x * 1.0, 1.78, 0); const arm = grp(box(.2, .62, .3, brown, x * .14, -.31, 0), box(.1, .5, .5, 0x1b4fd8, x * .18, -.36, .1)); const el = new T.Group(); el.position.set(x * .14, -.62, 0); el.add(box(.2, .5, .26, brown, 0, -.25, 0), sph(.14, white, 0, -.55, 0)); sh.add(arm, el); sh.userData.el = el; body.add(sh); return sh; };
     R.legL = mkLeg(-.22); R.legR = mkLeg(.22); R.armL = mkArm(-.46); R.armR = mkArm(.46);
     R.shadow = blob(2.2); root.add(R.shadow); R.shield = mesh(G('shld', () => new T.SphereGeometry(1.45, 20, 14)), new T.MeshBasicMaterial({ color: 0x5bd0ff, transparent: true, opacity: .2, depthWrite: false }), 0, 1.3, 0); R.shield.visible = false; root.add(R.shield);
     R.mring = mesh(G('mrg', () => new T.TorusGeometry(1.7, .035, 6, 40)), new T.MeshBasicMaterial({ color: 0xff5d6c, transparent: true, opacity: .55 }), 0, 1.3, 0); R.mring.rotation.x = Math.PI / 2; R.mring.visible = false; root.add(R.mring);
@@ -107,27 +107,27 @@
     let renderer; try { renderer = new T.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' }); } catch (e) { return null; }
     if (!renderer.getContext()) return null;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); renderer.setSize(W, H, false);
-    const sky = new T.Color(0xfff1d6), scene = new T.Scene(); scene.background = sky; scene.fog = new T.Fog(sky, 14, ROW * AHEAD - 2);
-    scene.add(new T.HemisphereLight(0xffffff, 0xaab8e0, .95)); const sun = new T.DirectionalLight(0xfff4e0, .5); sun.position.set(3, 9, 6); scene.add(sun);
-    const cam = new T.PerspectiveCamera(52, W / H, .3, 90); const world = new T.Group(); scene.add(world);
+    const sky = new T.Color(0x050a1f), scene = new T.Scene(); scene.background = sky; scene.fog = new T.Fog(sky, 26, ROW * AHEAD - 4);
+    scene.add(new T.HemisphereLight(0xb4c6ff, 0x1a2550, .9)); const sun = new T.DirectionalLight(0xcfe0ff, .55); sun.position.set(3, 9, 6); scene.add(sun);
+    const cam = new T.PerspectiveCamera(52, W / H, .3, 120); const world = new T.Group(); scene.add(world);
     // static shell: long walls above the lockers, ceiling, side floor strips
     const LEN = ROW * (AHEAD + 8), midZ = -LEN / 2 + 8;
     const shell = (w, h, col, x, y, z, rx, ry) => { const o = mesh(G(`p${w},${h}`, () => new T.PlaneGeometry(w, h)), mat(col), x, y, z); o.rotation.x = rx || 0; o.rotation.y = ry || 0; world.add(o); return o; };
-    shell(LEN, CEIL - 3.3, 0xfff3d9, -WALL, 3.3 + (CEIL - 3.3) / 2, midZ, 0, Math.PI / 2).rotation.set(0, Math.PI / 2, 0);
-    shell(LEN, CEIL - 3.3, 0xfff3d9, WALL, 3.3 + (CEIL - 3.3) / 2, midZ, 0, -Math.PI / 2);
+    shell(LEN, CEIL - 3.3, 0x0d1534, -WALL, 3.3 + (CEIL - 3.3) / 2, midZ, 0, Math.PI / 2).rotation.set(0, Math.PI / 2, 0);
+    shell(LEN, CEIL - 3.3, 0x0d1534, WALL, 3.3 + (CEIL - 3.3) / 2, midZ, 0, -Math.PI / 2);
     // gold stripe above the lockers
-    for (const sd of [-1, 1]) { const o = box(.12, .28, LEN, 0xffc542, sd * (WALL - .06), 3.4, midZ); world.add(o); }
-    const lockerMats = [0x2f8cff, 0x2fcf7a, 0xff9f43].map(c => new T.MeshLambertMaterial({ map: lockerTex('#' + c.toString(16).padStart(6, '0')) }));
-    const floorMats = [0xb6caf4, 0xa5bdee].map(c => mat(c)), tintMats = { 1: new T.MeshBasicMaterial({ color: 0xff3c50, transparent: true, opacity: .2, depthWrite: false }), 2: new T.MeshBasicMaterial({ color: 0xffc828, transparent: true, opacity: .24, depthWrite: false }), 3: new T.MeshBasicMaterial({ color: 0x3cc8ff, transparent: true, opacity: .24, depthWrite: false }) };
+    for (const sd of [-1, 1]) { const o = mesh(G('stripe', () => new T.BoxGeometry(.12, .22, LEN)), new T.MeshBasicMaterial({ color: 0x14c46f }), sd * (WALL - .06), 3.4, midZ); world.add(o); }
+    const lockerMats = [0x2f6bff, 0x14c46f].map(c => new T.MeshLambertMaterial({ map: lockerTex('#' + c.toString(16).padStart(6, '0')) }));
+    const floorMats = [0x1a2658, 0x131d46].map(c => mat(c)), tintMats = { 1: new T.MeshBasicMaterial({ color: 0xff3c50, transparent: true, opacity: .2, depthWrite: false }), 2: new T.MeshBasicMaterial({ color: 0xffc828, transparent: true, opacity: .24, depthWrite: false }), 3: new T.MeshBasicMaterial({ color: 0x3cc8ff, transparent: true, opacity: .24, depthWrite: false }) };
     const floorGeo = new T.PlaneGeometry(WALL * 2, ROW), laneGeo = new T.PlaneGeometry(LANE - .16, ROW * .98), lockGeo = new T.PlaneGeometry(ROW, 3.3), lightMat = new T.MeshBasicMaterial({ color: 0xffffff });
-    const pool = [];
+    const pool = [], lineMat = new T.MeshBasicMaterial({ color: 0x3d6bff });
     for (let i = 0; i < POOL; i++) {
       const g = new T.Group(); world.add(g); const s = { g, r: -99, kids: [], floor: mesh(floorGeo, floorMats[0]), tints: [], lockL: mesh(lockGeo, lockerMats[0]), lockR: mesh(lockGeo, lockerMats[0]), light: box(.1, .1, .1, 0xffffff, 0, -9, 0), arch: null };
       s.floor.rotation.x = -Math.PI / 2; g.add(s.floor); s.light.material = lightMat; g.add(s.light);
       for (let l = 0; l < 3; l++) { const t = mesh(laneGeo, tintMats[1], (l - 1) * LANE, .02, 0); t.rotation.x = -Math.PI / 2; t.visible = false; g.add(t); s.tints.push(t); }
-      for (const x of [-1.5, -.5, .5, 1.5]) g.add(box(.09, .02, ROW, 0xffffff, x * LANE, .03, 0));
+      for (const x of [-1.5, -.5, .5, 1.5]) g.add(mesh(G('ll', () => new T.BoxGeometry(.1, .02, ROW)), lineMat, x * LANE, .03, 0));
       s.lockL.position.set(-WALL + .01, 1.65, 0); s.lockL.rotation.y = Math.PI / 2; s.lockR.position.set(WALL - .01, 1.65, 0); s.lockR.rotation.y = -Math.PI / 2; g.add(s.lockL, s.lockR);
-      g.add(box(.5, .35, ROW, 0x1b2f78, -WALL + .25, .18, 0), box(.5, .35, ROW, 0x1b2f78, WALL - .25, .18, 0));
+      g.add(box(.5, .35, ROW, 0x0a1230, -WALL + .25, .18, 0), box(.5, .35, ROW, 0x0a1230, WALL - .25, .18, 0));
       pool.push(s);
     }
     const archMat = new T.MeshLambertMaterial({ map: labelTex('', '#0b1236', '#ffd24a', 512, 128) });
@@ -135,13 +135,13 @@
     const arches = {}; const archFor = r => arches[r] || (arches[r] = mkArch(['LEVEL 2 · SOPHOMORE', 'LEVEL 3 · JUNIOR', 'LEVEL 4 · SENIOR'][r / 100 - 1]));
     // the CLASS door at the end
     const vaultMat = new T.MeshLambertMaterial({ map: tex(512, 640, (g, w, h) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#fff3b0'); gr.addColorStop(.6, '#ffc542'); gr.addColorStop(1, '#c78600'); g.fillStyle = gr; g.fillRect(0, 0, w, h); g.fillStyle = 'rgba(120,70,0,.25)'; g.fillRect(24, 24, w - 48, h - 48); g.fillStyle = '#6b3d00'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '200px system-ui'; g.fillText('🎓', w / 2, 200); g.font = '900 96px system-ui'; g.fillText('CLASS', w / 2, 380); g.font = '900 52px system-ui'; g.fillText('JACKPOT +500', w / 2, 480); }), emissive: 0x442a00 });
-    const vault = grp(box(WALL * 2, CEIL, .4, 0xfff0cf, 0, CEIL / 2, -.3), mesh(G('vd', () => new T.BoxGeometry(5.6, 6.2, .3)), vaultMat, 0, 3.1, 0)); vault.visible = false; world.add(vault);
+    const vault = grp(box(WALL * 2, CEIL, .4, 0x141e44, 0, CEIL / 2, -.3), mesh(G('vd', () => new T.BoxGeometry(5.6, 6.2, .3)), vaultMat, 0, 3.1, 0)); vault.visible = false; world.add(vault);
     const foot = new T.Vector3(), out = { x: VX, y: 468 };
     let last = -1;
 
     function assign(s, r, rows) {
       s.r = r; s.kids.forEach(k => s.g.remove(k)); s.kids = []; const row = rows[r], par = r & 1;
-      s.floor.material = floorMats[par]; s.lockL.material = s.lockR.material = lockerMats[((r % 3) + 3) % 3];
+      s.floor.material = floorMats[par]; s.lockL.material = s.lockR.material = lockerMats[((r % 2) + 2) % 2];
       s.light.visible = r % 3 === 0;
       for (let l = 0; l < 3; l++) { let kind = 0; for (let b = 1; b <= 3; b++) { const n = rows[r + b]; if (!n) continue; kind = (n[0] >> l & 1) ? 1 : (n[2] >> l & 1) ? 2 : (n[3] >> l & 1) ? 3 : kind; if (kind) break; } const t = s.tints[l]; t.visible = !!kind; if (kind) t.material = tintMats[kind]; }
       s.coin = s.power = null;
