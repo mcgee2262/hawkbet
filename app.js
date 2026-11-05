@@ -1929,22 +1929,28 @@ function dashHawk(c, x, y, sz, phase, lean, dir, t, pose) { // the Seahawk, seen
   c.fillStyle = '#ffd24a'; c.beginPath(); c.arc(dir * sz * .08, -sz * .86 + bob, sz * .04, 0, 7); c.fill(); c.fillStyle = '#0a0e13'; c.beginPath(); c.arc(dir * sz * .09, -sz * .86 + bob, sz * .02, 0, 7); c.fill(); c.restore();
 }
 let dashTips = { low: false, high: false, lane: false, done: false };
+let threeP; const loadThree = () => threeP || (threeP = new Promise(res => { // real 3D for Hallway Dash: three.js plus our scene file; if either fails the flat canvas version runs instead
+  if (window.Dash3D) return res(true); const add = (src, ok) => { const e = document.createElement('script'); e.src = src; e.onload = ok; e.onerror = () => res(false); document.head.appendChild(e); };
+  add('assets/three_min.js', () => add('assets/dash3d.js?v=2', () => res(!!window.Dash3D)));
+}));
 async function dash(root) {
-  let st = null, run = null, timer = 0, played = false;
+  let st = null, run = null, timer = 0, played = false; const has3d = await loadThree(); if (!root.isConnected) return;
   const W = 400, H = 560, HY = 140, PY = 468, VX = 200, LANE = 122, BW = 94, FL = 212, K = 0.16, AHEAD = 24, PX = 100, AIR = 2, MAGNET = 12;
   const CPN = ['LEVEL 2 · SOPHOMORE', 'LEVEL 3 · JUNIOR', 'LEVEL 4 · SENIOR'], CPS = ['SOPH', 'JUNIOR', 'SENIOR'], LVN = ['FRESHMAN', 'SOPHOMORE', 'JUNIOR', 'SENIOR'], LVC = ['#19e58a', '#5b8cff', '#a855ff', '#ff5d6c'], GR = 0.25; // GR: a lane change counts up to a quarter row late, so near-misses are dodges
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>🎯 Goal:</b> race down the hallway and get to class before the bell. <b>← →</b> switch lanes around carts, <b>↑</b> jump the backpacks, <b>↓</b> slide under signs (phones: swipe, or tap a side). Grab 🪙 chips (+50), 🧲 magnet pulls them in, 🛡️ shield saves you from one hit. It starts easy and gets harder every 100 rows (Freshman → Senior). Every row is 10 points, each new level is +100 and the 🎓 door is a +500 jackpot.</div>
     ${skillBet('dash')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Chips</small><b id="ps">0</b></div></div>${hsBox()}`,
-    `<div class="dashwrap"><canvas id="dcv" width="${W}" height="${H}" aria-label="Hallway Dash game"></canvas><div class="mbadge ov hidden" aria-live="polite"></div><div class="dashmsg" id="dm"></div>
+    `<div class="dashwrap${has3d ? ' d3' : ''}">${has3d ? `<canvas id="dgl" width="${W}" height="${H}"></canvas>` : ''}<canvas id="dcv" width="${W}" height="${H}" aria-label="Hallway Dash game"></canvas><div class="mbadge ov hidden" aria-live="polite"></div><div class="dashmsg" id="dm"></div>
       <div class="dashintro" id="dintro">🎓 Reach class! ← → lanes · ↑ jump · ↓ slide</div><button class="dashinfo" id="dinfo" aria-label="How to play">ⓘ How to play</button></div>`);
   const hideIntro = () => { const d = $('#dintro'); if (d) d.classList.add('hidden'); };
   let firstVisit = true; try { firstVisit = !localStorage.getItem('hb_dash_seen'); localStorage.setItem('hb_dash_seen', '1'); } catch (e) {}
   if (firstVisit) { const t = setTimeout(hideIntro, 3000); const kd = () => { hideIntro(); document.removeEventListener('keydown', kd); }; document.addEventListener('keydown', kd); stopFns.push(() => { clearTimeout(t); document.removeEventListener('keydown', kd); }); } else hideIntro();
   $('#dinfo').onclick = () => showModal(`<h3>🎯 How to play</h3><p>Race down the hall before the bell and reach the <b>🎓 CLASS door</b> for a <b>+500 jackpot</b>. It starts easy and gets harder every 100 rows.</p>
     <ul class="dashrules"><li><b>⬅️ ➡️</b> switch lanes around the carts</li><li><b>⬆️</b> jump over the backpacks</li><li><b>⬇️</b> slide under the hanging signs</li><li><b>🪙</b> grab chips for points</li><li><b>🧲 🛡️</b> magnet and shield power-ups</li></ul><p><small>Phones: swipe up / down, tap left / right</small></p><button class="btn" data-close>Got it</button>`);
-  const cv = $('#dcv'), c = cv.getContext('2d'), tiers = (CFG && CFG.skillTiers && CFG.skillTiers.dash) || [[2500, 3], [1800, 2], [1200, 1.5], [700, 1]];
+  const cv = $('#dcv'), c = cv.getContext('2d'); let d3 = null; if (has3d) { try { d3 = window.Dash3D($('#dgl'), W, H); } catch (e) { d3 = null; } if (!d3) { $('#dgl').remove(); $('.dashwrap').classList.remove('d3'); } }
+  const tiers = (CFG && CFG.skillTiers && CFG.skillTiers.dash) || [[2500, 3], [1800, 2], [1200, 1.5], [700, 1]];
   const msg = t => { const m = $('#dm'); m.textContent = t; m.classList.toggle('hidden', !t); };
   stopFns.push(() => { clearTimeout(timer); run = null; });
+  const FX = () => (run && run.fx) || (run ? run.laneX : 200), FY = () => (run && run.fy) || PY; // where the runner's feet are on screen (3D projects them; the flat version uses fixed spots)
   const S = d => 1 / (1 + d * K), P = (x, s, h) => [VX + x * s, HY + (PY - HY - h) * s], OX = l => (l - 1) * LANE, LX = (l, s = 1) => VX + OX(l) * s;
   const poly = (pts, fill) => { c.fillStyle = fill; c.beginPath(); pts.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); c.fill(); };
   const wall = (sd, s1, s2, h1, h2, fill) => poly([P(sd * FL, s1, h1), P(sd * FL, s2, h1), P(sd * FL, s2, h2), P(sd * FL, s1, h2)], fill);
@@ -1972,6 +1978,14 @@ async function dash(root) {
   const coinSprite = (x, y, sz, now, k) => { const sp = Math.max(.22, Math.abs(Math.cos(now / 240 + k))), h = sz, w = h * sp; c.save(); c.translate(x, y - sz * .62 - Math.sin(now / 260 + k) * sz * .06); const g = c.createRadialGradient(0, 0, 0, 0, 0, sz * .7); g.addColorStop(0, 'rgba(255,220,90,.55)'); g.addColorStop(1, 'rgba(255,220,90,0)'); c.fillStyle = g; c.fillRect(-sz * .7, -sz * .7, sz * 1.4, sz * 1.4); c.drawImage(DIMG.coin, -w / 2, -h / 2, w, h); c.restore(); };
   const powerSprite = (x, y, sz, now, magnet) => { const im = DIMG[magnet ? 'magnet' : 'shield'], h = sz, w = h * im.naturalWidth / im.naturalHeight, col = magnet ? '255,93,108' : '91,208,255'; c.save(); c.translate(x, y - sz * .62 - Math.sin(now / 300) * sz * .08); const g = c.createRadialGradient(0, 0, 0, 0, 0, sz * .75); g.addColorStop(0, `rgba(${col},.55)`); g.addColorStop(1, `rgba(${col},0)`); c.fillStyle = g; c.fillRect(-sz * .75, -sz * .75, sz * 1.5, sz * 1.5); c.drawImage(im, -w / 2, -h / 2, w, h); c.restore(); };
   function scene(rp, now, crashed, tum) {
+    if (!d3) return scene2d(rp, now, crashed, tum);
+    const f = d3.frame(run, rp, now, crashed, tum, Math.min(2.3, speedAt(rp))); run.fx = f.x; run.fy = f.y;
+    c.clearRect(0, 0, W, H); c.save();
+    for (const p of run.parts) { c.globalAlpha = Math.max(0, p.life / p.max); c.fillStyle = p.col; c.beginPath(); c.arc(p.x, p.y, p.r, 0, 7); c.fill(); } c.globalAlpha = 1;
+    const sp = Math.min(2.3, speedAt(rp)); if (!crashed || tum) { const a = Math.max(0, sp - 1.05) * .2; if (a > 0) { c.strokeStyle = `rgba(255,255,255,${Math.min(.28, a)})`; c.lineWidth = 2; for (let i = 0; i < 10; i++) { const ang = i * 2.399 + .3, dd = ((now * .5 * sp + i * 91) % 320) + 120; c.beginPath(); c.moveTo(VX + Math.cos(ang) * dd * .85, 250 + Math.sin(ang) * dd * .9); c.lineTo(VX + Math.cos(ang) * (dd + 30), 250 + Math.sin(ang) * (dd + 30) * 1.1); c.stroke(); } } }
+    hud(rp, now); c.restore();
+  }
+  function scene2d(rp, now, crashed, tum) {
     c.save(); if (run.shakeUntil > now) c.translate((Math.random() - .5) * run.amp, (Math.random() - .5) * run.amp); if (run.slide) c.translate(0, run.slide * 6); // the camera dips on a slide
     c.translate(W / 2, H / 2); c.rotate(Math.max(-1, Math.min(1, (run.target - run.laneX) / 70)) * .018); c.translate(-W / 2, -H / 2); // the camera leans a touch into lane changes
     const art = dashArt() && dok('bg'); if (art) { const ib = DIMG.bg, k = Math.max((W + 60) / ib.naturalWidth, (H + 60) / ib.naturalHeight); c.drawImage(ib, W / 2 - ib.naturalWidth * k / 2, -30, ib.naturalWidth * k, ib.naturalHeight * k); } else { c.fillStyle = '#0a1233'; c.fillRect(-30, -30, W + 60, H + 60); }
@@ -2051,7 +2065,7 @@ async function dash(root) {
   async function more() { if (run.fetching || run.rows.length > run.max) return; run.fetching = true; try { const r = await api('POST', '/arcade/dash/rows', { from: run.rows.length }); if (run) run.rows.push(...r.rows); } catch (e) {} finally { if (run) run.fetching = false; } }
   async function over(crashed) {
     run.over = true; clearTimeout(timer); const moves = run.moves, acts = run.acts; run.shakeUntil = performance.now() + 700; run.amp = crashed ? 18 : 0;
-    if (crashed) { sfx.play('crash'); fx.lose(); puff(26, run.laneX, PY - 40, '#ffd24a', 2.2); msg('💥 Ouch! Tardy slip.'); } else { sfx.play('roar'); fx.burst(200); run.flashUntil = performance.now() + 2000; msg('🎓 You made it to class!'); }
+    if (crashed) { sfx.play('crash'); fx.lose(); puff(26, FX(), FY() - 40, '#ffd24a', 2.2); msg('💥 Ouch! Tardy slip.'); } else { sfx.play('roar'); fx.burst(200); run.flashUntil = performance.now() + 2000; msg('🎓 You made it to class!'); }
     const t0 = performance.now(), rp = run.pos;
     await new Promise(done => { const step = () => { if (!root.isConnected || !run) return done(); const k = Math.min(1, (performance.now() - t0) / (calm ? 100 : 800)); run.parts.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += .12; p.life--; }); run.parts = run.parts.filter(p => p.life > 0);
       scene(rp, performance.now(), true, crashed ? { rot: k * 4.2, sc: 1 - k * .25 } : null); k < 1 ? setTimeout(step, 16) : done(); }; step(); });
@@ -2064,24 +2078,24 @@ async function dash(root) {
   function tickLoop() {
     if (!run || run.over || !root.isConnected) return; const now = performance.now(), el = now - run.t0, rp = rowPosAt(el); run.pos = rp; const dt = Math.min(50, now - last) / 16, nr = Math.floor(rp - GR) + 1; last = now;
     if (run.queued) { const nl = run.next + run.queued; if (nl >= 0 && nl <= 2 && nr > run.lastRow) { run.moves.push({ row: nr, lane: nl }); run.lastRow = nr; run.from = run.next; run.next = nl; run.dir = run.queued; sfx.play('whoosh'); } run.queued = 0; }
-    if (run.qAct && nr >= run.lastAct + 3) { run.acts.push({ row: nr, kind: run.qAct }); run.lastAct = nr; const dur = Math.max(260, run.cum[Math.min(run.cum.length - 1, nr + AIR)] - el); if (run.qAct === 'j') { run.jump = { t0: now, dur }; sfx.play('tap'); puff(8, run.laneX, PY - 2, 'rgba(210,220,255,.75)', 1.3); } else { run.slideT = { t0: now, dur }; sfx.play('whoosh'); } run.qAct = null; }
+    if (run.qAct && nr >= run.lastAct + 3) { run.acts.push({ row: nr, kind: run.qAct }); run.lastAct = nr; const dur = Math.max(260, run.cum[Math.min(run.cum.length - 1, nr + AIR)] - el); if (run.qAct === 'j') { run.jump = { t0: now, dur }; sfx.play('tap'); puff(8, FX(), FY() - 2, 'rgba(210,220,255,.75)', 1.3); } else { run.slideT = { t0: now, dur }; sfx.play('whoosh'); } run.qAct = null; }
     while (run.checked + 1 + GR <= rp) {
       run.checked++; const r = run.checked, mv = run.moves.find(m => m.row === r); if (mv) run.lane = mv.lane; if (r > run.max) return over(false); const row = run.rows[r]; if (!row) break;
       const air = run.acts.some(a => a.kind === 'j' && a.row <= r && r < a.row + AIR), slide = run.acts.some(a => a.kind === 's' && a.row <= r && r < a.row + AIR), L = run.lane, [mask, pass, low, high, power] = row;
       const blocked = (mask >> L & 1) || ((low >> L & 1) && !air) || ((high >> L & 1) && !slide);
-      if (blocked) { if (run.shield) { run.shield = false; run.shieldUsed++; popup('SHIELD SAVED YOU!', '#5bd0ff'); sfx.play('crash'); run.shakeUntil = now + 220; run.amp = 9; puff(18, run.laneX, PY - 40, '#5bd0ff', 1.8); } else return over(true); }
+      if (blocked) { if (run.shield) { run.shield = false; run.shieldUsed++; popup('SHIELD SAVED YOU!', '#5bd0ff'); sfx.play('crash'); run.shakeUntil = now + 220; run.amp = 9; puff(18, FX(), FY() - 40, '#5bd0ff', 1.8); } else return over(true); }
       else if ((low >> L & 1) || (high >> L & 1)) { popup(low >> L & 1 ? 'CLEAN JUMP!' : 'SMOOTH SLIDE!', '#ffd24a'); sfx.play('near'); }
       else if (mv && (row[0] >> run.from & 1)) { popup('NEAR MISS!', '#ffd24a'); sfx.play('near'); run.shakeUntil = now + 160; run.amp = 5; }
-      if (pass >= 0 && (pass === L || (run.magnetUntil >= r && Math.abs(pass - L) <= 1))) { run.passes++; run.chain++; run.sinceGot = 0; run.got.add(r); sfx.play('coin'); puff(10, run.laneX, PY - 50, '#ffd24a', 1.3); if (run.chain >= 3) popup(`CHIPS ×${run.chain}!`, '#19e58a'); } else if (++run.sinceGot > 14) run.chain = 0;
-      if (power >= 0 && Math.floor(power / 10) === L) { run.got.add(-r); if (power % 10 === 1) { run.magnetUntil = r + MAGNET; popup('🧲 MAGNET!', '#ff9aa5'); } else { run.shield = true; popup('🛡️ SHIELD!', '#8fe0ff'); } sfx.play('clear'); puff(14, run.laneX, PY - 60, '#ffffff', 1.4); }
+      if (pass >= 0 && (pass === L || (run.magnetUntil >= r && Math.abs(pass - L) <= 1))) { run.passes++; run.chain++; run.sinceGot = 0; run.got.add(r); sfx.play('coin'); puff(10, FX(), FY() - 50, '#ffd24a', 1.3); if (run.chain >= 3) popup(`CHIPS ×${run.chain}!`, '#19e58a'); } else if (++run.sinceGot > 14) run.chain = 0;
+      if (power >= 0 && Math.floor(power / 10) === L) { run.got.add(-r); if (power % 10 === 1) { run.magnetUntil = r + MAGNET; popup('🧲 MAGNET!', '#ff9aa5'); } else { run.shield = true; popup('🛡️ SHIELD!', '#8fe0ff'); } sfx.play('clear'); puff(14, FX(), FY() - 60, '#ffffff', 1.4); }
       if (r === 100 || r === 200 || r === 300) { run.flashUntil = now + 1200; popup(`${CPN[r / 100 - 1]}! +100`, LVC[r / 100], { dur: 1500, size: 24 }); sfx.play('clear'); fx.burst(50, innerWidth / 2, innerHeight / 3); run.cp++; }
     }
     if (!dashTips.done) { for (let k = 3; k <= 8; k++) { const nx = run.rows[nr + k]; if (!nx) break; if (!dashTips.low && nx[2]) { dashTips.low = true; tipOf('⬆️ JUMP the backpacks!'); break; } if (!dashTips.high && nx[3]) { dashTips.high = true; tipOf('⬇️ SLIDE under the sign!'); break; } } if (!dashTips.lane && rp > 3) { dashTips.lane = true; tipOf('⬅️ ➡️ change lanes around the carts'); } if (dashTips.low && dashTips.high && dashTips.lane) dashTips.done = true; }
     run.target = LX(run.next ?? run.lane); run.laneX += (run.target - run.laneX) * Math.min(1, .3 * dt);
-    run.air = 0; run.jk = null; if (run.jump) { const kk = (now - run.jump.t0) / run.jump.dur; run.jk = kk; const u = Math.max(0, Math.min(1, (kk - .08) / .92)); run.air = kk < 1 ? Math.sin(u * Math.PI) * 78 : 0; if (kk >= 1) { run.jump = null; run.jk = null; run.landT = now; puff(10, run.laneX, PY - 2, 'rgba(210,220,255,.75)', 1.5); } }
+    run.air = 0; run.jk = null; if (run.jump) { const kk = (now - run.jump.t0) / run.jump.dur; run.jk = kk; const u = Math.max(0, Math.min(1, (kk - .08) / .92)); run.air = kk < 1 ? Math.sin(u * Math.PI) * 78 : 0; if (kk >= 1) { run.jump = null; run.jk = null; run.landT = now; puff(10, FX(), FY() - 2, 'rgba(210,220,255,.75)', 1.5); } }
     run.land = run.landT ? Math.max(0, 1 - (now - run.landT) / 190) : 0; if (!run.land) run.landT = 0;
-    run.slide = 0; if (run.slideT) { const kk = (now - run.slideT.t0) / run.slideT.dur, e = x => x * x * (3 - 2 * x); run.slide = kk < 1 ? e(Math.max(0, Math.min(1, kk * 5, (1 - kk) * 5))) : 0; if (run.slide > .5 && now - (run.lastSpark || 0) > 45) { run.lastSpark = now; puff(2, run.laneX + (Math.random() - .5) * 30, PY - 3, '#ffb347', .9); } if (kk >= 1) { run.slideT = null; puff(5, run.laneX, PY - 2, 'rgba(210,220,255,.6)', 1); } }
-    if (now - run.lastPuff > 70) { run.lastPuff = now; puff(1, run.laneX, PY - 2, 'rgba(210,220,255,.6)', .6); }
+    run.slide = 0; if (run.slideT) { const kk = (now - run.slideT.t0) / run.slideT.dur, e = x => x * x * (3 - 2 * x); run.slide = kk < 1 ? e(Math.max(0, Math.min(1, kk * 5, (1 - kk) * 5))) : 0; if (run.slide > .5 && now - (run.lastSpark || 0) > 45) { run.lastSpark = now; puff(2, FX() + (Math.random() - .5) * 30, FY() - 3, '#ffb347', .9); } if (kk >= 1) { run.slideT = null; puff(5, FX(), FY() - 2, 'rgba(210,220,255,.6)', 1); } }
+    if (now - run.lastPuff > 70) { run.lastPuff = now; puff(1, FX(), FY() - 2, 'rgba(210,220,255,.6)', .6); }
     run.parts.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += .1 * dt; p.life -= dt; }); run.parts = run.parts.filter(p => p.life > 0);
     scene(rp, now, false, null); setScore($('#sc'), scoreNow()); $('#ps').textContent = run.passes; if (rp > run.rows.length - 60) more();
     timer = setTimeout(tickLoop, 16);

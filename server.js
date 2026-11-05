@@ -1413,9 +1413,9 @@ const send = (res, status, body, type = 'application/json') => {
     'Content-Security-Policy': CSP, ...(PROD ? { 'Strict-Transport-Security': 'max-age=31536000' } : {}) });
   res.end(body);
 };
-const ASSET_TYPES = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', mp4: 'video/mp4', webm: 'video/webm' };
+const ASSET_TYPES = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', mp4: 'video/mp4', webm: 'video/webm', js: 'text/javascript' };
 function serveAsset(req, res, name) { // Higgsfield art and clips in /assets: cached for a day, with byte ranges so phones can play video
-  const m = /^[a-z0-9_-]+\.(webp|png|jpg|mp4|webm)$/.exec(name); let st;
+  const m = /^[a-z0-9_-]+\.(webp|png|jpg|mp4|webm|js)$/.exec(name); let st;
   try { st = m && fs.statSync(path.join(__dirname, 'assets', name)); } catch (e) {} if (!st || !st.isFile()) return send(res, 404, 'Not found', 'text/plain');
   const hdr = { 'Content-Type': ASSET_TYPES[m[1]], 'Cache-Control': 'public, max-age=86400', 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': CSP }, f = path.join(__dirname, 'assets', name);
   const r = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
