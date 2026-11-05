@@ -1931,7 +1931,7 @@ function dashHawk(c, x, y, sz, phase, lean, dir, t, pose) { // the Seahawk, seen
 let dashTips = { low: false, high: false, lane: false, done: false };
 let threeP; const loadThree = () => threeP || (threeP = new Promise(res => { // real 3D for Hallway Dash: three.js plus our scene file; if either fails the flat canvas version runs instead
   if (window.Dash3D) return res(true); const add = (src, ok) => { const e = document.createElement('script'); e.src = src; e.onload = ok; e.onerror = () => res(false); document.head.appendChild(e); };
-  add('assets/three_min.js', () => add('assets/dash3d.js?v=3', () => res(!!window.Dash3D)));
+  add('assets/three_min.js', () => add('assets/dash3d.js?v=6', () => res(!!window.Dash3D)));
 }));
 async function dash(root) {
   let st = null, run = null, timer = 0, played = false; const has3d = await loadThree(); if (!root.isConnected) return;
@@ -1941,6 +1941,7 @@ async function dash(root) {
     ${skillBet('dash')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Chips</small><b id="ps">0</b></div></div>${hsBox()}`,
     `<div class="dashwrap${has3d ? ' d3' : ''}">${has3d ? `<canvas id="dgl" width="${W}" height="${H}"></canvas>` : ''}<canvas id="dcv" width="${W}" height="${H}" aria-label="Hallway Dash game"></canvas><div class="mbadge ov hidden" aria-live="polite"></div><div class="dashmsg" id="dm"></div>
       <div class="dashintro" id="dintro">🎓 Reach class! ← → lanes · ↑ jump · ↓ slide</div><button class="dashinfo" id="dinfo" aria-label="How to play">ⓘ How to play</button></div>`);
+  root.querySelectorAll('.mbadge').forEach(b => b.remove()); // no multiplier on the Dash screen
   const hideIntro = () => { const d = $('#dintro'); if (d) d.classList.add('hidden'); };
   let firstVisit = true; try { firstVisit = !localStorage.getItem('hb_dash_seen'); localStorage.setItem('hb_dash_seen', '1'); } catch (e) {}
   if (firstVisit) { const t = setTimeout(hideIntro, 3000); const kd = () => { hideIntro(); document.removeEventListener('keydown', kd); }; document.addEventListener('keydown', kd); stopFns.push(() => { clearTimeout(t); document.removeEventListener('keydown', kd); }); } else hideIntro();
@@ -2047,7 +2048,6 @@ async function dash(root) {
     for (let i = 1; i <= 3; i++) { const x = bx + bw * i / 4; c.fillStyle = rp >= i * 100 ? '#fff' : '#ffffff66'; c.beginPath(); c.arc(x, by + 2.5, 3.2, 0, 7); c.fill(); c.font = '700 8px system-ui'; c.textAlign = 'center'; c.fillStyle = rp >= i * 100 ? LVC[i] : '#8fb0ff'; c.fillText(CPS[i - 1], x, by + 14); }
     c.font = '14px system-ui'; c.textAlign = 'center'; c.fillText('🎓', bx + bw + 4, by + 2); c.fillText('🦅', bx + Math.max(4, bw * pr), by - 8);
     c.font = '700 9px system-ui'; c.textAlign = 'right'; c.fillStyle = '#ffffff66'; c.fillText(`🎓 ${Math.max(0, Math.round(run.max - rp))} rows to class`, W - 20, 80);
-    c.textAlign = 'left'; c.font = '900 12px system-ui'; c.fillStyle = '#ffffffcc'; c.fillText(`×${Math.min(3, speedAt(rp)).toFixed(1)} speed`, 12, 548);
     if (run.chain >= 2) { c.textAlign = 'right'; c.fillStyle = '#ffd24a'; c.font = '900 16px system-ui'; c.fillText(`🪙 combo ×${run.chain}`, W - 12, 548); }
     if (run.magnetUntil >= Math.floor(rp)) { c.textAlign = 'left'; c.font = '800 12px system-ui'; c.fillStyle = '#ff9aa5'; c.fillText(`🧲 ${Math.max(0, Math.ceil(run.magnetUntil - rp))}`, 12, 528); }
     if (run.shield) { c.textAlign = 'left'; c.font = '800 12px system-ui'; c.fillStyle = '#8fe0ff'; c.fillText('🛡️ ready', 62, 528); }
@@ -2058,8 +2058,8 @@ async function dash(root) {
   const popup = (text, col, extra) => { run.pop = { text, col, t0: performance.now(), ...extra }; };
   const tipOf = text => popup(text, '#fff', { dur: 2000, y: 215, size: 22 });
   const puff = (n, x, y, col, spd = 1) => { for (let i = 0; i < n; i++) run.parts.push({ x: x + (Math.random() - .5) * 20, y, vx: (Math.random() - .5) * 2.2 * spd, vy: -Math.random() * 2.5 * spd - .5, r: 2 + Math.random() * 3, life: 26 + Math.random() * 14, max: 40, col }); };
-  const blank = () => ({ rows: Array.from({ length: 60 }, () => [0, -1, 0, 0, -1]), tick: Array(80).fill(280), max: 400, moves: [], acts: [], lane: 1, next: 1, from: 1, dir: 1, laneX: LX(1), target: LX(1), lastRow: -1, lastAct: -9, checked: -1, passes: 0, chain: 0, sinceGot: 0, pos: 0, queued: 0, qAct: null, over: false, parts: [], lastPuff: 0, shakeUntil: 0, amp: 0, pop: null, t0: 0, got: new Set(), air: 0, slide: 0, shield: false, shieldUsed: 0, magnetUntil: -1, flashUntil: 0, jump: null, slideT: null, cp: 0, cum: cum(Array(80).fill(340)) });
-  function turn(d) { if (run && !run.over && run.t0) run.queued = d; }
+  const blank = () => ({ rows: Array.from({ length: 60 }, () => [0, -1, 0, 0, -1]), tick: Array(80).fill(280), max: 400, moves: [], acts: [], lane: 1, next: 1, from: 1, dir: 1, laneX: LX(1), target: LX(1), lastRow: -1, lastAct: -9, checked: -1, passes: 0, chain: 0, sinceGot: 0, pos: 0, qq: [], qAct: null, over: false, parts: [], lastPuff: 0, shakeUntil: 0, amp: 0, pop: null, t0: 0, got: new Set(), air: 0, slide: 0, shield: false, shieldUsed: 0, magnetUntil: -1, flashUntil: 0, jump: null, slideT: null, cp: 0, cum: cum(Array(80).fill(340)) });
+  function turn(d) { if (run && !run.over && run.t0) { run.qq.push(d); if (run.qq.length > 2) run.qq.shift(); } } // taps queue up (two deep) and are used one per row, so a quick double tap is never dropped
   function act2(kind) { if (run && !run.over && run.t0) run.qAct = kind; }
   async function more() { if (run.fetching || run.rows.length > run.max) return; run.fetching = true; try { const r = await api('POST', '/arcade/dash/rows', { from: run.rows.length }); if (run) run.rows.push(...r.rows); } catch (e) {} finally { if (run) run.fetching = false; } }
   async function over(crashed) {
@@ -2076,7 +2076,7 @@ async function dash(root) {
   let last = 0;
   function tickLoop() {
     if (!run || run.over || !root.isConnected) return; const now = performance.now(), el = now - run.t0, rp = rowPosAt(el); run.pos = rp; const dt = Math.min(50, now - last) / 16, nr = Math.floor(rp - GR) + 1; last = now;
-    if (run.queued) { const nl = run.next + run.queued; if (nl >= 0 && nl <= 2 && nr > run.lastRow) { run.moves.push({ row: nr, lane: nl }); run.lastRow = nr; run.from = run.next; run.next = nl; run.dir = run.queued; sfx.play('whoosh'); } run.queued = 0; }
+    if (run.qq.length && nr > run.lastRow) { const d = run.qq.shift(), nl = run.next + d; if (nl >= 0 && nl <= 2) { run.moves.push({ row: nr, lane: nl }); run.lastRow = nr; run.from = run.next; run.next = nl; run.dir = d; sfx.play('whoosh'); } }
     if (run.qAct && nr >= run.lastAct + 3) { run.acts.push({ row: nr, kind: run.qAct }); run.lastAct = nr; const dur = Math.max(260, run.cum[Math.min(run.cum.length - 1, nr + AIR)] - el); if (run.qAct === 'j') { run.jump = { t0: now, dur }; sfx.play('tap'); puff(8, FX(), FY() - 2, 'rgba(210,220,255,.75)', 1.3); } else { run.slideT = { t0: now, dur }; sfx.play('whoosh'); } run.qAct = null; }
     while (run.checked + 1 + GR <= rp) {
       run.checked++; const r = run.checked, mv = run.moves.find(m => m.row === r); if (mv) run.lane = mv.lane; if (r > run.max) return over(false); const row = run.rows[r]; if (!row) break;
@@ -2090,7 +2090,7 @@ async function dash(root) {
       if (r === 100 || r === 200 || r === 300) { run.flashUntil = now + 1200; popup(`${CPN[r / 100 - 1]}! +100`, LVC[r / 100], { dur: 1500, size: 24 }); sfx.play('clear'); fx.burst(50, innerWidth / 2, innerHeight / 3); run.cp++; }
     }
     if (!dashTips.done) { for (let k = 3; k <= 8; k++) { const nx = run.rows[nr + k]; if (!nx) break; if (!dashTips.low && nx[2]) { dashTips.low = true; tipOf('⬆️ JUMP the backpacks!'); break; } if (!dashTips.high && nx[3]) { dashTips.high = true; tipOf('⬇️ SLIDE under the sign!'); break; } } if (!dashTips.lane && rp > 3) { dashTips.lane = true; tipOf('⬅️ ➡️ change lanes around the carts'); } if (dashTips.low && dashTips.high && dashTips.lane) dashTips.done = true; }
-    run.target = LX(run.next ?? run.lane); run.laneX += (run.target - run.laneX) * Math.min(1, .3 * dt);
+    run.target = LX(run.next ?? run.lane); run.laneX += (run.target - run.laneX) * Math.min(1, .45 * dt);
     run.air = 0; run.jk = null; if (run.jump) { const kk = (now - run.jump.t0) / run.jump.dur; run.jk = kk; const u = Math.max(0, Math.min(1, (kk - .08) / .92)); run.air = kk < 1 ? Math.sin(u * Math.PI) * 78 : 0; if (kk >= 1) { run.jump = null; run.jk = null; run.landT = now; puff(10, FX(), FY() - 2, 'rgba(210,220,255,.75)', 1.5); } }
     run.land = run.landT ? Math.max(0, 1 - (now - run.landT) / 190) : 0; if (!run.land) run.landT = 0;
     run.slide = 0; if (run.slideT) { const kk = (now - run.slideT.t0) / run.slideT.dur, e = x => x * x * (3 - 2 * x); run.slide = kk < 1 ? e(Math.max(0, Math.min(1, kk * 5, (1 - kk) * 5))) : 0; if (run.slide > .5 && now - (run.lastSpark || 0) > 45) { run.lastSpark = now; puff(2, FX() + (Math.random() - .5) * 30, FY() - 3, '#ffb347', .9); } if (kk >= 1) { run.slideT = null; puff(5, FX(), FY() - 2, 'rgba(210,220,255,.6)', 1); } }
