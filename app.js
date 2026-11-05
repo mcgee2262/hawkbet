@@ -1931,7 +1931,7 @@ function dashHawk(c, x, y, sz, phase, lean, dir, t, pose) { // the Seahawk, seen
 let dashTips = { low: false, high: false, lane: false, done: false };
 let threeP; const loadThree = () => threeP || (threeP = new Promise(res => { // real 3D for Hallway Dash: three.js plus our scene file; if either fails the flat canvas version runs instead
   if (window.Dash3D) return res(true); const add = (src, ok) => { const e = document.createElement('script'); e.src = src; e.onload = ok; e.onerror = () => res(false); document.head.appendChild(e); };
-  add('assets/three_bundle.js', () => add('assets/dash3d.js?v=12', () => res(!!window.Dash3D)));
+  add('assets/three_bundle.js', () => add('assets/dash3d.js?v=14', () => res(!!window.Dash3D)));
 }));
 async function dash(root) {
   let st = null, run = null, timer = 0, played = false; const has3d = await loadThree(); if (!root.isConnected) return;
@@ -1940,11 +1940,13 @@ async function dash(root) {
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>🎯 Goal:</b> race down the hallway and get to class before the bell. <b>← →</b> switch lanes around carts, <b>↑</b> jump the backpacks, <b>↓</b> slide under signs (phones: swipe, or tap a side). Grab 🪙 chips (+50), 🧲 magnet pulls them in, 🛡️ shield saves you from one hit. It starts easy and gets harder every 100 rows (Freshman → Senior). Every row is 10 points, each new level is +100 and the 🎓 door is a +500 jackpot.</div>
     ${skillBet('dash')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Chips</small><b id="ps">0</b></div></div>${hsBox()}`,
     `<div class="dashwrap${has3d ? ' d3' : ''}">${has3d ? `<canvas id="dgl" width="${W}" height="${H}"></canvas>` : ''}<canvas id="dcv" width="${W}" height="${H}" aria-label="Hallway Dash game"></canvas><div class="mbadge ov hidden" aria-live="polite"></div><div class="dashmsg" id="dm"></div>
-      <div class="dashintro" id="dintro">🎓 Reach class! ← → lanes · ↑ jump · ↓ slide</div><button class="dashfs" id="dfs" aria-label="Full screen" title="Full screen">⛶</button><button class="dashinfo" id="dinfo" aria-label="How to play">ⓘ How to play</button></div>`);
+      <div class="dstart" id="dstart"><button class="dsgo" id="dsgo">▶ TAP TO START</button><div class="dssub" id="dssub"></div><div class="dshint">← → lanes · ↑ jump · ↓ slide</div><button class="dspr" id="dspr">or play free practice</button></div><button class="dashfs" id="dfs" aria-label="Full screen" title="Full screen">⛶</button><button class="dashinfo" id="dinfo" aria-label="How to play">ⓘ How to play</button></div>`);
   root.querySelectorAll('.mbadge').forEach(b => b.remove()); // no multiplier on the Dash screen
-  const hideIntro = () => { const d = $('#dintro'); if (d) d.classList.add('hidden'); };
-  let firstVisit = true; try { firstVisit = !localStorage.getItem('hb_dash_seen'); localStorage.setItem('hb_dash_seen', '1'); } catch (e) {}
-  if (firstVisit) { const t = setTimeout(hideIntro, 3000); const kd = () => { hideIntro(); document.removeEventListener('keydown', kd); }; document.addEventListener('keydown', kd); stopFns.push(() => { clearTimeout(t); document.removeEventListener('keydown', kd); }); } else hideIntro();
+  const hideIntro = () => {};
+  const startUI = (on, last) => { const d = $('#dstart'); if (!d) return; d.classList.toggle('hidden', !on); if (on) { let b = 0; try { b = SCHOOL() ? 0 : readBet(); } catch (e) {} $('#dssub').textContent = `${last != null ? `Last run: ${fmt(last)} pts · ` : ''}${b ? `Bet ${fmt(b)} 🪙` : 'Free play'}`; } };
+  $('#dsgo').onclick = e => { e.stopPropagation(); const b = $('#start'); if (b && !b.disabled) b.click(); };
+  $('#dspr').onclick = e => { e.stopPropagation(); const b = $('#practice'); if (b && !b.disabled) b.click(); else $('#dsgo').click(); };
+  if (!$('#practice')) $('#dspr').classList.add('hidden');
   { // full screen: the game fills the whole screen (real full screen where the browser allows it; a fixed overlay everywhere else, including iPhone)
     const wrap = $('.dashwrap'); let home = null;
     const setFull = on => { if (on === wrap.classList.contains('dfull')) return;
@@ -2081,8 +2083,8 @@ async function dash(root) {
     await new Promise(done => { const step = () => { if (!root.isConnected || !run) return done(); const k = Math.min(1, (performance.now() - t0) / (calm ? 100 : 800)); run.parts.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += .12; p.life--; }); run.parts = run.parts.filter(p => p.life > 0);
       scene(rp, performance.now(), true, crashed ? { rot: k * 4.2, sc: 1 - k * .25 } : null); k < 1 ? setTimeout(step, 16) : done(); }; step(); });
     if (!root.isConnected) return;
-    try { const r = await api('POST', '/arcade/dash/end', { moves, acts }); st = null; run = null; lockStart(false); resMsg(true, `${r.rows} rows · ${r.passes} chips · ${r.checkpoints} checkpoints · ${fmt(r.score)} pts`); msg(`${fmt(r.score)} pts`); skillDone('dash', r, r.score >= 1200); }
-    catch (e) { toast(e.message); st = null; run = null; lockStart(false); }
+    try { const r = await api('POST', '/arcade/dash/end', { moves, acts }); st = null; run = null; lockStart(false); setTimeout(() => { if (!run && root.isConnected) { msg(''); startUI(true, r.score); drawIdle(); } }, 1400); resMsg(true, `${r.rows} rows · ${r.passes} chips · ${r.checkpoints} checkpoints · ${fmt(r.score)} pts`); msg(`${fmt(r.score)} pts`); skillDone('dash', r, r.score >= 1200); }
+    catch (e) { toast(e.message); st = null; run = null; lockStart(false); startUI(true); drawIdle(); }
   }
   const setScore = (el, v) => { const t = fmt(v); if (el && el.textContent !== t) el.textContent = t; };
   let last = 0;
@@ -2114,9 +2116,9 @@ async function dash(root) {
   const keys = e => { if (!root.isConnected) return; const k = e.key.toLowerCase(); if (k === 'arrowleft' || k === 'a') { e.preventDefault(); turn(-1); } else if (k === 'arrowright' || k === 'd') { e.preventDefault(); turn(1); } else if (k === 'arrowup' || k === 'w') { e.preventDefault(); act2('j'); } else if (k === 'arrowdown' || k === 's') { e.preventDefault(); act2('s'); } };
   document.addEventListener('keydown', keys); stopFns.push(() => document.removeEventListener('keydown', keys));
   let sx = 0, sy = 0; cv.addEventListener('pointerdown', e => { sx = e.clientX; sy = e.clientY; }); cv.addEventListener('pointerup', e => { const dx = e.clientX - sx, dy = e.clientY - sy, r = cv.getBoundingClientRect(); if (Math.abs(dy) > 24 && Math.abs(dy) > Math.abs(dx)) act2(dy < 0 ? 'j' : 's'); else turn(Math.abs(dx) > 24 ? Math.sign(dx) : e.clientX < r.left + r.width / 2 ? -1 : 1); });
-  const idle = blank(); const drawIdle = () => { if (run || !root.isConnected) return; run = idle; scene(0, performance.now(), true, null); run = null; }; setTimeout(drawIdle, 60);
+  const idle = blank(); let idleT = 0; const drawIdle = () => { clearTimeout(idleT); if (run || !root.isConnected) return; run = idle; const now = performance.now(); idle.laneX = idle.target = LX(1); scene((now / 300) % 40, now, false, null); run = null; idleT = setTimeout(drawIdle, 33); }; setTimeout(() => { startUI(true); drawIdle(); }, 60); stopFns.push(() => clearTimeout(idleT)); // before a run the Seahawk jogs down an empty hall behind a Tap to Start button
   skillButtons(bet => act(async () => {
-    const r = await api('POST', '/arcade/dash/start', { bet }); if (r.bet) setBal(r.balance); st = {}; played = true; hideIntro(); lockStart(true); $('#sc').textContent = '0'; $('#ps').textContent = '0'; $('#res').textContent = '';
+    const r = await api('POST', '/arcade/dash/start', { bet }); if (r.bet) setBal(r.balance); st = {}; played = true; startUI(false); lockStart(true); $('#sc').textContent = '0'; $('#ps').textContent = '0'; $('#res').textContent = '';
     run = { ...blank(), rows: r.rows, tick: r.tick, cum: cum(r.tick), max: r.max };
     scene(0, performance.now(), false, null); for (const n of [3, 2, 1]) { msg(String(n)); sfx.play('tick'); await wait(calm ? 200 : 650); if (!root.isConnected || !run) return; } msg('GO!'); sfx.play('whoosh'); setTimeout(() => { if (run && !run.over) msg(''); }, 500);
     run.t0 = performance.now(); last = run.t0; tickLoop();

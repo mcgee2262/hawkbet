@@ -665,8 +665,8 @@ const dashTick = i => i < 100 ? Math.round(280 - 0.5 * i) : i < 200 ? Math.round
 const dashTimeAt = r => { let t = 0; for (let i = 0; i < r; i++) t += dashTick(i); return t * TSCALE; };
 const dashRowAt = el => { let r = 0, t = 0; while (r < DASH_MAX + 1 && t + dashTick(r) * TSCALE <= el) t += dashTick(r++) * TSCALE; return r; };
 const DASH_LV = [ // per level: path shift chance, wall chance per side lane, obstacle row gap, hurdle/sign chance on the path, spare obstacles, chip chance, power-up chance
-  { shift: 0.07, wall: 0.10, gap: 8, act: 0.20, spare: 0.03, chip: 0.34, power: 0.06 }, { shift: 0.16, wall: 0.20, gap: 6, act: 0.26, spare: 0.06, chip: 0.30, power: 0.045 },
-  { shift: 0.24, wall: 0.30, gap: 5, act: 0.32, spare: 0.08, chip: 0.26, power: 0.035 }, { shift: 0.32, wall: 0.42, gap: 4, act: 0.38, spare: 0.10, chip: 0.22, power: 0.03 }];
+  { shift: 0.07, wall: 0.10, gap: 8, act: 0.20, spare: 0.03, chip: 0.34, power: 0.06 }, { shift: 0.14, wall: 0.17, gap: 7, act: 0.24, spare: 0.04, chip: 0.30, power: 0.05 },
+  { shift: 0.18, wall: 0.21, gap: 6, act: 0.26, spare: 0.04, chip: 0.28, power: 0.045 }, { shift: 0.22, wall: 0.25, gap: 6, act: 0.28, spare: 0.05, chip: 0.26, power: 0.04 }]; // later levels are faster, so they stay roomier than before
 function dashRows(seed) { // a safe path always exists: it shifts at most one lane per row, and hurdles on it are spaced so you can jump or slide in time
   const rnd = mulberry(seed), rows = []; let p = 1, lastAct = -9, lastShift = -9;
   for (let r = 0; r <= DASH_MAX; r++) {

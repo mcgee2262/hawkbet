@@ -49,6 +49,10 @@
   function mkSign() { // a hanging barrier: slide under it
     const red = mat(0x8a1224, .35, .5); return grp(mesh(G('signb', () => new T.BoxGeometry(2.2, 1.05, .16)), [red, red, mat(0xb91a33, .35, .5), red, signMat, signMat], 0, 2.2, 0), cyl(.04, .04, CEIL - 2.7, mat(0xc8d0e4, .3, .9), -.95, 2.7 + (CEIL - 2.7) / 2, 0, 10), cyl(.04, .04, CEIL - 2.7, mat(0xc8d0e4, .3, .9), .95, 2.7 + (CEIL - 2.7) / 2, 0, 10), box(2.3, .08, .2, mat(0xffd24a, .4, .3), 0, 1.68, 0));
   }
+  function mkBeam() { // a steel beam across the hall, bolted into both walls: the HALL CLOSED sign hangs from it
+    const steel = mat(0x8e9ab8, .32, .85), dark = mat(0x4a5578, .4, .7);
+    return grp(box(WALL * 2 - .1, .24, .36, steel, 0, CEIL + .1, 0), box(WALL * 2 - .1, .05, .5, dark, 0, CEIL - .03, 0), box(WALL * 2 - .1, .05, .5, dark, 0, CEIL + .23, 0),
+      box(.36, .9, .5, dark, -(WALL - .2), CEIL - .2, 0), box(.36, .9, .5, dark, WALL - .2, CEIL - .2, 0)); }
   const coinFace = new T.MeshStandardMaterial({ map: coinTex, emissive: 0x3a2200, roughness: .25, metalness: .7 }), coinMats = [mat(0xe29a00, .25, .9), coinFace, coinFace];
   function mkCoin() { const c = mesh(G('coin', () => new T.CylinderGeometry(.5, .5, .14, 40)), coinMats); c.rotation.x = Math.PI / 2; const g = grp(c); g.userData.spin = c; return g; }
   const glowTex = tex(128, 128, (g) => { const r = g.createRadialGradient(64, 64, 4, 64, 64, 62); r.addColorStop(0, 'rgba(255,255,255,.9)'); r.addColorStop(.35, 'rgba(255,255,255,.35)'); r.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = r; g.fillRect(0, 0, 128, 128); });
@@ -62,7 +66,7 @@
     const sparks = new T.Group(); for (let i = 0; i < 5; i++) { const sp = new T.Sprite(new T.SpriteMaterial({ map: glowTex, color: i % 2 ? 0xffe27a : 0xffffff, transparent: true, depthWrite: false, blending: T.AdditiveBlending })); sp.scale.setScalar(.18); sp.userData.a = i / 5 * Math.PI * 2; sparks.add(sp); } g.add(sparks); g.userData.sparks = sparks;
     g.scale.setScalar(1.25); g.rotation.z = -.18; return g; }
   function mkShield() { const s = mesh(G('shd', () => new T.SphereGeometry(.52, 32, 24)), new T.MeshStandardMaterial({ color: 0x4cc9ff, emissive: 0x0a4a66, roughness: .1, metalness: .3, transparent: true, opacity: .85 })); return grp(s, mesh(G('shr', () => new T.TorusGeometry(.6, .05, 12, 40)), mat(0xffffff, .3, .5))); }
-  const TPL = { lockB: mkLockerBank(0x2f6bff), lockG: mkLockerBank(0x14c46f), bags: mkBags(), sign: mkSign(), coin: mkCoin(), magnet: mkMagnet(), shield: mkShield() };
+  const TPL = { beam: mkBeam(), lockB: mkLockerBank(0x2f6bff), lockG: mkLockerBank(0x14c46f), bags: mkBags(), sign: mkSign(), coin: mkCoin(), magnet: mkMagnet(), shield: mkShield() };
   Object.values(TPL).forEach(shadowsOn);
   const clone = k => { const g = TPL[k].clone(); if (k === 'coin') g.userData.spin = g.children[0]; if (k === 'magnet') g.userData.sparks = g.children[g.children.length - 1]; return g; };
 
@@ -116,7 +120,7 @@
     scene.add(new T.HemisphereLight(0xdfe8ff, 0x34407a, 1.3));
     const sun = new T.DirectionalLight(0xfff6ea, 2.4); sun.position.set(5, 14, 7); sun.target.position.set(0, 0, -6); scene.add(sun, sun.target);
     sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); Object.assign(sun.shadow.camera, { left: -9, right: 9, top: 18, bottom: -14, near: 1, far: 40 }); sun.shadow.bias = -.0006; sun.shadow.normalBias = .03; sun.shadow.camera.updateProjectionMatrix();
-    const cam = new T.PerspectiveCamera(52, W / H, .3, 120), world = new T.Group(); scene.add(world);
+    const cam = new T.PerspectiveCamera(54, W / H, .3, 120), world = new T.Group(); scene.add(world);
     const LEN = ROW * (AHEAD + 8), midZ = -LEN / 2 + 8;
     for (const sd of [-1, 1]) {
       const wl = mesh(G(`uw`, () => new T.PlaneGeometry(LEN, CEIL - 3.3)), mat(0xa9bde6, .8), sd * WALL, 3.3 + (CEIL - 3.3) / 2, midZ); wl.rotation.y = -sd * Math.PI / 2; world.add(wl);
@@ -145,12 +149,13 @@
       s.r = r; s.kids.forEach(k => s.g.remove(k)); s.kids = []; const row = rows[r], par = ((r & 1) + 2) & 1;
       s.floor.material = floorMats[par]; s.lockL.material = s.lockR.material = lockerMats[((r % 2) + 2) % 2];
       for (let l = 0; l < 3; l++) { let kind = 0; for (let b = 1; b <= 3; b++) { const n = rows[r + b]; if (!n) continue; kind = (n[0] >> l & 1) ? 1 : (n[2] >> l & 1) ? 2 : (n[3] >> l & 1) ? 3 : kind; if (kind) break; } const t = s.tints[l]; t.visible = !!kind; if (kind) t.material = tintMats[kind]; }
-      s.coin = s.power = null;
+      s.coin = s.power = null; s.beam = false;
       if (r === 100 || r === 200 || r === 300) { const a = archFor(r); a.position.z = 0; s.g.add(a); s.kids.push(a); }
       if (!row || r < 1) return;
       for (let l = 0; l < 3; l++) { const x = (l - 1) * LANE, z = .4 * ROW; let o = null;
         if (row[0] >> l & 1) o = clone((r + l) & 1 ? 'lockB' : 'lockG'); else if (row[2] >> l & 1) o = clone('bags'); else if (row[3] >> l & 1) o = clone('sign');
         if (o) { o.position.set(x, 0, z); s.g.add(o); s.kids.push(o); }
+        if (o && row[3] >> l & 1 && !s.beam) { const bm = clone('beam'); bm.position.set(0, 0, z); s.g.add(bm); s.kids.push(bm); s.beam = true; }
         if (row[1] === l) { const c = clone('coin'); c.position.set(x, 1.3, z); s.g.add(c); s.kids.push(c); s.coin = c; }
         if (row[4] >= 0 && Math.floor(row[4] / 10) === l) { const p = clone(row[4] % 10 === 1 ? 'magnet' : 'shield'); p.position.set(x, 1.3, z); s.g.add(p); s.kids.push(p); s.power = p; } }
     }
@@ -195,9 +200,7 @@
       const sh = 1 - Math.min(.5, air / 4.5); rshadow.position.set(wx, .04, 0); rshadow.scale.set(1.8 * sh, 1.8 * sh, 1);
       shieldBall.visible = !!run.shield; shieldBall.position.set(wx, 1.3 + air, 0); shieldBall.scale.setScalar(1 + Math.sin(now / 120) * .03);
       mring.visible = run.magnetUntil >= Math.floor(rp); mring.position.set(wx, 1.3 + air, 0); mring.rotation.z = now / 500;
-      let sx = 0, sy = 0; if (run.shakeUntil > now) { sx = (Math.random() - .5) * run.amp * .03; sy = (Math.random() - .5) * run.amp * .03; }
-      const cx = wx * .6 + sx, cy = 6.9 - (run.slide || 0) * .5 + air * .2 + sy; cam.position.set(cx, cy, 9.4); cam.lookAt(wx * .35, .7, -3.5); cam.rotation.z += -lean * .035;
-      const fovT = 52 + Math.max(0, sp - 1) * 3; if (Math.abs(cam.fov - fovT) > .1) { cam.fov = fovT; cam.updateProjectionMatrix(); }
+      cam.position.set(0, 7.2, 9.6); cam.lookAt(0, .7, -3.5); // a fixed camera: it never slides, tilts, zooms or shakes
       renderer.render(scene, cam); cam.updateMatrixWorld(); foot.set(wx, .05, 0).project(cam); out.x = (foot.x * .5 + .5) * W; out.y = (-foot.y * .5 + .5) * H; return out;
     }
     return { frame, renderer, dispose() { renderer.dispose(); } };

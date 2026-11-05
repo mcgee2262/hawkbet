@@ -1093,6 +1093,12 @@ body.dfs-on{overflow:hidden}
 .dashwrap.dfull canvas{width:min(100vw,calc(100dvh * .7143));height:auto;border-radius:0;box-shadow:none}
 .dashwrap.dfull.d3 #dcv{left:50%;top:50%;transform:translate(-50%,-50%)}
 .dashwrap.dfull .dashfs{top:calc(10px + env(safe-area-inset-top));right:10px;bottom:auto;width:40px;height:36px;font-size:18px}
+.dstart{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:radial-gradient(ellipse at 50% 55%,#05103a55,#05103a99);border-radius:16px}.dstart.hidden{display:none}
+.dsgo{font:900 26px/1 system-ui;letter-spacing:.04em;color:#fff;padding:18px 28px;border-radius:18px;border:2px solid #ffffff55;background:linear-gradient(180deg,#2fd68a,#14a865);box-shadow:0 6px 0 #0b6b3f,0 12px 30px #0008;cursor:pointer;animation:dspulse 1.6s ease-in-out infinite}
+.dsgo:active{transform:translateY(3px);box-shadow:0 3px 0 #0b6b3f}@keyframes dspulse{50%{transform:scale(1.05)}}
+.dssub{font:800 14px system-ui;color:#ffe08a;text-shadow:0 2px 6px #000}.dshint{font:700 12px system-ui;color:#dfe8ff;text-shadow:0 2px 6px #000;opacity:.85}
+.dspr{margin-top:4px;padding:7px 14px;border-radius:99px;border:1px solid #ffffff55;background:#0a1131cc;color:#dfe8ff;font:700 13px system-ui;cursor:pointer}.dspr.hidden{display:none}
+@media (prefers-reduced-motion:reduce){.dsgo{animation:none}}
 .dashinfo:hover{border-color:#ffc542;color:#fff}
 .dashrules{margin:0 0 8px;padding:0;list-style:none;display:grid;gap:5px;font-size:14px}
 /* Football picks */
