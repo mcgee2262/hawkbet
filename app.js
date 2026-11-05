@@ -1931,7 +1931,7 @@ function dashHawk(c, x, y, sz, phase, lean, dir, t, pose) { // the Seahawk, seen
 let dashTips = { low: false, high: false, lane: false, done: false };
 let threeP; const loadThree = () => threeP || (threeP = new Promise(res => { // real 3D for Hallway Dash: three.js plus our scene file; if either fails the flat canvas version runs instead
   if (window.Dash3D) return res(true); const add = (src, ok) => { const e = document.createElement('script'); e.src = src; e.onload = ok; e.onerror = () => res(false); document.head.appendChild(e); };
-  add('assets/three_min.js', () => add('assets/dash3d.js?v=6', () => res(!!window.Dash3D)));
+  add('assets/three_bundle.js', () => add('assets/dash3d.js?v=9', () => res(!!window.Dash3D)));
 }));
 async function dash(root) {
   let st = null, run = null, timer = 0, played = false; const has3d = await loadThree(); if (!root.isConnected) return;
@@ -1981,7 +1981,8 @@ async function dash(root) {
   function scene(rp, now, crashed, tum) {
     if (!d3) return scene2d(rp, now, crashed, tum);
     const f = d3.frame(run, rp, now, crashed, tum, Math.min(2.3, speedAt(rp))); run.fx = f.x; run.fy = f.y;
-    c.clearRect(0, 0, W, H); c.save();
+    const k = Math.min(3, (devicePixelRatio || 1) * Math.max(1, cv.clientWidth) / W), pw = Math.round(W * k); if (cv.width !== pw) { cv.width = pw; cv.height = Math.round(H * k); } // draw the HUD at screen resolution so text stays sharp
+    c.setTransform(k, 0, 0, k, 0, 0); c.clearRect(0, 0, W, H); c.save();
     for (const p of run.parts) { c.globalAlpha = Math.max(0, p.life / p.max); c.fillStyle = p.col; c.beginPath(); c.arc(p.x, p.y, p.r, 0, 7); c.fill(); } c.globalAlpha = 1;
     const sp = Math.min(2.3, speedAt(rp)); if (!crashed || tum) { const a = Math.max(0, sp - 1.05) * .2; if (a > 0) { c.strokeStyle = `rgba(255,255,255,${Math.min(.28, a)})`; c.lineWidth = 2; for (let i = 0; i < 10; i++) { const ang = i * 2.399 + .3, dd = ((now * .5 * sp + i * 91) % 320) + 120; c.beginPath(); c.moveTo(VX + Math.cos(ang) * dd * .85, 250 + Math.sin(ang) * dd * .9); c.lineTo(VX + Math.cos(ang) * (dd + 30), 250 + Math.sin(ang) * (dd + 30) * 1.1); c.stroke(); } } }
     hud(rp, now); c.restore();

@@ -1407,15 +1407,15 @@ const routes = {
 
 const FILES = { '/': 'index.html', '/index.html': 'index.html', '/style.css': 'style.css', '/app.js': 'app.js', '/logo.svg': 'logo.svg', '/hawk.svg': 'hawk.svg', '/rocket.svg': 'rocket.svg' };
 const TYPES = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', svg: 'image/svg+xml' };
-const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 const send = (res, status, body, type = 'application/json') => {
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer',
     'Content-Security-Policy': CSP, ...(PROD ? { 'Strict-Transport-Security': 'max-age=31536000' } : {}) });
   res.end(body);
 };
-const ASSET_TYPES = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', mp4: 'video/mp4', webm: 'video/webm', js: 'text/javascript' };
+const ASSET_TYPES = { webp: 'image/webp', png: 'image/png', jpg: 'image/jpeg', mp4: 'video/mp4', webm: 'video/webm', js: 'text/javascript', glb: 'model/gltf-binary' };
 function serveAsset(req, res, name) { // Higgsfield art and clips in /assets: cached for a day, with byte ranges so phones can play video
-  const m = /^[a-z0-9_-]+\.(webp|png|jpg|mp4|webm|js)$/.exec(name); let st;
+  const m = /^[a-z0-9_-]+\.(webp|png|jpg|mp4|webm|js|glb)$/.exec(name); let st;
   try { st = m && fs.statSync(path.join(__dirname, 'assets', name)); } catch (e) {} if (!st || !st.isFile()) return send(res, 404, 'Not found', 'text/plain');
   const hdr = { 'Content-Type': ASSET_TYPES[m[1]], 'Cache-Control': 'public, max-age=86400', 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': CSP }, f = path.join(__dirname, 'assets', name);
   const r = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
