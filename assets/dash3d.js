@@ -51,11 +51,20 @@
   }
   const coinFace = new T.MeshStandardMaterial({ map: coinTex, emissive: 0x3a2200, roughness: .25, metalness: .7 }), coinMats = [mat(0xe29a00, .25, .9), coinFace, coinFace];
   function mkCoin() { const c = mesh(G('coin', () => new T.CylinderGeometry(.5, .5, .14, 40)), coinMats); c.rotation.x = Math.PI / 2; const g = grp(c); g.userData.spin = c; return g; }
-  function mkMagnet() { const g = new T.Group(); const u = mesh(G('mag', () => new T.TorusGeometry(.42, .15, 16, 32, Math.PI)), mat(0xff3b52, .3, .6)); u.rotation.z = Math.PI; g.add(u, cyl(.15, .15, .22, mat(0xf2f6ff, .25, .9), -.42, .1, 0), cyl(.15, .15, .22, mat(0xf2f6ff, .25, .9), .42, .1, 0)); return g; }
+  const glowTex = tex(128, 128, (g) => { const r = g.createRadialGradient(64, 64, 4, 64, 64, 62); r.addColorStop(0, 'rgba(255,255,255,.9)'); r.addColorStop(.35, 'rgba(255,255,255,.35)'); r.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = r; g.fillRect(0, 0, 128, 128); });
+  function mkMagnet() { // a classic horseshoe magnet: glossy red U, silver pole tips, a soft red glow and sparks circling it
+    const red = new T.MeshPhysicalMaterial({ color: 0xe0142e, roughness: .22, metalness: .35, clearcoat: 1, clearcoatRoughness: .08 }), silver = new T.MeshStandardMaterial({ color: 0xf2f5fa, roughness: .12, metalness: 1 }), R0 = .34, t = .15;
+    const arch = mesh(G('magArch', () => new T.TorusGeometry(R0, t, 24, 48, Math.PI)), red, 0, .12, 0);
+    const legGeo = G('magLeg', () => new T.CylinderGeometry(t, t, .34, 24)), tipGeo = G('magTip', () => new T.CylinderGeometry(t * 1.03, t * 1.03, .2, 24));
+    const g = grp(arch, mesh(legGeo, red, -R0, -.05, 0), mesh(legGeo, red, R0, -.05, 0), mesh(tipGeo, silver, -R0, -.32, 0), mesh(tipGeo, silver, R0, -.32, 0),
+      mesh(G('magBand', () => new T.CylinderGeometry(t * 1.06, t * 1.06, .04, 24)), new T.MeshStandardMaterial({ color: 0xffffff, roughness: .4 }), -R0, -.215, 0), mesh(G('magBand', () => null), new T.MeshStandardMaterial({ color: 0xffffff, roughness: .4 }), R0, -.215, 0));
+    const glow = new T.Sprite(new T.SpriteMaterial({ map: glowTex, color: 0xff3b52, transparent: true, opacity: .55, depthWrite: false, blending: T.AdditiveBlending })); glow.scale.set(1.9, 1.9, 1); g.add(glow);
+    const sparks = new T.Group(); for (let i = 0; i < 5; i++) { const sp = new T.Sprite(new T.SpriteMaterial({ map: glowTex, color: i % 2 ? 0xffe27a : 0xffffff, transparent: true, depthWrite: false, blending: T.AdditiveBlending })); sp.scale.setScalar(.18); sp.userData.a = i / 5 * Math.PI * 2; sparks.add(sp); } g.add(sparks); g.userData.sparks = sparks;
+    g.scale.setScalar(1.25); g.rotation.z = -.18; return g; }
   function mkShield() { const s = mesh(G('shd', () => new T.SphereGeometry(.52, 32, 24)), new T.MeshStandardMaterial({ color: 0x4cc9ff, emissive: 0x0a4a66, roughness: .1, metalness: .3, transparent: true, opacity: .85 })); return grp(s, mesh(G('shr', () => new T.TorusGeometry(.6, .05, 12, 40)), mat(0xffffff, .3, .5))); }
   const TPL = { lockB: mkLockerBank(0x2f6bff), lockG: mkLockerBank(0x14c46f), bags: mkBags(), sign: mkSign(), coin: mkCoin(), magnet: mkMagnet(), shield: mkShield() };
   Object.values(TPL).forEach(shadowsOn);
-  const clone = k => { const g = TPL[k].clone(); if (k === 'coin') g.userData.spin = g.children[0]; return g; };
+  const clone = k => { const g = TPL[k].clone(); if (k === 'coin') g.userData.spin = g.children[0]; if (k === 'magnet') g.userData.sparks = g.children[g.children.length - 1]; return g; };
 
   /* ---------- GLB models ---------- */
   const fit = (obj, height, turn = 0) => { // scale a loaded model to a height, stand it on the floor, centre it in its lane
@@ -178,7 +187,7 @@
       sizeUp(); const base = Math.floor(rp) - 5, rows = run.rows;
       for (let r = base; r < base + POOL; r++) { const s = pool[((r % POOL) + POOL) % POOL]; if (s.r !== r || (r < rows.length && !s.hadRow && rows[r])) { assign(s, r, rows); s.hadRow = !!rows[r]; } s.g.position.z = -(r - rp + .5) * ROW;
         if (s.coin) { s.coin.visible = !run.got.has(r); s.coin.userData.spin.rotation.z = now / 260 + r; s.coin.position.y = 1.35 + Math.sin(now / 280 + r) * .12; }
-        if (s.power) { s.power.visible = !run.got.has(-r); s.power.rotation.y = now / 420; s.power.position.y = 1.3 + Math.sin(now / 300) * .14; } }
+        if (s.power) { s.power.visible = !run.got.has(-r); s.power.rotation.y = Math.sin(now / 500) * .7; s.power.position.y = 1.4 + Math.sin(now / 300) * .14; const sk = s.power.userData.sparks; if (sk) sk.children.forEach((p, i) => { const a = p.userData.a + now / 380; p.position.set(Math.cos(a) * .62, Math.sin(a * 1.3) * .35, Math.sin(a) * .62); p.material.opacity = .5 + .5 * Math.sin(now / 120 + i * 2); }); } }
       const toEnd = run.max + 1 - rp; vault.visible = toEnd < AHEAD + 3; vault.position.z = -toEnd * ROW;
       const wx = (run.laneX - VX) / LANEPX * LANE, lean = clamp((run.target - run.laneX) / 70, -1, 1), air = run.air / 78 * 1.8, airborne = run.air > 2;
       R.root.position.set(wx, air, 0);

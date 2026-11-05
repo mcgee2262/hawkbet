@@ -1087,6 +1087,12 @@ body.out .side,body.out .tabbar,body.out .lvlchip,body.out .menubtn,body.out .sc
 .dashintro.hidden{display:none}
 @keyframes dintroOut{to{opacity:0}}
 .dashinfo{position:absolute;right:8px;bottom:8px;z-index:4;padding:5px 10px;border-radius:99px;border:1px solid #ffffff44;background:#0a1131cc;color:#cfe0f3;font-size:12px;cursor:pointer}
+.dashfs{position:absolute;right:8px;bottom:44px;z-index:4;width:34px;height:30px;border-radius:99px;border:1px solid #ffffff44;background:#0a1131cc;color:#cfe0f3;font-size:16px;line-height:1;cursor:pointer}.dashfs:hover{border-color:#ffc542;color:#fff}
+body.dfs-on{overflow:hidden}
+.dashwrap.dfull{position:fixed;inset:0;z-index:9999;max-width:none;width:100vw;height:100vh;height:100dvh;margin:0;background:#050a1f;display:flex;align-items:center;justify-content:center}
+.dashwrap.dfull canvas{width:min(100vw,calc(100dvh * .7143));height:auto;border-radius:0;box-shadow:none}
+.dashwrap.dfull.d3 #dcv{left:50%;top:50%;transform:translate(-50%,-50%)}
+.dashwrap.dfull .dashfs{top:calc(10px + env(safe-area-inset-top));right:10px;bottom:auto;width:40px;height:36px;font-size:18px}
 .dashinfo:hover{border-color:#ffc542;color:#fff}
 .dashrules{margin:0 0 8px;padding:0;list-style:none;display:grid;gap:5px;font-size:14px}
 /* Football picks */

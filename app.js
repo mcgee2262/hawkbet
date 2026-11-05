@@ -1931,7 +1931,7 @@ function dashHawk(c, x, y, sz, phase, lean, dir, t, pose) { // the Seahawk, seen
 let dashTips = { low: false, high: false, lane: false, done: false };
 let threeP; const loadThree = () => threeP || (threeP = new Promise(res => { // real 3D for Hallway Dash: three.js plus our scene file; if either fails the flat canvas version runs instead
   if (window.Dash3D) return res(true); const add = (src, ok) => { const e = document.createElement('script'); e.src = src; e.onload = ok; e.onerror = () => res(false); document.head.appendChild(e); };
-  add('assets/three_bundle.js', () => add('assets/dash3d.js?v=9', () => res(!!window.Dash3D)));
+  add('assets/three_bundle.js', () => add('assets/dash3d.js?v=12', () => res(!!window.Dash3D)));
 }));
 async function dash(root) {
   let st = null, run = null, timer = 0, played = false; const has3d = await loadThree(); if (!root.isConnected) return;
@@ -1940,11 +1940,22 @@ async function dash(root) {
   root.innerHTML = gameShell(`<div class="note" style="margin-top:0"><b>🎯 Goal:</b> race down the hallway and get to class before the bell. <b>← →</b> switch lanes around carts, <b>↑</b> jump the backpacks, <b>↓</b> slide under signs (phones: swipe, or tap a side). Grab 🪙 chips (+50), 🧲 magnet pulls them in, 🛡️ shield saves you from one hit. It starts easy and gets harder every 100 rows (Freshman → Senior). Every row is 10 points, each new level is +100 and the 🎓 door is a +500 jackpot.</div>
     ${skillBet('dash')}<div class="stats"><div><small>Score</small><b id="sc">0</b></div><div><small>Chips</small><b id="ps">0</b></div></div>${hsBox()}`,
     `<div class="dashwrap${has3d ? ' d3' : ''}">${has3d ? `<canvas id="dgl" width="${W}" height="${H}"></canvas>` : ''}<canvas id="dcv" width="${W}" height="${H}" aria-label="Hallway Dash game"></canvas><div class="mbadge ov hidden" aria-live="polite"></div><div class="dashmsg" id="dm"></div>
-      <div class="dashintro" id="dintro">🎓 Reach class! ← → lanes · ↑ jump · ↓ slide</div><button class="dashinfo" id="dinfo" aria-label="How to play">ⓘ How to play</button></div>`);
+      <div class="dashintro" id="dintro">🎓 Reach class! ← → lanes · ↑ jump · ↓ slide</div><button class="dashfs" id="dfs" aria-label="Full screen" title="Full screen">⛶</button><button class="dashinfo" id="dinfo" aria-label="How to play">ⓘ How to play</button></div>`);
   root.querySelectorAll('.mbadge').forEach(b => b.remove()); // no multiplier on the Dash screen
   const hideIntro = () => { const d = $('#dintro'); if (d) d.classList.add('hidden'); };
   let firstVisit = true; try { firstVisit = !localStorage.getItem('hb_dash_seen'); localStorage.setItem('hb_dash_seen', '1'); } catch (e) {}
   if (firstVisit) { const t = setTimeout(hideIntro, 3000); const kd = () => { hideIntro(); document.removeEventListener('keydown', kd); }; document.addEventListener('keydown', kd); stopFns.push(() => { clearTimeout(t); document.removeEventListener('keydown', kd); }); } else hideIntro();
+  { // full screen: the game fills the whole screen (real full screen where the browser allows it; a fixed overlay everywhere else, including iPhone)
+    const wrap = $('.dashwrap'); let home = null;
+    const setFull = on => { if (on === wrap.classList.contains('dfull')) return;
+      if (on) { home = [wrap.parentNode, wrap.nextSibling]; document.body.appendChild(wrap); wrap.classList.add('dfull'); document.body.classList.add('dfs-on'); try { const p = wrap.requestFullscreen && wrap.requestFullscreen({ navigationUI: 'hide' }); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+      else { wrap.classList.remove('dfull'); document.body.classList.remove('dfs-on'); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); if (home && home[0].isConnected) home[0].insertBefore(wrap, home[1] && home[1].parentNode === home[0] ? home[1] : null); else wrap.remove(); }
+      const b = $('#dfs'); if (b) { b.textContent = on ? '✕' : '⛶'; b.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen'); } };
+    $('#dfs').onclick = e => { e.stopPropagation(); setFull(!wrap.classList.contains('dfull')); };
+    const fsc = () => { if (!document.fullscreenElement && wrap.classList.contains('dfull')) setFull(false); }, esc = e => { if (e.key === 'Escape') setFull(false); };
+    document.addEventListener('fullscreenchange', fsc); document.addEventListener('keydown', esc);
+    stopFns.push(() => { document.removeEventListener('fullscreenchange', fsc); document.removeEventListener('keydown', esc); setFull(false); });
+  }
   $('#dinfo').onclick = () => showModal(`<h3>🎯 How to play</h3><p>Race down the hall before the bell and reach the <b>🎓 CLASS door</b> for a <b>+500 jackpot</b>. It starts easy and gets harder every 100 rows.</p>
     <ul class="dashrules"><li><b>⬅️ ➡️</b> switch lanes around the carts</li><li><b>⬆️</b> jump over the backpacks</li><li><b>⬇️</b> slide under the hanging signs</li><li><b>🪙</b> grab chips for points</li><li><b>🧲 🛡️</b> magnet and shield power-ups</li></ul><p><small>Phones: swipe up / down, tap left / right</small></p><button class="btn" data-close>Got it</button>`);
   const cv = $('#dcv'), c = cv.getContext('2d'); let d3 = null; if (has3d) { try { d3 = window.Dash3D($('#dgl'), W, H); } catch (e) { d3 = null; } if (!d3) { $('#dgl').remove(); $('.dashwrap').classList.remove('d3'); } }
